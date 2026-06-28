@@ -25,6 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'camera_subscriber = perception.camera_subscriber:main',
+            'lane_detector = perception.lane_detector:main',
+            'sign_detector = perception.sign_detector:main',
         ],
     },
 )
