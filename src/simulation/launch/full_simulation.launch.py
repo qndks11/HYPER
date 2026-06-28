@@ -1,4 +1,5 @@
 import os
+import xacro
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -8,7 +9,7 @@ from launch.actions import (
     TimerAction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -46,15 +47,17 @@ def generate_launch_description():
                 'gz_sim.launch.py',
             ])
         ]),
-        launch_arguments={'gz_args': ['-r ', world]}.items(),
+        launch_arguments={
+            'gz_args': '-r ' + os.path.join(sim_share, 'worlds', 'track.sdf'),
+        }.items(),
     )
 
     # ---------- robot model ----------
     urdf_path = os.path.join(sim_share, 'models', 'hyper.urdf.xacro')
-    robot_description_cmd = [
-        'xacro', urdf_path,
-        'robot_name:=', robot_name,
-    ]
+    robot_description_content = xacro.process_file(
+        urdf_path,
+        mappings={'robot_name': robot_name}
+    ).toxml()
 
     robot_state_publisher = Node(
         package='robot_state_publisher',
@@ -62,7 +65,7 @@ def generate_launch_description():
         name='robot_state_publisher',
         output='screen',
         parameters=[{
-            'robot_description': robot_description_cmd,
+            'robot_description': robot_description_content,
             'use_sim_time': True,
         }],
     )
