@@ -27,6 +27,7 @@ setup(
             'camera_subscriber = perception.camera_subscriber:main',
             'lane_detector = perception.lane_detector:main',
             'sign_detector = perception.sign_detector:main',
+            'visualizer = perception.visualizer:main',
         ],
     },
 )

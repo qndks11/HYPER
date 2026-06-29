@@ -121,6 +121,14 @@ def generate_launch_description():
         }],
     )
 
+    visualizer = Node(
+        package='perception',
+        executable='visualizer',
+        name='visualizer',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+    )
+
     return LaunchDescription([
         world_arg,
         robot_name_arg,
@@ -133,5 +141,6 @@ def generate_launch_description():
             camera_subscriber,
             lane_detector,
             sign_detector,
+            visualizer,
         ]),
     ])
