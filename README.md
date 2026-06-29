@@ -26,7 +26,7 @@ rosdep install --from-paths src --ignore-src -r -y
 
 ```bash
 colcon build
-``
+```
 
 특정 패키지만 빌드하려면:
 
