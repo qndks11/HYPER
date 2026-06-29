@@ -1,0 +1,407 @@
+[0.000000] (-) TimerEvent: {}
+[0.000890] (auto_vehicle) JobQueued: {'identifier': 'auto_vehicle', 'dependencies': OrderedDict()}
+[0.001888] (perception) JobQueued: {'identifier': 'perception', 'dependencies': OrderedDict()}
+[0.002013] (simulation) JobQueued: {'identifier': 'simulation', 'dependencies': OrderedDict()}
+[0.002470] (auto_vehicle) JobStarted: {'identifier': 'auto_vehicle'}
+[0.014277] (perception) JobStarted: {'identifier': 'perception'}
+[0.023568] (simulation) JobStarted: {'identifier': 'simulation'}
+[0.034226] (auto_vehicle) JobProgress: {'identifier': 'auto_vehicle', 'progress': 'cmake'}
+[0.035330] (auto_vehicle) JobProgress: {'identifier': 'auto_vehicle', 'progress': 'build'}
+[0.036345] (auto_vehicle) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/qndks11/HYPER/build/auto_vehicle', '--', '-j12', '-l12'], 'cwd': '/home/qndks11/HYPER/build/auto_vehicle', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('GZ_SIM_RESOURCE_PATH', '/home/qndks11/.gz/models'), ('USER', 'qndks11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/home/qndks11/ros2_ws/install/px4_ros_com/lib:/home/qndks11/ros2_ws/install/px4_msgs/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/home/qndks11'), ('OLDPWD', '/home/qndks11/HYPER/src'), ('ROS_PYTHON_VERSION', '3'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('WSL_DISTRO_NAME', 'Ubuntu-22.04'), ('WAYLAND_DISPLAY', 'wayland-0'), ('COLCON_PREFIX_PATH', '/home/qndks11/HYPER/install:/home/qndks11/ros2_ws/install'), ('ROS_DISTRO', 'humble'), ('LOGNAME', 'qndks11'), ('NAME', 'DESKTOP-PUAD3RC'), ('WSL_INTEROP', '/run/WSL/1265_interop'), ('PULSE_SERVER', 'unix:/mnt/wslg/PulseServer'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('TERM', 'xterm-256color'), ('ROS_LOCALHOST_ONLY', '0'), ('PATH', '/opt/gcc-arm-none-eabi-9-2020-q2-update/bin:/home/qndks11/.local/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.10.0_x64__8wekyb3d8bbwe:/mnt/c/Program Files/Common Files/Oracle/Java/javapath:/mnt/c/Program Files (x86)/Common Files/Oracle/Java/javapath:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/Scripts/:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Local/atom/bin:/mnt/c/Program Files/heroku/bin:/mnt/c/Users/김형준/AppData/Local/GitHubDesktop/bin:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Roaming/npm:/mnt/c/dev/jdk-17/bin:/mnt/c/Program Files/JetBrains/PyCharm Community Edition 2021.3.3/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/PostgreSQL/15/bin:/snap/bin:/opt/xtensa-esp-elf/bin/:/opt/xtensa-esp-elf/bin/'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':0'), ('LANG', 'en_US.UTF-8'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('AMENT_PREFIX_PATH', '/home/qndks11/HYPER/install/simulation:/home/qndks11/HYPER/install/perception:/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs:/home/qndks11/ros2_ws/install/offboard_pkg:/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('PWD', '/home/qndks11/HYPER/build/auto_vehicle'), ('XDG_DATA_DIRS', '/usr/local/share:/usr/share:/var/lib/snapd/desktop'), ('PYTHONPATH', '/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:/home/qndks11/ros2_ws/install/px4_ros_com/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/install/px4_msgs/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/build/offboard_pkg:/home/qndks11/ros2_ws/install/offboard_pkg/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('WSL2_GUI_APPS_ENABLED', '1'), ('HOSTTYPE', 'x86_64'), ('CMAKE_PREFIX_PATH', '/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs:/home/qndks11/HYPER/install/simulation:/home/qndks11/HYPER/install/perception:/home/qndks11/ros2_ws/install/offboard_pkg:/opt/ros/humble'), ('WSLENV', '')]), 'shell': False}
+[0.099456] (-) TimerEvent: {}
+[0.199923] (-) TimerEvent: {}
+[0.300455] (-) TimerEvent: {}
+[0.380304] (auto_vehicle) StdoutLine: {'line': b'-- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)\n'}
+[0.382770] (auto_vehicle) StdoutLine: {'line': b'-- Found rclcpp: 16.0.19 (/opt/ros/humble/share/rclcpp/cmake)\n'}
+[0.404834] (-) TimerEvent: {}
+[0.505391] (-) TimerEvent: {}
+[0.554116] (auto_vehicle) StdoutLine: {'line': b'-- Found rosidl_generator_c: 3.1.8 (/opt/ros/humble/share/rosidl_generator_c/cmake)\n'}
+[0.557497] (auto_vehicle) StdoutLine: {'line': b'-- Found rosidl_adapter: 3.1.8 (/opt/ros/humble/share/rosidl_adapter/cmake)\n'}
+[0.566083] (auto_vehicle) StdoutLine: {'line': b'-- Found rosidl_generator_cpp: 3.1.8 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)\n'}
+[0.581379] (auto_vehicle) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c\n'}
+[0.604953] (auto_vehicle) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp\n'}
+[0.605518] (-) TimerEvent: {}
+[0.655954] (auto_vehicle) StdoutLine: {'line': b'-- Found rmw_implementation_cmake: 6.1.2 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)\n'}
+[0.658302] (auto_vehicle) StdoutLine: {'line': b'-- Found rmw_fastrtps_cpp: 6.2.10 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)\n'}
+[0.705750] (-) TimerEvent: {}
+[0.806222] (-) TimerEvent: {}
+[0.906665] (-) TimerEvent: {}
+[1.007114] (-) TimerEvent: {}
+[1.108698] (-) TimerEvent: {}
+[1.209211] (-) TimerEvent: {}
+[1.309740] (-) TimerEvent: {}
+[1.410138] (-) TimerEvent: {}
+[1.512348] (-) TimerEvent: {}
+[1.612875] (-) TimerEvent: {}
+[1.629643] (perception) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/perception', 'build', '--build-base', '/home/qndks11/HYPER/build/perception/build', 'install', '--record', '/home/qndks11/HYPER/build/perception/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/home/qndks11/HYPER/src/perception', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'GZ_SIM_RESOURCE_PATH': '/home/qndks11/.gz/models', 'USER': 'qndks11', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/home/qndks11/ros2_ws/install/px4_ros_com/lib:/home/qndks11/ros2_ws/install/px4_msgs/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/home/qndks11', 'OLDPWD': '/home/qndks11/HYPER/src', 'ROS_PYTHON_VERSION': '3', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'WSL_DISTRO_NAME': 'Ubuntu-22.04', 'WAYLAND_DISPLAY': 'wayland-0', 'COLCON_PREFIX_PATH': '/home/qndks11/HYPER/install:/home/qndks11/ros2_ws/install', 'ROS_DISTRO': 'humble', 'LOGNAME': 'qndks11', 'NAME': 'DESKTOP-PUAD3RC', 'WSL_INTEROP': '/run/WSL/1265_interop', 'PULSE_SERVER': 'unix:/mnt/wslg/PulseServer', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/opt/gcc-arm-none-eabi-9-2020-q2-update/bin:/home/qndks11/.local/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.10.0_x64__8wekyb3d8bbwe:/mnt/c/Program Files/Common Files/Oracle/Java/javapath:/mnt/c/Program Files (x86)/Common Files/Oracle/Java/javapath:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/Scripts/:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Local/atom/bin:/mnt/c/Program Files/heroku/bin:/mnt/c/Users/김형준/AppData/Local/GitHubDesktop/bin:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Roaming/npm:/mnt/c/dev/jdk-17/bin:/mnt/c/Program Files/JetBrains/PyCharm Community Edition 2021.3.3/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/PostgreSQL/15/bin:/snap/bin:/opt/xtensa-esp-elf/bin/:/opt/xtensa-esp-elf/bin/', 'XDG_RUNTIME_DIR': '/run/user/1000', 'DISPLAY': ':0', 'LANG': 'en_US.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'AMENT_PREFIX_PATH': '/home/qndks11/HYPER/install/simulation:/home/qndks11/HYPER/install/perception:/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs:/home/qndks11/ros2_ws/install/offboard_pkg:/opt/ros/humble', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'PWD': '/home/qndks11/HYPER/build/perception', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/home/qndks11/HYPER/build/perception/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:/home/qndks11/ros2_ws/install/px4_ros_com/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/install/px4_msgs/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/build/offboard_pkg:/home/qndks11/ros2_ws/install/offboard_pkg/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'WSL2_GUI_APPS_ENABLED': '1', 'HOSTTYPE': 'x86_64', 'CMAKE_PREFIX_PATH': '/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs', 'WSLENV': ''}, 'shell': False}
+[1.635241] (simulation) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../../build/simulation', 'build', '--build-base', '/home/qndks11/HYPER/build/simulation/build', 'install', '--record', '/home/qndks11/HYPER/build/simulation/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/home/qndks11/HYPER/src/simulation', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'GZ_SIM_RESOURCE_PATH': '/home/qndks11/.gz/models', 'USER': 'qndks11', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/home/qndks11/ros2_ws/install/px4_ros_com/lib:/home/qndks11/ros2_ws/install/px4_msgs/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'HOME': '/home/qndks11', 'OLDPWD': '/home/qndks11/HYPER/src', 'ROS_PYTHON_VERSION': '3', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'WSL_DISTRO_NAME': 'Ubuntu-22.04', 'WAYLAND_DISPLAY': 'wayland-0', 'COLCON_PREFIX_PATH': '/home/qndks11/HYPER/install:/home/qndks11/ros2_ws/install', 'ROS_DISTRO': 'humble', 'LOGNAME': 'qndks11', 'NAME': 'DESKTOP-PUAD3RC', 'WSL_INTEROP': '/run/WSL/1265_interop', 'PULSE_SERVER': 'unix:/mnt/wslg/PulseServer', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/opt/gcc-arm-none-eabi-9-2020-q2-update/bin:/home/qndks11/.local/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.10.0_x64__8wekyb3d8bbwe:/mnt/c/Program Files/Common Files/Oracle/Java/javapath:/mnt/c/Program Files (x86)/Common Files/Oracle/Java/javapath:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/Scripts/:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Local/atom/bin:/mnt/c/Program Files/heroku/bin:/mnt/c/Users/김형준/AppData/Local/GitHubDesktop/bin:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Roaming/npm:/mnt/c/dev/jdk-17/bin:/mnt/c/Program Files/JetBrains/PyCharm Community Edition 2021.3.3/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/PostgreSQL/15/bin:/snap/bin:/opt/xtensa-esp-elf/bin/:/opt/xtensa-esp-elf/bin/', 'XDG_RUNTIME_DIR': '/run/user/1000', 'DISPLAY': ':0', 'LANG': 'en_US.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'AMENT_PREFIX_PATH': '/home/qndks11/HYPER/install/simulation:/home/qndks11/HYPER/install/perception:/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs:/home/qndks11/ros2_ws/install/offboard_pkg:/opt/ros/humble', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'PWD': '/home/qndks11/HYPER/build/simulation', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/home/qndks11/HYPER/build/simulation/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:/home/qndks11/ros2_ws/install/px4_ros_com/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/install/px4_msgs/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/build/offboard_pkg:/home/qndks11/ros2_ws/install/offboard_pkg/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'WSL2_GUI_APPS_ENABLED': '1', 'HOSTTYPE': 'x86_64', 'CMAKE_PREFIX_PATH': '/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs', 'WSLENV': ''}, 'shell': False}
+[1.713097] (-) TimerEvent: {}
+[1.813680] (-) TimerEvent: {}
+[1.915985] (-) TimerEvent: {}
+[2.016421] (-) TimerEvent: {}
+[2.087395] (perception) StdoutLine: {'line': b'running egg_info\n'}
+[2.115955] (perception) StdoutLine: {'line': b'writing ../../build/perception/perception.egg-info/PKG-INFO\n'}
+[2.116565] (-) TimerEvent: {}
+[2.116939] (simulation) StdoutLine: {'line': b'running egg_info\n'}
+[2.117389] (perception) StdoutLine: {'line': b'writing dependency_links to ../../build/perception/perception.egg-info/dependency_links.txt\n'}
+[2.117812] (perception) StdoutLine: {'line': b'writing entry points to ../../build/perception/perception.egg-info/entry_points.txt\n'}
+[2.118350] (perception) StdoutLine: {'line': b'writing requirements to ../../build/perception/perception.egg-info/requires.txt\n'}
+[2.119002] (perception) StdoutLine: {'line': b'writing top-level names to ../../build/perception/perception.egg-info/top_level.txt\n'}
+[2.150305] (simulation) StdoutLine: {'line': b'writing ../../build/simulation/simulation.egg-info/PKG-INFO\n'}
+[2.151464] (simulation) StdoutLine: {'line': b'writing dependency_links to ../../build/simulation/simulation.egg-info/dependency_links.txt\n'}
+[2.151994] (simulation) StdoutLine: {'line': b'writing entry points to ../../build/simulation/simulation.egg-info/entry_points.txt\n'}
+[2.152535] (simulation) StdoutLine: {'line': b'writing requirements to ../../build/simulation/simulation.egg-info/requires.txt\n'}
+[2.153010] (simulation) StdoutLine: {'line': b'writing top-level names to ../../build/simulation/simulation.egg-info/top_level.txt\n'}
+[2.185550] (perception) StdoutLine: {'line': b"reading manifest file '../../build/perception/perception.egg-info/SOURCES.txt'\n"}
+[2.188503] (perception) StdoutLine: {'line': b"writing manifest file '../../build/perception/perception.egg-info/SOURCES.txt'\n"}
+[2.189037] (perception) StdoutLine: {'line': b'running build\n'}
+[2.189196] (perception) StdoutLine: {'line': b'running build_py\n'}
+[2.189601] (perception) StdoutLine: {'line': b'copying perception/lane_detector.py -> /home/qndks11/HYPER/build/perception/build/lib/perception\n'}
+[2.190135] (perception) StdoutLine: {'line': b'copying perception/sign_detector.py -> /home/qndks11/HYPER/build/perception/build/lib/perception\n'}
+[2.190634] (perception) StdoutLine: {'line': b'copying perception/__init__.py -> /home/qndks11/HYPER/build/perception/build/lib/perception\n'}
+[2.191202] (perception) StdoutLine: {'line': b'copying perception/visualizer.py -> /home/qndks11/HYPER/build/perception/build/lib/perception\n'}
+[2.191663] (perception) StdoutLine: {'line': b'copying perception/camera_subscriber.py -> /home/qndks11/HYPER/build/perception/build/lib/perception\n'}
+[2.192236] (perception) StdoutLine: {'line': b'running install\n'}
+[2.199765] (perception) StdoutLine: {'line': b'running install_lib\n'}
+[2.216763] (-) TimerEvent: {}
+[2.219452] (simulation) StdoutLine: {'line': b"reading manifest file '../../build/simulation/simulation.egg-info/SOURCES.txt'\n"}
+[2.227485] (simulation) StdoutLine: {'line': b"writing manifest file '../../build/simulation/simulation.egg-info/SOURCES.txt'\n"}
+[2.227800] (simulation) StdoutLine: {'line': b'running build\n'}
+[2.227953] (simulation) StdoutLine: {'line': b'running build_py\n'}
+[2.228109] (simulation) StdoutLine: {'line': b'copying simulation/__init__.py -> /home/qndks11/HYPER/build/simulation/build/lib/simulation\n'}
+[2.228279] (simulation) StdoutLine: {'line': b'copying simulation/spawn_robot.py -> /home/qndks11/HYPER/build/simulation/build/lib/simulation\n'}
+[2.228450] (simulation) StdoutLine: {'line': b'running install\n'}
+[2.229403] (perception) StdoutLine: {'line': b'copying /home/qndks11/HYPER/build/perception/build/lib/perception/visualizer.py -> /home/qndks11/HYPER/install/perception/lib/python3.10/site-packages/perception\n'}
+[2.230640] (simulation) StdoutLine: {'line': b'running install_lib\n'}
+[2.230901] (perception) StdoutLine: {'line': b'byte-compiling /home/qndks11/HYPER/install/perception/lib/python3.10/site-packages/perception/visualizer.py to visualizer.cpython-310.pyc\n'}
+[2.232914] (perception) StdoutLine: {'line': b'running install_data\n'}
+[2.233360] (perception) StdoutLine: {'line': b'copying resource/perception -> /home/qndks11/HYPER/install/perception/share/ament_index/resource_index/packages\n'}
+[2.233859] (perception) StdoutLine: {'line': b'copying package.xml -> /home/qndks11/HYPER/install/perception/share/perception\n'}
+[2.234634] (perception) StdoutLine: {'line': b'running install_egg_info\n'}
+[2.266937] (simulation) StdoutLine: {'line': b'running install_data\n'}
+[2.267331] (simulation) StdoutLine: {'line': b'copying resource/simulation -> /home/qndks11/HYPER/install/simulation/share/ament_index/resource_index/packages\n'}
+[2.267555] (simulation) StdoutLine: {'line': b'copying package.xml -> /home/qndks11/HYPER/install/simulation/share/simulation\n'}
+[2.268118] (simulation) StdoutLine: {'line': b'copying launch/full_simulation.launch.py -> /home/qndks11/HYPER/install/simulation/share/simulation/launch\n'}
+[2.268502] (simulation) StdoutLine: {'line': b'copying worlds/track.sdf -> /home/qndks11/HYPER/install/simulation/share/simulation/worlds\n'}
+[2.268938] (simulation) StdoutLine: {'line': b'copying config/bridge.yaml -> /home/qndks11/HYPER/install/simulation/share/simulation/config\n'}
+[2.269266] (simulation) StdoutLine: {'line': b'copying models/hyper.urdf.xacro -> /home/qndks11/HYPER/install/simulation/share/simulation/models\n'}
+[2.269536] (simulation) StdoutLine: {'line': b'running install_egg_info\n'}
+[2.271323] (perception) StdoutLine: {'line': b"removing '/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages/perception-0.0.0-py3.10.egg-info' (and everything under it)\n"}
+[2.271629] (perception) StdoutLine: {'line': b'Copying ../../build/perception/perception.egg-info to /home/qndks11/HYPER/install/perception/lib/python3.10/site-packages/perception-0.0.0-py3.10.egg-info\n'}
+[2.274933] (perception) StdoutLine: {'line': b'running install_scripts\n'}
+[2.301038] (simulation) StdoutLine: {'line': b"removing '/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation-0.0.0-py3.10.egg-info' (and everything under it)\n"}
+[2.301870] (simulation) StdoutLine: {'line': b'Copying ../../build/simulation/simulation.egg-info to /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation-0.0.0-py3.10.egg-info\n'}
+[2.308541] (simulation) StdoutLine: {'line': b'running install_scripts\n'}
+[2.316939] (-) TimerEvent: {}
+[2.417416] (-) TimerEvent: {}
+[2.496315] (perception) StdoutLine: {'line': b'Installing camera_subscriber script to /home/qndks11/HYPER/install/perception/lib/perception\n'}
+[2.496796] (perception) StdoutLine: {'line': b'Installing lane_detector script to /home/qndks11/HYPER/install/perception/lib/perception\n'}
+[2.497249] (perception) StdoutLine: {'line': b'Installing sign_detector script to /home/qndks11/HYPER/install/perception/lib/perception\n'}
+[2.497496] (perception) StdoutLine: {'line': b'Installing visualizer script to /home/qndks11/HYPER/install/perception/lib/perception\n'}
+[2.498074] (perception) StdoutLine: {'line': b"writing list of installed files to '/home/qndks11/HYPER/build/perception/install.log'\n"}
+[2.517609] (-) TimerEvent: {}
+[2.536298] (simulation) StdoutLine: {'line': b'Installing spawn_robot script to /home/qndks11/HYPER/install/simulation/lib/simulation\n'}
+[2.537002] (simulation) StdoutLine: {'line': b"writing list of installed files to '/home/qndks11/HYPER/build/simulation/install.log'\n"}
+[2.550329] (perception) CommandEnded: {'returncode': 0}
+[2.567016] (perception) JobEnded: {'identifier': 'perception', 'rc': 0}
+[2.594844] (simulation) CommandEnded: {'returncode': 0}
+[2.607223] (simulation) JobEnded: {'identifier': 'simulation', 'rc': 0}
+[2.617832] (-) TimerEvent: {}
+[2.718276] (-) TimerEvent: {}
+[2.818862] (-) TimerEvent: {}
+[2.919354] (-) TimerEvent: {}
+[3.019846] (-) TimerEvent: {}
+[3.120328] (-) TimerEvent: {}
+[3.220905] (-) TimerEvent: {}
+[3.321436] (-) TimerEvent: {}
+[3.422548] (-) TimerEvent: {}
+[3.523015] (-) TimerEvent: {}
+[3.623470] (-) TimerEvent: {}
+[3.723965] (-) TimerEvent: {}
+[3.824455] (-) TimerEvent: {}
+[3.926426] (-) TimerEvent: {}
+[4.026933] (-) TimerEvent: {}
+[4.127433] (-) TimerEvent: {}
+[4.227964] (-) TimerEvent: {}
+[4.328561] (-) TimerEvent: {}
+[4.429230] (-) TimerEvent: {}
+[4.529742] (-) TimerEvent: {}
+[4.633779] (-) TimerEvent: {}
+[4.734219] (-) TimerEvent: {}
+[4.834637] (-) TimerEvent: {}
+[4.935124] (-) TimerEvent: {}
+[5.035615] (-) TimerEvent: {}
+[5.136043] (-) TimerEvent: {}
+[5.237752] (-) TimerEvent: {}
+[5.338176] (-) TimerEvent: {}
+[5.438634] (-) TimerEvent: {}
+[5.539067] (-) TimerEvent: {}
+[5.639615] (-) TimerEvent: {}
+[5.740164] (-) TimerEvent: {}
+[5.840741] (-) TimerEvent: {}
+[5.941252] (-) TimerEvent: {}
+[6.041788] (-) TimerEvent: {}
+[6.142195] (-) TimerEvent: {}
+[6.242692] (-) TimerEvent: {}
+[6.343166] (-) TimerEvent: {}
+[6.443667] (-) TimerEvent: {}
+[6.544146] (-) TimerEvent: {}
+[6.644629] (-) TimerEvent: {}
+[6.745782] (-) TimerEvent: {}
+[6.846302] (-) TimerEvent: {}
+[6.946900] (-) TimerEvent: {}
+[7.047528] (-) TimerEvent: {}
+[7.149217] (-) TimerEvent: {}
+[7.249917] (-) TimerEvent: {}
+[7.350505] (-) TimerEvent: {}
+[7.452495] (-) TimerEvent: {}
+[7.553058] (-) TimerEvent: {}
+[7.653549] (-) TimerEvent: {}
+[7.754050] (-) TimerEvent: {}
+[7.854506] (-) TimerEvent: {}
+[7.955030] (-) TimerEvent: {}
+[8.055546] (-) TimerEvent: {}
+[8.156037] (-) TimerEvent: {}
+[8.256580] (-) TimerEvent: {}
+[8.357070] (-) TimerEvent: {}
+[8.457713] (-) TimerEvent: {}
+[8.558222] (-) TimerEvent: {}
+[8.658668] (-) TimerEvent: {}
+[8.759589] (-) TimerEvent: {}
+[8.860162] (-) TimerEvent: {}
+[8.960750] (-) TimerEvent: {}
+[9.061321] (-) TimerEvent: {}
+[9.161872] (-) TimerEvent: {}
+[9.262339] (-) TimerEvent: {}
+[9.362807] (-) TimerEvent: {}
+[9.463284] (-) TimerEvent: {}
+[9.563778] (-) TimerEvent: {}
+[9.664277] (-) TimerEvent: {}
+[9.764829] (-) TimerEvent: {}
+[9.865322] (-) TimerEvent: {}
+[9.965812] (-) TimerEvent: {}
+[10.066252] (-) TimerEvent: {}
+[10.166756] (-) TimerEvent: {}
+[10.267253] (-) TimerEvent: {}
+[10.305242] (auto_vehicle) StdoutLine: {'line': b"-- Using RMW implementation 'rmw_fastrtps_cpp' as default\n"}
+[10.367414] (-) TimerEvent: {}
+[10.375603] (auto_vehicle) StdoutLine: {'line': b'-- Found sensor_msgs: 4.9.1 (/opt/ros/humble/share/sensor_msgs/cmake)\n'}
+[10.419151] (auto_vehicle) StdoutLine: {'line': b'-- Found ament_lint_auto: 0.12.15 (/opt/ros/humble/share/ament_lint_auto/cmake)\n'}
+[10.467593] (-) TimerEvent: {}
+[10.568265] (-) TimerEvent: {}
+[10.575325] (auto_vehicle) StdoutLine: {'line': b"-- Added test 'cppcheck' to perform static code analysis on C / C++ code\n"}
+[10.575636] (auto_vehicle) StdoutLine: {'line': b'-- Configured cppcheck include dirs: /home/qndks11/HYPER/src/auto_vehicle/include\n'}
+[10.575913] (auto_vehicle) StdoutLine: {'line': b'-- Configured cppcheck exclude dirs and/or files: \n'}
+[10.576195] (auto_vehicle) StdoutLine: {'line': b"-- Added test 'flake8' to check Python code syntax and style conventions\n"}
+[10.576959] (auto_vehicle) StdoutLine: {'line': b"-- Added test 'lint_cmake' to check CMake code style\n"}
+[10.577538] (auto_vehicle) StdoutLine: {'line': b"-- Added test 'pep257' to check Python code against some of the docstring style conventions in PEP 257\n"}
+[10.579568] (auto_vehicle) StdoutLine: {'line': b"-- Added test 'uncrustify' to check C / C++ code style\n"}
+[10.579795] (auto_vehicle) StdoutLine: {'line': b'-- Configured uncrustify additional arguments: \n'}
+[10.580239] (auto_vehicle) StdoutLine: {'line': b"-- Added test 'xmllint' to check XML markup files\n"}
+[10.581522] (auto_vehicle) StdoutLine: {'line': b'-- Configuring done\n'}
+[10.604410] (auto_vehicle) StdoutLine: {'line': b'-- Generating done\n'}
+[10.613058] (auto_vehicle) StdoutLine: {'line': b'-- Build files have been written to: /home/qndks11/HYPER/build/auto_vehicle\n'}
+[10.654518] (auto_vehicle) StdoutLine: {'line': b'\x1b[35m\x1b[1mConsolidate compiler generated dependencies of target vehicle_controller\x1b[0m\n'}
+[10.655674] (auto_vehicle) StdoutLine: {'line': b'\x1b[35m\x1b[1mConsolidate compiler generated dependencies of target joystick_controller\x1b[0m\n'}
+[10.668432] (-) TimerEvent: {}
+[10.681292] (auto_vehicle) StdoutLine: {'line': b'[ 25%] \x1b[32mBuilding CXX object CMakeFiles/vehicle_controller.dir/src/vehicle_controller.cpp.o\x1b[0m\n'}
+[10.682798] (auto_vehicle) StdoutLine: {'line': b'[ 50%] \x1b[32mBuilding CXX object CMakeFiles/joystick_controller.dir/src/joystick_controller.cpp.o\x1b[0m\n'}
+[10.772268] (-) TimerEvent: {}
+[10.873024] (-) TimerEvent: {}
+[10.973619] (-) TimerEvent: {}
+[11.074206] (-) TimerEvent: {}
+[11.174967] (-) TimerEvent: {}
+[11.275489] (-) TimerEvent: {}
+[11.376270] (-) TimerEvent: {}
+[11.476894] (-) TimerEvent: {}
+[11.577601] (-) TimerEvent: {}
+[11.678160] (-) TimerEvent: {}
+[11.778617] (-) TimerEvent: {}
+[11.879242] (-) TimerEvent: {}
+[11.979760] (-) TimerEvent: {}
+[12.080333] (-) TimerEvent: {}
+[12.180991] (-) TimerEvent: {}
+[12.281650] (-) TimerEvent: {}
+[12.382228] (-) TimerEvent: {}
+[12.482888] (-) TimerEvent: {}
+[12.583308] (-) TimerEvent: {}
+[12.683797] (-) TimerEvent: {}
+[12.784306] (-) TimerEvent: {}
+[12.884892] (-) TimerEvent: {}
+[12.985364] (-) TimerEvent: {}
+[13.086089] (-) TimerEvent: {}
+[13.186701] (-) TimerEvent: {}
+[13.287478] (-) TimerEvent: {}
+[13.388050] (-) TimerEvent: {}
+[13.489191] (-) TimerEvent: {}
+[13.590080] (-) TimerEvent: {}
+[13.690581] (-) TimerEvent: {}
+[13.791339] (-) TimerEvent: {}
+[13.892174] (-) TimerEvent: {}
+[13.992847] (-) TimerEvent: {}
+[14.093615] (-) TimerEvent: {}
+[14.194432] (-) TimerEvent: {}
+[14.295067] (-) TimerEvent: {}
+[14.395737] (-) TimerEvent: {}
+[14.496181] (-) TimerEvent: {}
+[14.596852] (-) TimerEvent: {}
+[14.697499] (-) TimerEvent: {}
+[14.798153] (-) TimerEvent: {}
+[14.901552] (-) TimerEvent: {}
+[15.002334] (-) TimerEvent: {}
+[15.102967] (-) TimerEvent: {}
+[15.203507] (-) TimerEvent: {}
+[15.304069] (-) TimerEvent: {}
+[15.404976] (-) TimerEvent: {}
+[15.505673] (-) TimerEvent: {}
+[15.606300] (-) TimerEvent: {}
+[15.706868] (-) TimerEvent: {}
+[15.807526] (-) TimerEvent: {}
+[15.908093] (-) TimerEvent: {}
+[16.008603] (-) TimerEvent: {}
+[16.109149] (-) TimerEvent: {}
+[16.209805] (-) TimerEvent: {}
+[16.310892] (-) TimerEvent: {}
+[16.411951] (-) TimerEvent: {}
+[16.512518] (-) TimerEvent: {}
+[16.613124] (-) TimerEvent: {}
+[16.713957] (-) TimerEvent: {}
+[16.814458] (-) TimerEvent: {}
+[16.914915] (-) TimerEvent: {}
+[17.017820] (-) TimerEvent: {}
+[17.118214] (-) TimerEvent: {}
+[17.218904] (-) TimerEvent: {}
+[17.319618] (-) TimerEvent: {}
+[17.420133] (-) TimerEvent: {}
+[17.520712] (-) TimerEvent: {}
+[17.621313] (-) TimerEvent: {}
+[17.721847] (-) TimerEvent: {}
+[17.822354] (-) TimerEvent: {}
+[17.926686] (-) TimerEvent: {}
+[18.027109] (-) TimerEvent: {}
+[18.128878] (-) TimerEvent: {}
+[18.229410] (-) TimerEvent: {}
+[18.334436] (-) TimerEvent: {}
+[18.434891] (-) TimerEvent: {}
+[18.535362] (-) TimerEvent: {}
+[18.635861] (-) TimerEvent: {}
+[18.736332] (-) TimerEvent: {}
+[18.836841] (-) TimerEvent: {}
+[18.937411] (-) TimerEvent: {}
+[19.037942] (-) TimerEvent: {}
+[19.138547] (-) TimerEvent: {}
+[19.239111] (-) TimerEvent: {}
+[19.339707] (-) TimerEvent: {}
+[19.440197] (-) TimerEvent: {}
+[19.540701] (-) TimerEvent: {}
+[19.641393] (-) TimerEvent: {}
+[19.741864] (-) TimerEvent: {}
+[19.842332] (-) TimerEvent: {}
+[19.942858] (-) TimerEvent: {}
+[20.043676] (-) TimerEvent: {}
+[20.144206] (-) TimerEvent: {}
+[20.244680] (-) TimerEvent: {}
+[20.345366] (-) TimerEvent: {}
+[20.445937] (-) TimerEvent: {}
+[20.546406] (-) TimerEvent: {}
+[20.648760] (-) TimerEvent: {}
+[20.749276] (-) TimerEvent: {}
+[20.849825] (-) TimerEvent: {}
+[20.950301] (-) TimerEvent: {}
+[21.053075] (-) TimerEvent: {}
+[21.153570] (-) TimerEvent: {}
+[21.254105] (-) TimerEvent: {}
+[21.354570] (-) TimerEvent: {}
+[21.455066] (-) TimerEvent: {}
+[21.555525] (-) TimerEvent: {}
+[21.656044] (-) TimerEvent: {}
+[21.756520] (-) TimerEvent: {}
+[21.856993] (-) TimerEvent: {}
+[21.957452] (-) TimerEvent: {}
+[22.057969] (-) TimerEvent: {}
+[22.158486] (-) TimerEvent: {}
+[22.259147] (-) TimerEvent: {}
+[22.360457] (-) TimerEvent: {}
+[22.461078] (-) TimerEvent: {}
+[22.561762] (-) TimerEvent: {}
+[22.662407] (-) TimerEvent: {}
+[22.762827] (-) TimerEvent: {}
+[22.863375] (-) TimerEvent: {}
+[22.963881] (-) TimerEvent: {}
+[23.064707] (-) TimerEvent: {}
+[23.165200] (-) TimerEvent: {}
+[23.265770] (-) TimerEvent: {}
+[23.366216] (-) TimerEvent: {}
+[23.466629] (-) TimerEvent: {}
+[23.567107] (-) TimerEvent: {}
+[23.667556] (-) TimerEvent: {}
+[23.768236] (-) TimerEvent: {}
+[23.868687] (-) TimerEvent: {}
+[23.969198] (-) TimerEvent: {}
+[24.069804] (-) TimerEvent: {}
+[24.170305] (-) TimerEvent: {}
+[24.270819] (-) TimerEvent: {}
+[24.371261] (-) TimerEvent: {}
+[24.471776] (-) TimerEvent: {}
+[24.572264] (-) TimerEvent: {}
+[24.672809] (-) TimerEvent: {}
+[24.773406] (-) TimerEvent: {}
+[24.873985] (-) TimerEvent: {}
+[24.974423] (-) TimerEvent: {}
+[25.074922] (-) TimerEvent: {}
+[25.175443] (-) TimerEvent: {}
+[25.275947] (-) TimerEvent: {}
+[25.376545] (-) TimerEvent: {}
+[25.477091] (-) TimerEvent: {}
+[25.577692] (-) TimerEvent: {}
+[25.645188] (auto_vehicle) StdoutLine: {'line': b'[ 75%] \x1b[32m\x1b[1mLinking CXX executable joystick_controller\x1b[0m\n'}
+[25.681337] (-) TimerEvent: {}
+[25.724511] (auto_vehicle) StdoutLine: {'line': b'[100%] \x1b[32m\x1b[1mLinking CXX executable vehicle_controller\x1b[0m\n'}
+[25.781542] (-) TimerEvent: {}
+[25.882028] (-) TimerEvent: {}
+[25.982586] (-) TimerEvent: {}
+[26.083138] (-) TimerEvent: {}
+[26.183791] (-) TimerEvent: {}
+[26.284531] (-) TimerEvent: {}
+[26.385039] (-) TimerEvent: {}
+[26.485499] (-) TimerEvent: {}
+[26.497228] (auto_vehicle) StdoutLine: {'line': b'[100%] Built target joystick_controller\n'}
+[26.552566] (auto_vehicle) StdoutLine: {'line': b'[100%] Built target vehicle_controller\n'}
+[26.569567] (auto_vehicle) CommandEnded: {'returncode': 0}
+[26.571166] (auto_vehicle) JobProgress: {'identifier': 'auto_vehicle', 'progress': 'install'}
+[26.581265] (auto_vehicle) Command: {'cmd': ['/usr/bin/cmake', '--install', '/home/qndks11/HYPER/build/auto_vehicle'], 'cwd': '/home/qndks11/HYPER/build/auto_vehicle', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('GZ_SIM_RESOURCE_PATH', '/home/qndks11/.gz/models'), ('USER', 'qndks11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/home/qndks11/ros2_ws/install/px4_ros_com/lib:/home/qndks11/ros2_ws/install/px4_msgs/lib:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/home/qndks11'), ('OLDPWD', '/home/qndks11/HYPER/src'), ('ROS_PYTHON_VERSION', '3'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('WSL_DISTRO_NAME', 'Ubuntu-22.04'), ('WAYLAND_DISPLAY', 'wayland-0'), ('COLCON_PREFIX_PATH', '/home/qndks11/HYPER/install:/home/qndks11/ros2_ws/install'), ('ROS_DISTRO', 'humble'), ('LOGNAME', 'qndks11'), ('NAME', 'DESKTOP-PUAD3RC'), ('WSL_INTEROP', '/run/WSL/1265_interop'), ('PULSE_SERVER', 'unix:/mnt/wslg/PulseServer'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('TERM', 'xterm-256color'), ('ROS_LOCALHOST_ONLY', '0'), ('PATH', '/opt/gcc-arm-none-eabi-9-2020-q2-update/bin:/home/qndks11/.local/bin:/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.7.10.0_x64__8wekyb3d8bbwe:/mnt/c/Program Files/Common Files/Oracle/Java/javapath:/mnt/c/Program Files (x86)/Common Files/Oracle/Java/javapath:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/nodejs/:/mnt/c/Program Files/Bandizip/:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/Scripts/:/mnt/c/Users/김형준/AppData/Local/Programs/Python/Python310/:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Local/atom/bin:/mnt/c/Program Files/heroku/bin:/mnt/c/Users/김형준/AppData/Local/GitHubDesktop/bin:/mnt/c/Users/김형준/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/김형준/AppData/Roaming/npm:/mnt/c/dev/jdk-17/bin:/mnt/c/Program Files/JetBrains/PyCharm Community Edition 2021.3.3/bin:/mnt/c/Users/김형준/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/PostgreSQL/15/bin:/snap/bin:/opt/xtensa-esp-elf/bin/:/opt/xtensa-esp-elf/bin/'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':0'), ('LANG', 'en_US.UTF-8'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('AMENT_PREFIX_PATH', '/home/qndks11/HYPER/install/simulation:/home/qndks11/HYPER/install/perception:/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs:/home/qndks11/ros2_ws/install/offboard_pkg:/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('PWD', '/home/qndks11/HYPER/build/auto_vehicle'), ('XDG_DATA_DIRS', '/usr/local/share:/usr/share:/var/lib/snapd/desktop'), ('PYTHONPATH', '/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:/home/qndks11/ros2_ws/install/px4_ros_com/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/install/px4_msgs/local/lib/python3.10/dist-packages:/home/qndks11/ros2_ws/build/offboard_pkg:/home/qndks11/ros2_ws/install/offboard_pkg/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('COLCON', '1'), ('WSL2_GUI_APPS_ENABLED', '1'), ('HOSTTYPE', 'x86_64'), ('CMAKE_PREFIX_PATH', '/home/qndks11/HYPER/install/auto_vehicle:/home/qndks11/ros2_ws/install/px4_ros_com:/home/qndks11/ros2_ws/install/px4_msgs:/home/qndks11/HYPER/install/simulation:/home/qndks11/HYPER/install/perception:/home/qndks11/ros2_ws/install/offboard_pkg:/opt/ros/humble'), ('WSLENV', '')]), 'shell': False}
+[26.585685] (-) TimerEvent: {}
+[26.591797] (auto_vehicle) StdoutLine: {'line': b'-- Install configuration: ""\n'}
+[26.592298] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/launch\n'}
+[26.592418] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/launch/vehicle.launch.py\n'}
+[26.598429] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/launch/joystick.launch.py\n'}
+[26.598695] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/urdf\n'}
+[26.598859] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/urdf/vehicle.xacro\n'}
+[26.598971] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/config\n'}
+[26.599060] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/config/ros_gz_bridge.yaml\n'}
+[26.599142] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/config/gz_ros2_control.yaml\n'}
+[26.599263] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/config/parameters.yaml\n'}
+[26.599366] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/worlds\n'}
+[26.599461] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/worlds/track.world\n'}
+[26.599557] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/lib/auto_vehicle/vehicle_controller\n'}
+[26.603371] (auto_vehicle) StdoutLine: {'line': b'-- Set runtime path of "/home/qndks11/HYPER/install/auto_vehicle/lib/auto_vehicle/vehicle_controller" to ""\n'}
+[26.603859] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/lib/auto_vehicle/joystick_controller\n'}
+[26.612617] (auto_vehicle) StdoutLine: {'line': b'-- Set runtime path of "/home/qndks11/HYPER/install/auto_vehicle/lib/auto_vehicle/joystick_controller" to ""\n'}
+[26.613026] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/ament_index/resource_index/package_run_dependencies/auto_vehicle\n'}
+[26.613168] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/ament_index/resource_index/parent_prefix_path/auto_vehicle\n'}
+[26.613659] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/environment/ament_prefix_path.sh\n'}
+[26.614133] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/environment/ament_prefix_path.dsv\n'}
+[26.614450] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/environment/path.sh\n'}
+[26.614678] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/environment/path.dsv\n'}
+[26.614846] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/local_setup.bash\n'}
+[26.615175] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/local_setup.sh\n'}
+[26.615656] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/local_setup.zsh\n'}
+[26.615826] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/local_setup.dsv\n'}
+[26.615924] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/package.dsv\n'}
+[26.616011] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/ament_index/resource_index/packages/auto_vehicle\n'}
+[26.616143] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/cmake/auto_vehicleConfig.cmake\n'}
+[26.616228] (auto_vehicle) StdoutLine: {'line': b'-- Up-to-date: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/cmake/auto_vehicleConfig-version.cmake\n'}
+[26.616308] (auto_vehicle) StdoutLine: {'line': b'-- Installing: /home/qndks11/HYPER/install/auto_vehicle/share/auto_vehicle/package.xml\n'}
+[26.618685] (auto_vehicle) CommandEnded: {'returncode': 0}
+[26.639838] (auto_vehicle) JobEnded: {'identifier': 'auto_vehicle', 'rc': 0}
+[26.641184] (-) EventReactorShutdown: {}

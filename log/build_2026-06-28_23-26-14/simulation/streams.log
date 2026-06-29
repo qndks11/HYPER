@@ -1,0 +1,41 @@
+[1.169s] Invoking command in '/home/qndks11/HYPER/src/simulation': PYTHONPATH=/home/qndks11/HYPER/build/simulation/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/simulation build --build-base /home/qndks11/HYPER/build/simulation/build install --record /home/qndks11/HYPER/build/simulation/install.log --single-version-externally-managed install_data
+[1.456s] running egg_info
+[1.475s] creating ../../build/simulation/simulation.egg-info
+[1.476s] writing ../../build/simulation/simulation.egg-info/PKG-INFO
+[1.476s] writing dependency_links to ../../build/simulation/simulation.egg-info/dependency_links.txt
+[1.477s] writing entry points to ../../build/simulation/simulation.egg-info/entry_points.txt
+[1.477s] writing requirements to ../../build/simulation/simulation.egg-info/requires.txt
+[1.477s] writing top-level names to ../../build/simulation/simulation.egg-info/top_level.txt
+[1.477s] writing manifest file '../../build/simulation/simulation.egg-info/SOURCES.txt'
+[1.517s] reading manifest file '../../build/simulation/simulation.egg-info/SOURCES.txt'
+[1.518s] writing manifest file '../../build/simulation/simulation.egg-info/SOURCES.txt'
+[1.519s] running build
+[1.519s] running build_py
+[1.519s] creating /home/qndks11/HYPER/build/simulation/build/lib/simulation
+[1.520s] copying simulation/__init__.py -> /home/qndks11/HYPER/build/simulation/build/lib/simulation
+[1.521s] copying simulation/spawn_robot.py -> /home/qndks11/HYPER/build/simulation/build/lib/simulation
+[1.521s] running install
+[1.525s] running install_lib
+[1.545s] creating /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation
+[1.546s] copying /home/qndks11/HYPER/build/simulation/build/lib/simulation/__init__.py -> /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation
+[1.546s] copying /home/qndks11/HYPER/build/simulation/build/lib/simulation/spawn_robot.py -> /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation
+[1.546s] byte-compiling /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation/__init__.py to __init__.cpython-310.pyc
+[1.547s] byte-compiling /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation/spawn_robot.py to spawn_robot.cpython-310.pyc
+[1.548s] running install_data
+[1.548s] creating /home/qndks11/HYPER/install/simulation/share/ament_index/resource_index/packages
+[1.549s] copying resource/simulation -> /home/qndks11/HYPER/install/simulation/share/ament_index/resource_index/packages
+[1.550s] copying package.xml -> /home/qndks11/HYPER/install/simulation/share/simulation
+[1.550s] creating /home/qndks11/HYPER/install/simulation/share/simulation/launch
+[1.550s] copying launch/full_simulation.launch.py -> /home/qndks11/HYPER/install/simulation/share/simulation/launch
+[1.551s] creating /home/qndks11/HYPER/install/simulation/share/simulation/worlds
+[1.551s] copying worlds/track.sdf -> /home/qndks11/HYPER/install/simulation/share/simulation/worlds
+[1.551s] creating /home/qndks11/HYPER/install/simulation/share/simulation/config
+[1.552s] copying config/bridge.yaml -> /home/qndks11/HYPER/install/simulation/share/simulation/config
+[1.552s] creating /home/qndks11/HYPER/install/simulation/share/simulation/models
+[1.553s] copying models/hyper.urdf.xacro -> /home/qndks11/HYPER/install/simulation/share/simulation/models
+[1.553s] running install_egg_info
+[1.574s] Copying ../../build/simulation/simulation.egg-info to /home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages/simulation-0.0.0-py3.10.egg-info
+[1.575s] running install_scripts
+[1.723s] Installing spawn_robot script to /home/qndks11/HYPER/install/simulation/lib/simulation
+[1.724s] writing list of installed files to '/home/qndks11/HYPER/build/simulation/install.log'
+[1.754s] Invoked command in '/home/qndks11/HYPER/src/simulation' returned '0': PYTHONPATH=/home/qndks11/HYPER/build/simulation/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/qndks11/HYPER/install/simulation/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/simulation build --build-base /home/qndks11/HYPER/build/simulation/build install --record /home/qndks11/HYPER/build/simulation/install.log --single-version-externally-managed install_data

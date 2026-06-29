@@ -1,0 +1,1 @@
+geometry_msgs:joint_state_publisher:nav_msgs:rclpy:robot_state_publisher:ros_gz_bridge:ros_gz_sim:sensor_msgs:std_msgs:tf2_ros:xacro

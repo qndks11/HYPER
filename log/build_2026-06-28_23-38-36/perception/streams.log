@@ -1,0 +1,29 @@
+[1.138s] Invoking command in '/home/qndks11/HYPER/src/perception': PYTHONPATH=/home/qndks11/HYPER/build/perception/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/perception build --build-base /home/qndks11/HYPER/build/perception/build install --record /home/qndks11/HYPER/build/perception/install.log --single-version-externally-managed install_data
+[1.437s] running egg_info
+[1.460s] writing ../../build/perception/perception.egg-info/PKG-INFO
+[1.461s] writing dependency_links to ../../build/perception/perception.egg-info/dependency_links.txt
+[1.461s] writing entry points to ../../build/perception/perception.egg-info/entry_points.txt
+[1.461s] writing requirements to ../../build/perception/perception.egg-info/requires.txt
+[1.462s] writing top-level names to ../../build/perception/perception.egg-info/top_level.txt
+[1.503s] reading manifest file '../../build/perception/perception.egg-info/SOURCES.txt'
+[1.505s] writing manifest file '../../build/perception/perception.egg-info/SOURCES.txt'
+[1.505s] running build
+[1.505s] running build_py
+[1.505s] copying perception/lane_detector.py -> /home/qndks11/HYPER/build/perception/build/lib/perception
+[1.506s] copying perception/sign_detector.py -> /home/qndks11/HYPER/build/perception/build/lib/perception
+[1.506s] copying perception/__init__.py -> /home/qndks11/HYPER/build/perception/build/lib/perception
+[1.506s] copying perception/camera_subscriber.py -> /home/qndks11/HYPER/build/perception/build/lib/perception
+[1.507s] running install
+[1.511s] running install_lib
+[1.532s] running install_data
+[1.532s] copying resource/perception -> /home/qndks11/HYPER/install/perception/share/ament_index/resource_index/packages
+[1.532s] copying package.xml -> /home/qndks11/HYPER/install/perception/share/perception
+[1.533s] running install_egg_info
+[1.554s] removing '/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages/perception-0.0.0-py3.10.egg-info' (and everything under it)
+[1.554s] Copying ../../build/perception/perception.egg-info to /home/qndks11/HYPER/install/perception/lib/python3.10/site-packages/perception-0.0.0-py3.10.egg-info
+[1.556s] running install_scripts
+[1.715s] Installing camera_subscriber script to /home/qndks11/HYPER/install/perception/lib/perception
+[1.715s] Installing lane_detector script to /home/qndks11/HYPER/install/perception/lib/perception
+[1.715s] Installing sign_detector script to /home/qndks11/HYPER/install/perception/lib/perception
+[1.716s] writing list of installed files to '/home/qndks11/HYPER/build/perception/install.log'
+[1.747s] Invoked command in '/home/qndks11/HYPER/src/perception' returned '0': PYTHONPATH=/home/qndks11/HYPER/build/perception/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/qndks11/HYPER/install/perception/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/perception build --build-base /home/qndks11/HYPER/build/perception/build install --record /home/qndks11/HYPER/build/perception/install.log --single-version-externally-managed install_data
