@@ -25,16 +25,14 @@ rosdep install --from-paths src --ignore-src -r -y
 ### 2. 빌드
 
 ```bash
-colcon build --symlink-install
-```
-
-> `--symlink-install` 옵션을 쓰면 Python 파일을 수정할 때마다 다시 빌드하지 않아도 됩니다.
+colcon build
+``
 
 특정 패키지만 빌드하려면:
 
 ```bash
-colcon build --symlink-install --packages-select perception
-colcon build --symlink-install --packages-select simulation
+colcon build  --packages-select perception
+colcon build --packages-select simulation
 ```
 
 ### 3. 환경 소싱 (source)
