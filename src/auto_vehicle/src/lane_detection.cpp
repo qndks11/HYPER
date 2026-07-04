@@ -10,10 +10,11 @@
 namespace
 {
 // ROI trapezoid corners as (row_ratio, col_ratio) of the source image
-constexpr double kRoiTopLeftRow = 0.6, kRoiTopLeftCol = 0.1;
-constexpr double kRoiTopRightRow = 0.6, kRoiTopRightCol = 0.9;
-constexpr double kRoiBottomLeftRow = 1.0, kRoiBottomLeftCol = 0.0;
-constexpr double kRoiBottomRightRow = 1.0, kRoiBottomRightCol = 1.0;
+constexpr double kRoiTopLeftRow = 0.6,  kRoiTopLeftCol = 0.25;
+constexpr double kRoiTopRightRow = 0.6, kRoiTopRightCol = 0.75;
+constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -0.6;
+constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 1.6;
+
 
 constexpr int kNumWindows = 12;
 constexpr int kMargin = 50;
@@ -96,7 +97,7 @@ cv::Mat LaneDetection::binary_mask(const cv::Mat & image) const
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
 
   cv::Mat white_mask;
-  cv::inRange(hsv, cv::Scalar(0, 0, 180), cv::Scalar(180, 40, 255), white_mask);
+  cv::inRange(hsv, cv::Scalar(0, 0, 200), cv::Scalar(180, 30, 255), white_mask);
 
   cv::Mat yellow_mask;
   cv::inRange(hsv, cv::Scalar(15, 80, 80), cv::Scalar(35, 255, 255), yellow_mask);
@@ -233,12 +234,14 @@ LaneDetection::LaneFitResult LaneDetection::evaluate_lane(
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
   result.offset_m = (width / 2.0 - lane_center) * meters_per_pixel;
 
-  result.steering_angle_deg = std::atan(result.offset_m / result.curvature_px) * 180.0 / CV_PI;
+  // Heading error: average slope (dx/dy) of both lane fits at the vehicle position,
+  // converted to an angle from the forward (vertical) axis.
+  const double heading_slope = (left_slope + right_slope) / 2.0;
+  result.steering_angle_deg = std::atan(heading_slope) * 180.0 / CV_PI;
   result.valid = true;
 
   return result;
 }
-
 cv::Mat LaneDetection::make_thumbnail(const cv::Mat & image, const std::string & label) const
 {
   cv::Mat bgr = image;
@@ -356,7 +359,11 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   std_msgs::msg::Float64MultiArray lane_msg;
   lane_msg.data = {fit.offset_m, fit.steering_angle_deg, fit.curvature_px, fit.valid ? 1.0 : 0.0};
-  lane_center_publisher_->publish(lane_msg);
+
+  RCLCPP_INFO_THROTTLE(
+    get_logger(), *get_clock(), 2000,
+    "[/lane/center] offset=%.3f m, angle=%.2f deg, curvature=%.1f px, valid=%s",
+    fit.offset_m, fit.steering_angle_deg, fit.curvature_px, fit.valid ? "true" : "false");
 
   const cv::Scalar text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
