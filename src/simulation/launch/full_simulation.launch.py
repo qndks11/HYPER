@@ -93,40 +93,14 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ---------- perception nodes ----------
-    camera_subscriber = Node(
-        package='perception',
-        executable='camera_subscriber',
-        name='camera_subscriber',
+    # ---------- lane detection ----------
+    lane_detection = Node(
+        package='auto_vehicle',
+        executable='lane_detection',
+        name='lane_detection',
         output='screen',
         parameters=[{'use_sim_time': True}],
-    )
-
-    lane_detector = Node(
-        package='perception',
-        executable='lane_detector',
-        name='lane_detector',
-        output='screen',
-        parameters=[{'use_sim_time': True}],
-    )
-
-    sign_detector = Node(
-        package='perception',
-        executable='sign_detector',
-        name='sign_detector',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'model_path': os.path.join(sim_share, 'models', 'best.pt'),
-        }],
-    )
-
-    visualizer = Node(
-        package='perception',
-        executable='visualizer',
-        name='visualizer',
-        output='screen',
-        parameters=[{'use_sim_time': True}],
+        remappings=[('/image_raw', '/camera/image_raw')],
     )
 
     return LaunchDescription([
@@ -138,9 +112,6 @@ def generate_launch_description():
         TimerAction(period=3.0, actions=[spawn_entity]),
         TimerAction(period=4.0, actions=[ros_gz_bridge]),
         TimerAction(period=5.0, actions=[
-            camera_subscriber,
-            lane_detector,
-            sign_detector,
-            visualizer,
+            lane_detection,
         ]),
     ])

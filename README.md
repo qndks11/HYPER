@@ -8,7 +8,7 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 | 패키지 | 설명 |
 |--------|------|
-| `perception` | 카메라 구독, 차선 감지, 표지판 인식, OpenCV 시각화 |
+| `auto_vehicle` | 차량 제어(Ackermann/조이스틱), 차선 감지 및 시각화 |
 | `simulation` | Gazebo 시뮬레이션 월드, 로봇 모델, ROS↔Gazebo 브리지 |
 
 ---
@@ -31,7 +31,7 @@ colcon build
 특정 패키지만 빌드하려면:
 
 ```bash
-colcon build  --packages-select perception
+colcon build --packages-select auto_vehicle
 colcon build --packages-select simulation
 ```
 
@@ -60,7 +60,7 @@ source ~/.bashrc
 ros2 launch simulation full_simulation.launch.py
 ```
 
-Gazebo 월드, 로봇 스폰, ROS↔Gazebo 브리지, 인지 노드, OpenCV 시각화 창이 순서대로 실행됩니다.
+Gazebo 월드, 로봇 스폰, ROS↔Gazebo 브리지, 차선 감지 노드(디버그 대시보드 포함)가 순서대로 실행됩니다.
 
 ### 실행 순서 (내부적으로 자동 처리)
 
@@ -70,7 +70,7 @@ Gazebo 월드, 로봇 스폰, ROS↔Gazebo 브리지, 인지 노드, OpenCV 시�
 | t = 0s | `robot_state_publisher` — URDF 로드 |
 | t = 3s | 로봇 엔티티 스폰 (`hyper`) |
 | t = 4s | `ros_gz_bridge` — 토픽 브리지 시작 |
-| t = 5s | 인지 노드 + 시각화 창 시작 |
+| t = 5s | `auto_vehicle`의 `lane_detection` 노드 시작 |
 
 ### 실행 옵션
 
@@ -84,22 +84,13 @@ ros2 launch simulation full_simulation.launch.py x:=2.0 y:=1.0 z:=0.1
 
 ---
 
-## 인지 노드 개별 실행
+## 차선 감지 노드 개별 실행
 
 시뮬레이션 없이 실제 카메라나 rosbag으로 테스트할 때:
 
 ```bash
-# 카메라 구독 (로그 출력)
-ros2 run perception camera_subscriber
-
-# 차선 감지 → /lane/center 퍼블리시
-ros2 run perception lane_detector
-
-# 표지판 인식 → /perception/sign 퍼블리시
-ros2 run perception sign_detector --ros-args -p model_path:=/path/to/best.pt
-
-# OpenCV 시각화 창
-ros2 run perception visualizer
+# 차선 감지 → /lane/center 퍼블리시 + OpenCV 디버그 대시보드 표시
+ros2 launch auto_vehicle lane.launch.py
 ```
 
 ---
@@ -109,8 +100,7 @@ ros2 run perception visualizer
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
 | `/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 카메라 영상 |
-| `/lane/center` | `std_msgs/Float64MultiArray` | perception → | `[offset, heading_err, valid]` |
-| `/perception/sign` | `vision_msgs/Detection2DArray` | perception → | 표지판 감지 결과 |
+| `/lane/center` | `std_msgs/Float64MultiArray` | auto_vehicle → | `[offset_m, steering_angle_deg, curvature_px, valid]` |
 | `/cmd_vel` | `geometry_msgs/Twist` | ROS → Gazebo | 속도 명령 |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS | 오도메트리 |
 | `/imu` | `sensor_msgs/Imu` | Gazebo → ROS | IMU |
