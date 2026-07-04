@@ -5,11 +5,16 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
 
 include_directories(include)
 
@@ -19,6 +24,9 @@ ament_target_dependencies(vehicle_controller rclcpp std_msgs)
 add_executable(joystick_controller src/joystick_controller.cpp)
 ament_target_dependencies(joystick_controller rclcpp std_msgs sensor_msgs)
 
+add_executable(lane_detection src/lane_detection.cpp)
+ament_target_dependencies(lane_detection rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
+
 install(
   DIRECTORY launch urdf config worlds
   DESTINATION share/${PROJECT_NAME}
@@ -27,6 +35,7 @@ install(
 install(TARGETS
   vehicle_controller
   joystick_controller
+  lane_detection
   DESTINATION lib/${PROJECT_NAME}
 )
 
