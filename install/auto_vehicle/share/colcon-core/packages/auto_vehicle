@@ -1,0 +1,1 @@
+cv_bridge:gazebo_ros:gz_ros2_control:joint_state_publisher:joy:libopencv-dev:rclcpp:robot_state_publisher:ros2_control:ros_gz_bridge:std_msgs:xacro
