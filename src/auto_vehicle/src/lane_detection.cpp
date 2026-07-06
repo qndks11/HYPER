@@ -96,14 +96,8 @@ cv::Mat LaneDetection::binary_mask(const cv::Mat & image) const
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
 
-  cv::Mat white_mask;
-  cv::inRange(hsv, cv::Scalar(0, 0, 200), cv::Scalar(180, 30, 255), white_mask);
-
-  cv::Mat yellow_mask;
-  cv::inRange(hsv, cv::Scalar(15, 80, 80), cv::Scalar(35, 255, 255), yellow_mask);
-
   cv::Mat mask;
-  cv::bitwise_or(white_mask, yellow_mask, mask);
+  cv::inRange(hsv, cv::Scalar(15, 80, 80), cv::Scalar(35, 255, 255), mask);
 
   const cv::Mat kernel = cv::Mat::ones(3, 3, CV_8U);
   cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
