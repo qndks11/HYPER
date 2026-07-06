@@ -28,6 +28,71 @@
     </light>
 
     <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_1</name> 
+      <pose>-5.86 -10.72 0.0 0.0 0.0 0.0</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_2</name> 
+      <pose>-6.06 -10.72 0.0 0.0 0.0 0.0</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_3</name> 
+      <pose>-6.26 -10.72 0.0 0.0 0.0 0.0</pose>
+    </include>
+    
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_4</name> 
+      <pose>-6.46 -10.72 0.0 0.0 0.0 0.0</pose>
+    </include>
+    
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_5</name> 
+      <pose>-6.66 -10.72 0.0 0.0 0.0 0.0</pose>
+    </include>
+
+    <model name="yellow_cube">
+      <pose>-7 -10.72 0.5 0.0 0.0 0.0</pose>
+      <static>false</static> <link name="box_link">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia>
+            <ixx>0.166667</ixx>
+            <iyy>0.166667</iyy>
+            <izz>0.166667</izz>
+            <ixy>0.0</ixy>
+            <ixz>0.0</ixz>
+            <iyz>0.0</iyz>
+          </inertia>
+        </inertial>
+
+        <collision name="box_collision">
+          <geometry>
+            <box>
+              <size>1.0 1.0 1.0</size> </box>
+          </geometry>
+        </collision>
+
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>1.0 1.0 1.0</size> </box>
+          </geometry>
+          <material>
+            <ambient>1.0 1.0 0.0 1.0</ambient>  <diffuse>1.0 1.0 0.0 1.0</diffuse>  
+            <specular>0.5 0.5 0.5 1.0</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
       <uri>model://driving_course</uri>
     </include>
     <spherical_coordinates>

@@ -1,29 +1,29 @@
 /**:
   ros__parameters:
-    # Body params
-    body_length: 0.3 # Length of the vehicle's body [m]
-    body_width: 0.18 # Width of the vehicle's body [m]
-    body_height: 0.05 # Height of the vehicle's body [m]
-    body_density: 7850.0 # Density of the vehicle's body material, e.g., steel [kg/m^3]
+    # Body params (헤네스 브룬 T8 Sport 실측 제원 기반)
+    body_length: 1.34 # 차량 실제 전장 [m]
+    body_width: 0.81 # 차량 실제 전폭 [m]
+    body_height: 0.40 # 차량 전고 기준 섀시/프레임 근사 높이 [m]
+    body_density: 150.0 # 차체가 플라스틱(ABS) 내부 프레임 위주이므로, 실중량(약 30~35kg)에 맞춰 밀도 대폭 하향 [kg/m^3]
 
-    # Wheel params
-    wheel_radius: 0.04 # Radius of each wheel [m]
-    wheel_width: 0.02 # Width of each wheel [m]
-    wheel_density: 900.0 # Density of the wheel material, e.g., rubber [kg/m^3]
+    # Wheel params (T8 Sport 대형 우레탄/고무 타이어 기준)
+    wheel_radius: 0.13 # 실제 바퀴 지름 약 26cm -> 반지름 13cm [m]
+    wheel_width: 0.09 # 바퀴 단면 폭 약 9cm [m]
+    wheel_density: 950.0 # 발포 우레탄 및 고무 내외륜 밀도 [kg/m^3]
 
     # Kinematics and dynamics params
-    max_steering_angle: 0.6108652 # Maximum steering angle of the vehicle [rad]
-    max_steering_angular_velocity: 1.570796 # Maximum steering angular velocity [rad/s]
-    max_steering_effort: 1.0 # Maximum steering torque [Nm]
-    max_velocity: 2.0 # Maximum wheel velocity [m/s]
-    max_effort: 10.0 # Maximum wheel torque [Nm]
+    max_steering_angle: 0.5235988 # 최대 조향각 약 30도 (실차 주행 및 서보 보호용) [rad]
+    max_steering_angular_velocity: 2.0 # 고성능 조향 모터/서보 반영으로 상향 [rad/s]
+    max_steering_effort: 15.0 # 대형 차체를 돌리기 위한 조향 토크 상향 [Nm]
+    max_velocity: 4.44 # T8 Sport 순정 최고 속도 약 16km/h 반영 [m/s]
+    max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
 
-    # Camera and image params
-    camera_box_size: 0.05 # Size of the camera enclosure [m]
-    camera_stick_size: 0.02 # Size of the camera stick [m]
-    camera_height: 0.2 # Height of the camera above the body_link [m]
-    camera_pitch: 0.0 # Pitch angle of the camera relative to body_link [rad]
-    camera_fov: 1.3962634 # Field of view of the camera [rad]
-    camera_fps: 30 # Frames per second for camera capture [Hz]
-    image_width: 640 # Width of the camera's image output [pixels]
-    image_height: 480 # Height of the camera's image output [pixels]
+    # Camera and image params (일반적인 AI 자율주행 카메라 세팅 - 예: RealSense / 웹캠)
+    camera_box_size: 0.05 # 카메라 하우징 크기 [m]
+    camera_stick_size: 0.02 # 카메라 지지대 두께 [m]
+    camera_height: 1.2 # 차량 보닛이나 롤바 위에 장착 시 시야 확보를 위해 상향 [m]
+    camera_pitch: 0.2617994 # 바닥의 차선이나 장애물을 잘 보도록 아래로 약 15도 숙임 [rad]
+    camera_fov: 1.5184364 # Intel RealSense D435 등에서 자주 쓰이는 가로 FOV 약 87도 반영 [rad]
+    camera_fps: 30 # [Hz]
+    image_width: 640 # [pixels]
+    image_height: 480 # [pixels]
