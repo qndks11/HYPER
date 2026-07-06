@@ -92,7 +92,8 @@ def generate_launch_description():
             os.pathsep,
             os.path.join(package_path, 'worlds'),
             os.pathsep,
-            os.path.join(package_path, 'models'),
+            # 💡 worlds 폴더 안의 models 폴더를 직접 바라보도록 수정합니다.
+            os.path.join(package_path, 'worlds', 'models'), 
             os.pathsep,
             os.environ.get('GZ_SIM_RESOURCE_PATH', '')
         ]

@@ -10,10 +10,10 @@
 namespace
 {
 // ROI trapezoid corners as (row_ratio, col_ratio) of the source image
-constexpr double kRoiTopLeftRow = 0.6,  kRoiTopLeftCol = 0.25;
-constexpr double kRoiTopRightRow = 0.6, kRoiTopRightCol = 0.75;
-constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -0.6;
-constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 1.6;
+constexpr double kRoiTopLeftRow = 0.55,  kRoiTopLeftCol = 0.15;
+constexpr double kRoiTopRightRow = 0.55, kRoiTopRightCol = 0.85;
+constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -2.3;
+constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 3.3;
 
 
 constexpr int kNumWindows = 12;

@@ -1,0 +1,6 @@
+newmtl course
+Ka 1 1 1
+Kd 1 1 1
+d 1
+illum 1
+map_Kd course.png

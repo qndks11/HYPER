@@ -1,2 +1,1 @@
-source;share/auto_vehicle/environment/ament_prefix_path.sh
-source;share/auto_vehicle/environment/path.sh
+/home/qndks11/HYPER/build/auto_vehicle/ament_cmake_environment_hooks/local_setup.dsv
