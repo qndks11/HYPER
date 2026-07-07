@@ -70,7 +70,7 @@
       <name>traffic_light</name>
       <uri>model://gazebo_traffic_light</uri>
       <static>false</static>
-      <pose relative_to="cross_beam_frame">0.0 -0.9 3.7 -1.5707 0 0</pose>
+      <pose relative_to="cross_beam_frame">0.0 -0.81 3.6 -1.5707 0 0</pose>
       <scale>0.5 0.5 0.5</scale>
     </include>
     

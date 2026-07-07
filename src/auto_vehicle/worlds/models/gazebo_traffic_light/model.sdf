@@ -10,7 +10,7 @@
         <pose>0 0.175 0.535 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.1 1.6 0.6</size>
+            <size>0.1 1.6 0.4</size>
           </box>
         </geometry>
         <material>
@@ -19,27 +19,11 @@
           <specular>0 0 0 1</specular>
         </material>
       </visual>
-      <collision name="collision">
-        <pose>0 0.175 0.535 0 0 0</pose>
-        <geometry>
-          <box>
-            <size>0.1 1.6 0.6</size>
-          </box>
-        </geometry>
-      </collision>
     </link>
     
     <link name="red_off">
       <gravity>false</gravity>
       <pose>0.075 -0.35 0.535 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.05</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>
