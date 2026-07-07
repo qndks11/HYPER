@@ -547,8 +547,7 @@
       <update_rate>${camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera</topic>
-      <pose>0 0 0 0 0 0</pose>
-      <always_on>true</always_on>
+
       <camera name="head">
         <horizontal_fov>${camera_fov}</horizontal_fov>
         <image>
@@ -558,22 +557,26 @@
         </image>
         <clip>
           <near>0.02</near>
-          <far>300</far>
-        </clip>    
-        <distortion>
-          <k1>0.0</k1>
-          <k2>0.0</k2>
-          <k3>0.0</k3>
-          <p1>0.0</p1>
-          <p2>0.0</p2>
-          <center>0.5 0.5</center>
-        </distortion>
+          <far>550</far>
+        </clip>
         <noise>
           <type>gaussian</type>
           <mean>0.0</mean>
           <stddev>0.007</stddev>
         </noise>
       </camera>
+      <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>0.0</updateRate>
+        <cameraName>vehicle_front_camera</cameraName>
+        <frameName>camera_link</frameName>
+        <hackBaseline>0.07</hackBaseline>
+        <distortionK1>0.0</distortionK1>
+        <distortionK2>0.0</distortionK2>
+        <distortionK3>0.0</distortionK3>
+        <distortionT1>0.0</distortionT1>
+        <distortionT2>0.0</distortionT2>
+      </plugin>
     </sensor>
   </gazebo>
 

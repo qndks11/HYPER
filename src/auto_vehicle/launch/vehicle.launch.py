@@ -2,7 +2,7 @@ import os
 import xacro
 import yaml
 
-from ament_index_python.packages import get_package_share_directory, get_package_prefix
+from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import (
@@ -92,20 +92,9 @@ def generate_launch_description():
             os.pathsep,
             os.path.join(package_path, 'worlds'),
             os.pathsep,
-            # 💡 worlds 폴더 안의 models 폴더를 직접 바라보도록 수정합니다.
-            os.path.join(package_path, 'worlds', 'models'), 
+            os.path.join(package_path, 'models'),
             os.pathsep,
             os.environ.get('GZ_SIM_RESOURCE_PATH', '')
-        ]
-    )
-
-    # Gazebo Sim에서 커스텀 System 플러그인(신호등 자동 점멸 등)을 찾을 수 있도록 설정
-    gz_plugin_path = SetEnvironmentVariable(
-        name='GZ_SIM_SYSTEM_PLUGIN_PATH',
-        value=[
-            os.path.join(get_package_prefix(package_name), 'lib', package_name),
-            os.pathsep,
-            os.environ.get('GZ_SIM_SYSTEM_PLUGIN_PATH', '')
         ]
     )
 
@@ -117,37 +106,37 @@ def generate_launch_description():
 
     x_arg = DeclareLaunchArgument(
         'x',
-        default_value='43.32',
+        default_value='0.0',
         description='Initial X position'
     )
 
     y_arg = DeclareLaunchArgument(
         'y',
-        default_value='-50.39',
+        default_value='0.0',
         description='Initial Y position'
     )
 
     z_arg = DeclareLaunchArgument(
         'z',
-        default_value='0.5',
+        default_value='0.1',
         description='Initial Z position'
     )
 
     roll_arg = DeclareLaunchArgument(
         'R',
-        default_value='0.00',
+        default_value='0.0',
         description='Initial Roll'
     )
 
     pitch_arg = DeclareLaunchArgument(
         'P',
-        default_value='0.00',
+        default_value='0.0',
         description='Initial Pitch'
     )
 
     yaw_arg = DeclareLaunchArgument(
         'Y',
-        default_value='1.64',
+        default_value='0.0',
         description='Initial Yaw'
     )
 
@@ -251,7 +240,6 @@ def generate_launch_description():
 
     launch_description = LaunchDescription([
         gz_resource_path,
-        gz_plugin_path,
 
         RegisterEventHandler(
             event_handler=OnProcessExit(

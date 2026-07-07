@@ -148,7 +148,7 @@
 
     <model name="yellow_cube_2">
       <pose>7.99 -40.00 0.5 0.0 0.0 0.0</pose>
-      <static>false</static> <link name="box_link">
+      <static>true</static> <link name="box_link">
         <inertial>
           <mass>1.0</mass>
           <inertia>
