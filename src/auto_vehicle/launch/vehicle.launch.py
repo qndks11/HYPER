@@ -2,7 +2,7 @@ import os
 import xacro
 import yaml
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, get_package_prefix
 
 from launch import LaunchDescription
 from launch.actions import (
@@ -96,6 +96,16 @@ def generate_launch_description():
             os.path.join(package_path, 'worlds', 'models'), 
             os.pathsep,
             os.environ.get('GZ_SIM_RESOURCE_PATH', '')
+        ]
+    )
+
+    # Gazebo Sim에서 커스텀 System 플러그인(신호등 자동 점멸 등)을 찾을 수 있도록 설정
+    gz_plugin_path = SetEnvironmentVariable(
+        name='GZ_SIM_SYSTEM_PLUGIN_PATH',
+        value=[
+            os.path.join(get_package_prefix(package_name), 'lib', package_name),
+            os.pathsep,
+            os.environ.get('GZ_SIM_SYSTEM_PLUGIN_PATH', '')
         ]
     )
 
@@ -241,6 +251,7 @@ def generate_launch_description():
 
     launch_description = LaunchDescription([
         gz_resource_path,
+        gz_plugin_path,
 
         RegisterEventHandler(
             event_handler=OnProcessExit(

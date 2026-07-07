@@ -15,6 +15,7 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(ignition-gazebo6 REQUIRED)
 
 include_directories(include)
 
@@ -27,6 +28,9 @@ ament_target_dependencies(joystick_controller rclcpp std_msgs sensor_msgs)
 add_executable(lane_detection src/lane_detection.cpp)
 ament_target_dependencies(lane_detection rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
 
+add_library(TrafficLightPlugin SHARED gz_plugins/TrafficLightPlugin.cc)
+target_link_libraries(TrafficLightPlugin ignition-gazebo6::core)
+
 install(
   DIRECTORY launch urdf config worlds
   DESTINATION share/${PROJECT_NAME}
@@ -37,6 +41,11 @@ install(TARGETS
   joystick_controller
   lane_detection
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS
+  TrafficLightPlugin
+  LIBRARY DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
