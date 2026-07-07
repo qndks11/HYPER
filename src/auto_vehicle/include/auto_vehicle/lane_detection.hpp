@@ -13,28 +13,32 @@
 
 class LaneDetection : public rclcpp::Node
 {
-
 public:
   LaneDetection();
 
 private:
+  struct PolarSearchResult
+  {
+    std::vector<cv::Point> points;  // detected right-lane pixel centers, ordered near to far
+    std::vector<cv::Rect> boxes;    // the search box that found each point, for visualization
+  };
+
   struct LaneFitResult
   {
     bool valid{false};
     double offset_m{0.0};
     double steering_angle_deg{0.0};
-    double curvature_px{0.0};
-    cv::Vec3d left_fit{0.0, 0.0, 0.0};
-    cv::Vec3d right_fit{0.0, 0.0, 0.0};
+    double curvature_radius_px{0.0};
+    std::vector<cv::Point> spline_points;  // densely resampled curve, for drawing
   };
 
   /**
    * @brief Callback invoked for every incoming camera frame.
    *
-   * @details Warps the frame to a bird's-eye view, extracts the lane binary mask, runs the
-   * contour-based sliding-window search, fits a quadratic to each lane, publishes the lane
-   * offset/steering angle/curvature on `/lane/center`, and shows a 6-panel debug dashboard
-   * (original, bird's-eye, threshold mask, sliding windows, final overlay, fitted lane).
+   * @details Masks yellow lane paint, warps to a bird's-eye view, runs the polar right-lane
+   * search, fits a parametric cubic spline through the result, publishes offset/steering
+   * angle/curvature-radius on `/lane/center`, and shows a 4-panel debug dashboard (original,
+   * bird's-eye yellow mask, polar search + spline, final overlay).
    *
    * @param msg Incoming camera image.
    */
@@ -56,41 +60,38 @@ private:
   cv::Mat bird_eye(const cv::Mat & image) const;
 
   /**
-   * @brief Produces a binary mask isolating white and yellow lane markings in HSV space.
+   * @brief Produces a binary mask isolating yellow lane paint in HSV space.
    */
-  cv::Mat binary_mask(const cv::Mat & image) const;
+  cv::Mat yellow_mask(const cv::Mat & image) const;
 
   /**
-   * @brief Runs the contour-based sliding-window lane search over the binary mask.
+   * @brief Searches for the right lane in polar coordinates, anchored at the bottom-center of
+   * the bird's-eye mask.
    *
-   * @details A histogram of the bottom half of the mask locates the initial left/right base
-   * positions. Stacked windows re-center on the largest contour's centroid found within a
-   * margin of the previous window (falling back to the previous base when no contour clears
-   * the pixel-count threshold). Windows are drawn in white and centroids in green on
-   * `windows_view` for the debug dashboard.
+   * @details For each angle from 0 (due right, along the bottom edge) to pi/2 (due forward) in
+   * kAngleStepRad steps, finds the closest small box along that ray whose fill ratio clears
+   * kSearchBoxFillThreshold, using an exponential-then-binary-search sweep over the radius so
+   * each ray is O(log r) instead of a linear scan. Walking by angle rather than by image row
+   * lets the search follow the lane even where it curves sharply sideways, which a
+   * fixed-direction vertical search cannot. The sweep stops the moment an angle turns up
+   * nothing (a disconnect) rather than continuing on to pi/2 regardless.
    *
-   * @param binary Binary lane mask (bird's-eye view).
-   * @param windows_view BGR bird's-eye mask annotated in place with windows and centroids.
-   * @param left_points Output centroids found for the left lane.
-   * @param right_points Output centroids found for the right lane.
+   * @param binary Binary yellow lane mask (bird's-eye view).
+   * @return The points found (near to far) and the boxes that found them.
    */
-  void sliding_window_search(
-    const cv::Mat & binary, cv::Mat & windows_view, std::vector<cv::Point> & left_points,
-    std::vector<cv::Point> & right_points) const;
+  PolarSearchResult polar_search(const cv::Mat & binary) const;
 
   /**
-   * @brief Fits a quadratic to each lane's centroids and derives curvature, offset, and
-   * steering angle.
+   * @brief Fits a parametric cubic spline through the polar search points and derives the
+   * curvature radius, heading angle, and lateral offset near the vehicle.
    *
-   * @param left_points Left lane centroids (bird's-eye view).
-   * @param right_points Right lane centroids (bird's-eye view).
-   * @param width Bird's-eye image width [px].
-   * @param height Bird's-eye image height [px].
-   * @return The lane fit result; `valid` is false if either side has too few points.
+   * @param points Right-lane points from polar_search(), ordered near to far.
+   * @param origin The bottom-center point the polar search was anchored to.
+   * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
+   * @return The lane fit result; `valid` is false if there are too few points.
    */
-  LaneFitResult evaluate_lane(
-    const std::vector<cv::Point> & left_points, const std::vector<cv::Point> & right_points,
-    int width, int height) const;
+  LaneFitResult fit_lane(
+    const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const;
 
   /**
    * @brief Resizes an image to the dashboard thumbnail size and stamps a label on it.
@@ -98,15 +99,14 @@ private:
   cv::Mat make_thumbnail(const cv::Mat & image, const std::string & label) const;
 
   /**
-   * @brief Arranges exactly six labeled views into a 3x2 grid for the debug dashboard.
+   * @brief Arranges exactly four labeled views into a 2x2 grid for the debug dashboard.
    */
   cv::Mat build_dashboard(const std::vector<std::pair<std::string, cv::Mat>> & views) const;
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
 
-  std::vector<cv::Point> prev_left_points_;
-  std::vector<cv::Point> prev_right_points_;
+  std::vector<cv::Point> prev_points_;
 };
 
 #endif  // LANE_DETECTION_HPP

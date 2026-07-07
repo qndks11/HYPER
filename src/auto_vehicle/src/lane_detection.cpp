@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.hpp>
@@ -15,10 +16,17 @@ constexpr double kRoiTopRightRow = 0.40, kRoiTopRightCol = 0.75;
 constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -1;
 constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 2;
 
+// Polar right-lane search: from the bottom-center origin, sweep angle 0 (due right, along the
+// bottom edge) to pi/2 (due forward) looking for the closest box of yellow pixels at each angle.
+constexpr int kSearchBoxSize = 6;                  // px; the search box is kSearchBoxSize^2
+constexpr double kSearchBoxFillThreshold = 0.30;   // fraction of the box that must be yellow
+constexpr double kAngleStepRad = 0.1;
+constexpr double kMaxAngleRad = CV_PI / 2.0;
+constexpr double kBinarySearchTolerancePx = 1.0;
 
-constexpr int kNumWindows = 12;
-constexpr int kMargin = 50;
-constexpr int kMinPix = 50;
+constexpr int kMinLanePoints = 4;
+constexpr int kSplineSamples = 120;
+constexpr double kMinCurvatureKappa = 1e-6;
 
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
@@ -26,29 +34,153 @@ constexpr double kArrowLength = 100.0;
 constexpr int kThumbWidth = 480;
 constexpr int kThumbHeight = 360;
 
-// Fits x = a*y^2 + b*y + c to the given points using least squares.
-cv::Vec3d fit_quadratic(const std::vector<cv::Point> & points)
+// A natural cubic spline through (t_i, y_i), t strictly increasing. Used to fit x(t) and y(t)
+// independently for a parametric curve, so unlike a single-valued x = f(y) fit, the curve can
+// bend back on itself in x for a given y -- the case a fixed-column vertical search cannot
+// represent at all.
+class CubicSpline1D
 {
-  const int n = static_cast<int>(points.size());
-  cv::Mat A(n, 3, CV_64F);
-  cv::Mat b(n, 1, CV_64F);
+public:
+  CubicSpline1D(const std::vector<double> & t, const std::vector<double> & y) : t_(t), y_(y)
+  {
+    const int n = static_cast<int>(t_.size()) - 1;
+    std::vector<double> h(std::max(n, 1));
+    for (int i = 0; i < n; ++i) h[i] = t_[i + 1] - t_[i];
 
-  for (int i = 0; i < n; ++i) {
-    const double y = points[i].y;
-    A.at<double>(i, 0) = y * y;
-    A.at<double>(i, 1) = y;
-    A.at<double>(i, 2) = 1.0;
-    b.at<double>(i, 0) = points[i].x;
+    // Thomas algorithm for the tridiagonal natural-spline system (M_0 = M_n = 0).
+    std::vector<double> a(n + 1, 0.0), b(n + 1, 1.0), c(n + 1, 0.0), d(n + 1, 0.0);
+    for (int i = 1; i < n; ++i) {
+      a[i] = h[i - 1];
+      b[i] = 2.0 * (h[i - 1] + h[i]);
+      c[i] = h[i];
+      d[i] = 6.0 * ((y_[i + 1] - y_[i]) / h[i] - (y_[i] - y_[i - 1]) / h[i - 1]);
+    }
+
+    std::vector<double> cp(n + 1, 0.0), dp(n + 1, 0.0);
+    for (int i = 1; i <= n; ++i) {
+      const double pivot = b[i] - a[i] * cp[i - 1];
+      cp[i] = (i < n) ? c[i] / pivot : 0.0;
+      dp[i] = (d[i] - a[i] * dp[i - 1]) / pivot;
+    }
+
+    m_.assign(n + 1, 0.0);
+    m_[n] = dp[n];
+    for (int i = n - 1; i >= 0; --i) m_[i] = dp[i] - cp[i] * m_[i + 1];
   }
 
-  cv::Mat coeffs;
-  cv::solve(A, b, coeffs, cv::DECOMP_SVD);
-  return cv::Vec3d(coeffs.at<double>(0), coeffs.at<double>(1), coeffs.at<double>(2));
+  // Evaluates the spline and its first/second derivatives at parameter `t`.
+  void evaluate(double t, double & value, double & first, double & second) const
+  {
+    const int n = static_cast<int>(t_.size()) - 1;
+    const int i = std::clamp(
+      static_cast<int>(std::upper_bound(t_.begin(), t_.end(), t) - t_.begin()) - 1, 0,
+      std::max(n - 1, 0));
+
+    const double h = t_[i + 1] - t_[i];
+    const double a = t_[i + 1] - t;
+    const double bb = t - t_[i];
+
+    value = m_[i] * a * a * a / (6.0 * h) + m_[i + 1] * bb * bb * bb / (6.0 * h) +
+            (y_[i] / h - m_[i] * h / 6.0) * a + (y_[i + 1] / h - m_[i + 1] * h / 6.0) * bb;
+    first = -m_[i] * a * a / (2.0 * h) + m_[i + 1] * bb * bb / (2.0 * h) -
+            (y_[i] / h - m_[i] * h / 6.0) + (y_[i + 1] / h - m_[i + 1] * h / 6.0);
+    second = m_[i] * a / h + m_[i + 1] * bb / h;
+  }
+
+private:
+  std::vector<double> t_;
+  std::vector<double> y_;
+  std::vector<double> m_;  // second derivatives at knots
+};
+
+std::vector<cv::Point> sample_spline(
+  const CubicSpline1D & spline_x, const CubicSpline1D & spline_y, double t_max, int num_samples)
+{
+  std::vector<cv::Point> points;
+  points.reserve(num_samples);
+  for (int i = 0; i < num_samples; ++i) {
+    const double t = t_max * static_cast<double>(i) / static_cast<double>(num_samples - 1);
+    double x, x1, x2, y, y1, y2;
+    spline_x.evaluate(t, x, x1, x2);
+    spline_y.evaluate(t, y, y1, y2);
+    points.emplace_back(static_cast<int>(std::lround(x)), static_cast<int>(std::lround(y)));
+  }
+  return points;
 }
 
-double eval_quadratic(const cv::Vec3d & fit, double y)
+struct BoxCheck
 {
-  return fit[0] * y * y + fit[1] * y + fit[2];
+  bool valid{false};
+  double fill_ratio{0.0};
+};
+
+// Fraction of set pixels within a `size`x`size` box centered at `center`, clipped to the image.
+// `valid` is false once the box has walked entirely off the image.
+BoxCheck evaluate_box(const cv::Mat & binary, const cv::Point2d & center, int size)
+{
+  const int half = size / 2;
+  const cv::Rect box(
+    static_cast<int>(std::lround(center.x)) - half,
+    static_cast<int>(std::lround(center.y)) - half, size, size);
+  const cv::Rect clipped = box & cv::Rect(0, 0, binary.cols, binary.rows);
+  if (clipped.area() <= 0) {
+    return {};
+  }
+  const double ratio = static_cast<double>(cv::countNonZero(binary(clipped))) / clipped.area();
+  return {true, ratio};
+}
+
+struct PolarHit
+{
+  cv::Point pixel;
+  cv::Rect box;
+};
+
+// From `origin`, searches along the ray at angle `theta` (0 = due right, pi/2 = due forward) for
+// the closest box that clears kSearchBoxFillThreshold. Exponentially doubles the radius outward
+// (close to far) to bracket the first hit, then binary-searches the bracket down to within
+// kBinarySearchTolerancePx. Returns nullopt if the ray leaves the image before any box qualifies.
+std::optional<PolarHit> find_closest_box(
+  const cv::Mat & binary, const cv::Point2d & origin, double theta)
+{
+  const cv::Point2d direction(std::cos(theta), -std::sin(theta));
+  const auto sample = [&](double r) {
+    return evaluate_box(binary, origin + direction * r, kSearchBoxSize);
+  };
+
+  double lo = 0.0;
+  double hi = kSearchBoxSize;
+  BoxCheck hit;
+  while (true) {
+    const BoxCheck check = sample(hi);
+    if (!check.valid) {
+      return std::nullopt;  // walked off the image without finding anything
+    }
+    if (check.fill_ratio >= kSearchBoxFillThreshold) {
+      hit = check;
+      break;
+    }
+    lo = hi;
+    hi *= 2.0;
+  }
+
+  while (hi - lo > kBinarySearchTolerancePx) {
+    const double mid = 0.5 * (lo + hi);
+    const BoxCheck check = sample(mid);
+    if (check.valid && check.fill_ratio >= kSearchBoxFillThreshold) {
+      hi = mid;
+      hit = check;
+    } else {
+      lo = mid;
+    }
+  }
+
+  const cv::Point2d center = origin + direction * hi;
+  const cv::Point pixel(
+    static_cast<int>(std::lround(center.x)), static_cast<int>(std::lround(center.y)));
+  const cv::Rect box(
+    pixel.x - kSearchBoxSize / 2, pixel.y - kSearchBoxSize / 2, kSearchBoxSize, kSearchBoxSize);
+  return PolarHit{pixel, box};
 }
 }  // namespace
 
@@ -60,7 +192,7 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
 
   cv::namedWindow("Dashboard", cv::WINDOW_NORMAL);
-  cv::resizeWindow("Dashboard", kThumbWidth * 3, kThumbHeight * 2);
+  cv::resizeWindow("Dashboard", kThumbWidth * 2, kThumbHeight * 2);
 
   RCLCPP_INFO(get_logger(), "LaneDetection started");
 }
@@ -91,7 +223,7 @@ cv::Mat LaneDetection::bird_eye(const cv::Mat & image) const
   return warped;
 }
 
-cv::Mat LaneDetection::binary_mask(const cv::Mat & image) const
+cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
 {
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
@@ -105,137 +237,74 @@ cv::Mat LaneDetection::binary_mask(const cv::Mat & image) const
   return mask;
 }
 
-void LaneDetection::sliding_window_search(
-  const cv::Mat & binary, cv::Mat & windows_view, std::vector<cv::Point> & left_points,
-  std::vector<cv::Point> & right_points) const
+LaneDetection::PolarSearchResult LaneDetection::polar_search(const cv::Mat & binary) const
 {
-  const int height = binary.rows;
-  const int width = binary.cols;
-  const int mid = width / 2;
+  PolarSearchResult result;
+  const cv::Point2d origin(binary.cols / 2.0, binary.rows - 1.0);
+  bool found = 0;
 
-  // Histogram (column-wise pixel value sum) of the bottom half locates the initial bases
-  const cv::Mat lower_half = binary(cv::Range(height / 2, height), cv::Range::all());
-  cv::Mat column_sums;
-  cv::reduce(lower_half, column_sums, 0, cv::REDUCE_SUM, CV_32S);
-
-  int left_base = 0;
-  int right_base = mid;
-  int left_max = -1;
-  int right_max = -1;
-  for (int col = 0; col < mid; ++col) {
-    const int value = column_sums.at<int>(0, col);
-    if (value > left_max) {
-      left_max = value;
-      left_base = col;
+  for (double theta = 0.0; theta <= kMaxAngleRad + 1e-6; theta += kAngleStepRad) {
+    const std::optional<PolarHit> hit = find_closest_box(binary, origin, theta);
+    if (!hit) {
+      if (found) break;  // disconnect: the lane trail stops here
+      continue;
     }
+    found = 1;
+    result.points.push_back(hit->pixel);
+    result.boxes.push_back(hit->box);
   }
-  for (int col = mid; col < width; ++col) {
-    const int value = column_sums.at<int>(0, col);
-    if (value > right_max) {
-      right_max = value;
-      right_base = col;
-    }
-  }
-
-  const int window_height = std::max(1, height / kNumWindows);
-
-  for (int y_high = height; y_high > 0; y_high -= window_height) {
-    const int y_low = std::max(0, y_high - window_height);
-
-    const int left_low = std::clamp(left_base - kMargin, 0, width);
-    const int left_high = std::clamp(left_base + kMargin, 0, width);
-    const int right_low = std::clamp(right_base - kMargin, 0, width);
-    const int right_high = std::clamp(right_base + kMargin, 0, width);
-
-    cv::rectangle(
-      windows_view, cv::Point(left_low, y_low), cv::Point(left_high, y_high),
-      cv::Scalar(255, 255, 255), 2);
-    cv::rectangle(
-      windows_view, cv::Point(right_low, y_low), cv::Point(right_high, y_high),
-      cv::Scalar(255, 255, 255), 2);
-
-    // Left window: find the largest contour's centroid, if any clears the pixel-count threshold
-    const cv::Mat left_window = binary(cv::Range(y_low, y_high), cv::Range(left_low, left_high)).clone();
-    if (cv::countNonZero(left_window) > kMinPix) {
-      std::vector<std::vector<cv::Point>> contours;
-      cv::findContours(left_window, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-      if (!contours.empty()) {
-        const auto & largest = *std::max_element(
-          contours.begin(), contours.end(), [](const auto & a, const auto & b) {
-            return cv::contourArea(a) < cv::contourArea(b);
-          });
-        const cv::Moments m = cv::moments(largest);
-        if (m.m00 != 0) {
-          const int cx = static_cast<int>(m.m10 / m.m00) + left_low;
-          const int cy = static_cast<int>(m.m01 / m.m00) + y_low;
-          left_points.emplace_back(cx, cy);
-          left_base = cx;
-          cv::circle(windows_view, cv::Point(cx, cy), 4, cv::Scalar(0, 255, 0), -1);
-        }
-      }
-    }
-
-    // Right window: mirror of the left window search
-    const cv::Mat right_window =
-      binary(cv::Range(y_low, y_high), cv::Range(right_low, right_high)).clone();
-    if (cv::countNonZero(right_window) > kMinPix) {
-      std::vector<std::vector<cv::Point>> contours;
-      cv::findContours(right_window, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-      if (!contours.empty()) {
-        const auto & largest = *std::max_element(
-          contours.begin(), contours.end(), [](const auto & a, const auto & b) {
-            return cv::contourArea(a) < cv::contourArea(b);
-          });
-        const cv::Moments m = cv::moments(largest);
-        if (m.m00 != 0) {
-          const int cx = static_cast<int>(m.m10 / m.m00) + right_low;
-          const int cy = static_cast<int>(m.m01 / m.m00) + y_low;
-          right_points.emplace_back(cx, cy);
-          right_base = cx;
-          cv::circle(windows_view, cv::Point(cx, cy), 4, cv::Scalar(0, 255, 0), -1);
-        }
-      }
-    }
-  }
-}
-
-LaneDetection::LaneFitResult LaneDetection::evaluate_lane(
-  const std::vector<cv::Point> & left_points, const std::vector<cv::Point> & right_points,
-  int width, int height) const
-{
-  LaneFitResult result;
-  if (left_points.size() < 3 || right_points.size() < 3) {
-    return result;
-  }
-
-  result.left_fit = fit_quadratic(left_points);
-  result.right_fit = fit_quadratic(right_points);
-
-  const double y_eval = static_cast<double>(height);
-
-  const double left_slope = 2.0 * result.left_fit[0] * y_eval + result.left_fit[1];
-  const double right_slope = 2.0 * result.right_fit[0] * y_eval + result.right_fit[1];
-  const double left_curvature =
-    std::pow(1.0 + left_slope * left_slope, 1.5) / std::abs(2.0 * result.left_fit[0]);
-  const double right_curvature =
-    std::pow(1.0 + right_slope * right_slope, 1.5) / std::abs(2.0 * result.right_fit[0]);
-  result.curvature_px = (left_curvature + right_curvature) / 2.0;
-
-  // Offset uses the fit evaluated at the bottom of the image (closest to the vehicle)
-  const double left_x = eval_quadratic(result.left_fit, y_eval);
-  const double right_x = eval_quadratic(result.right_fit, y_eval);
-  const double lane_center = (left_x + right_x) / 2.0;
-  const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
-  result.offset_m = (width / 2.0 - lane_center) * meters_per_pixel;
-
-  // Heading error: average slope (dx/dy) of both lane fits at the vehicle position,
-  // converted to an angle from the forward (vertical) axis.
-  const double heading_slope = (left_slope + right_slope) / 2.0;
-  result.steering_angle_deg = std::atan(heading_slope) * 180.0 / CV_PI;
-  result.valid = true;
 
   return result;
 }
+
+LaneDetection::LaneFitResult LaneDetection::fit_lane(
+  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const
+{
+  LaneFitResult result;
+  if (static_cast<int>(points.size()) < kMinLanePoints) {
+    return result;
+  }
+
+  std::vector<double> t(points.size()), xs(points.size()), ys(points.size());
+  t[0] = 0.0;
+  xs[0] = points[0].x;
+  ys[0] = points[0].y;
+  for (std::size_t i = 1; i < points.size(); ++i) {
+    const double dx = points[i].x - points[i - 1].x;
+    const double dy = points[i].y - points[i - 1].y;
+    t[i] = t[i - 1] + std::max(std::hypot(dx, dy), 1e-3);  // keep t strictly increasing
+    xs[i] = points[i].x;
+    ys[i] = points[i].y;
+  }
+
+  const CubicSpline1D spline_x(t, xs);
+  const CubicSpline1D spline_y(t, ys);
+
+  result.spline_points = sample_spline(spline_x, spline_y, t.back(), kSplineSamples);
+
+  // The natural boundary condition forces zero curvature exactly at t=0, so evaluate the
+  // vehicle-side heading/curvature one knot in rather than at the true endpoint.
+  const double t_eval = t[1];
+  double x_val, x1, x2, y_val, y1, y2;
+  spline_x.evaluate(t_eval, x_val, x1, x2);
+  spline_y.evaluate(t_eval, y_val, y1, y2);
+
+  const double speed_sq = x1 * x1 + y1 * y1;
+  const double kappa =
+    speed_sq > 1e-9 ? (x1 * y2 - y1 * x2) / std::pow(speed_sq, 1.5) : 0.0;
+  result.curvature_radius_px = 1.0 / std::max(std::abs(kappa), kMinCurvatureKappa);
+
+  // Heading of travel relative to straight ahead (the -y axis); atan2 stays well-behaved even
+  // when the lane runs nearly horizontal, which is exactly the steep-curve case this is for.
+  result.steering_angle_deg = std::atan2(x1, -y1) * 180.0 / CV_PI;
+
+  const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
+  result.offset_m = (points[0].x - origin.x) * meters_per_pixel;
+
+  result.valid = true;
+  return result;
+}
+
 cv::Mat LaneDetection::make_thumbnail(const cv::Mat & image, const std::string & label) const
 {
   cv::Mat bgr = image;
@@ -260,12 +329,9 @@ cv::Mat LaneDetection::build_dashboard(
     thumbs.push_back(make_thumbnail(image, label));
   }
 
-  cv::Mat row1;
-  cv::Mat row2;
-  cv::hconcat(std::vector<cv::Mat>(thumbs.begin(), thumbs.begin() + 3), row1);
-  cv::hconcat(std::vector<cv::Mat>(thumbs.begin() + 3, thumbs.begin() + 6), row2);
-
-  cv::Mat dashboard;
+  cv::Mat row1, row2, dashboard;
+  cv::hconcat(std::vector<cv::Mat>{thumbs[0], thumbs[1]}, row1);
+  cv::hconcat(std::vector<cv::Mat>{thumbs[2], thumbs[3]}, row2);
   cv::vconcat(row1, row2, dashboard);
   return dashboard;
 }
@@ -297,52 +363,54 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   }
 
   const cv::Mat warped = bird_eye(frame);
-  const cv::Mat binary = binary_mask(warped);
+  const cv::Mat mask = yellow_mask(warped);
 
-  cv::Mat windows_view;
-  cv::cvtColor(binary, windows_view, cv::COLOR_GRAY2BGR);
+  cv::Mat masked_view = warped.clone();
+  masked_view.setTo(cv::Scalar(0, 255, 0), mask);
 
-  std::vector<cv::Point> left_points;
-  std::vector<cv::Point> right_points;
-  sliding_window_search(binary, windows_view, left_points, right_points);
+  const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0);
+  const PolarSearchResult search = polar_search(mask);
 
-  // Fall back to the previous frame's lane when nothing clears the threshold this frame
-  if (left_points.empty()) {
-    left_points = prev_left_points_;
+  // Fall back to the previous frame's lane when nothing is found this frame
+  std::vector<cv::Point> points = search.points;
+  if (points.empty()) {
+    points = prev_points_;
   } else {
-    prev_left_points_ = left_points;
-  }
-  if (right_points.empty()) {
-    right_points = prev_right_points_;
-  } else {
-    prev_right_points_ = right_points;
+    prev_points_ = points;
   }
 
-  const LaneFitResult fit = evaluate_lane(left_points, right_points, width, height);
+  const LaneFitResult fit = fit_lane(points, origin, warped.cols);
 
-  cv::Mat fitted_view = warped.clone();
-  cv::Mat result = frame.clone();
-
+  cv::Mat search_view;
+  cv::cvtColor(mask, search_view, cv::COLOR_GRAY2BGR);
+  cv::circle(
+    search_view, cv::Point(static_cast<int>(origin.x), static_cast<int>(origin.y)), 5,
+    cv::Scalar(0, 0, 255), -1);
+  for (const auto & box : search.boxes) {
+    cv::rectangle(search_view, box, cv::Scalar(255, 255, 255), 1);
+  }
+  for (const auto & p : points) {
+    cv::circle(search_view, p, 3, cv::Scalar(0, 255, 0), -1);
+  }
   if (fit.valid) {
-    const double left_bottom = eval_quadratic(fit.left_fit, height);
-    const double left_top = eval_quadratic(fit.left_fit, 0);
-    const double right_bottom = eval_quadratic(fit.right_fit, height);
-    const double right_top = eval_quadratic(fit.right_fit, 0);
+    cv::polylines(search_view, fit.spline_points, false, cv::Scalar(255, 0, 0), 2);
+  }
 
-    const std::vector<cv::Point> quad{
-      {static_cast<int>(left_bottom), height},
-      {static_cast<int>(left_top), 0},
-      {static_cast<int>(right_top), 0},
-      {static_cast<int>(right_bottom), height}};
+  cv::Mat result = frame.clone();
+  if (fit.valid) {
+    std::vector<cv::Point2f> bev_points;
+    bev_points.reserve(fit.spline_points.size());
+    for (const auto & p : fit.spline_points) bev_points.emplace_back(p);
 
-    cv::Mat overlay = warped.clone();
-    cv::fillPoly(overlay, std::vector<std::vector<cv::Point>>{quad}, cv::Scalar(0, 255, 0));
-    cv::addWeighted(overlay, 0.2, warped, 0.8, 0.0, fitted_view);
+    std::vector<cv::Point2f> original_points;
+    cv::perspectiveTransform(bev_points, original_points, build_transform(height, width).inv());
 
-    const cv::Mat inverse_transform = build_transform(height, width).inv();
-    cv::Mat unwarped_overlay;
-    cv::warpPerspective(fitted_view, unwarped_overlay, inverse_transform, frame.size());
-    cv::addWeighted(frame, 1.0, unwarped_overlay, 0.5, 0.0, result);
+    std::vector<cv::Point> original_points_i;
+    original_points_i.reserve(original_points.size());
+    for (const auto & p : original_points) {
+      original_points_i.emplace_back(static_cast<int>(p.x), static_cast<int>(p.y));
+    }
+    cv::polylines(result, original_points_i, false, cv::Scalar(255, 0, 255), 3);
 
     const cv::Point arrow_start(width / 2, height);
     const cv::Point arrow_end(
@@ -352,19 +420,21 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   }
 
   std_msgs::msg::Float64MultiArray lane_msg;
-  lane_msg.data = {fit.offset_m, fit.steering_angle_deg, fit.curvature_px, fit.valid ? 1.0 : 0.0};
+  lane_msg.data = {fit.offset_m, fit.steering_angle_deg, fit.curvature_radius_px,
+                    fit.valid ? 1.0 : 0.0};
+  lane_center_publisher_->publish(lane_msg);
 
   RCLCPP_INFO_THROTTLE(
     get_logger(), *get_clock(), 2000,
-    "[/lane/center] offset=%.3f m, angle=%.2f deg, curvature=%.1f px, valid=%s",
-    fit.offset_m, fit.steering_angle_deg, fit.curvature_px, fit.valid ? "true" : "false");
+    "[/lane/center] offset=%.3f m, angle=%.2f deg, radius=%.1f px, valid=%s", fit.offset_m,
+    fit.steering_angle_deg, fit.curvature_radius_px, fit.valid ? "true" : "false");
 
   const cv::Scalar text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
-  char curvature_text[64];
-  std::snprintf(curvature_text, sizeof(curvature_text), "Curvature: %.2f px", fit.curvature_px);
+  char radius_text[64];
+  std::snprintf(radius_text, sizeof(radius_text), "Radius: %.1f px", fit.curvature_radius_px);
   cv::putText(
-    result, curvature_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+    result, radius_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   char offset_text[64];
   std::snprintf(offset_text, sizeof(offset_text), "Offset: %.2f m", fit.offset_m);
@@ -385,11 +455,9 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   const cv::Mat dashboard = build_dashboard({
     {"Original", original_view},
-    {"Bird's Eye View", warped},
-    {"Thresholding", binary},
-    {"Sliding Windows", windows_view},
-    {"Lane Detection", result},
-    {"Fitted Lane (Bird's Eye)", fitted_view}});
+    {"BEV Yellow Mask", masked_view},
+    {"Polar Search + Spline", search_view},
+    {"Result", result}});
 
   cv::imshow("Dashboard", dashboard);
   cv::waitKey(1);

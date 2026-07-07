@@ -24,9 +24,9 @@ class KeyboardController(Node):
 
         # Declare the used parameters
         self.declare_parameter('max_steering_angle', 2.0)
-        self.declare_parameter('max_velocity', 5.0)
+        self.declare_parameter('max_velocity', 10.0)
         self.declare_parameter('steering_step', 0.02)
-        self.declare_parameter('velocity_step', 0.2)
+        self.declare_parameter('velocity_step', 2.0)
         self.declare_parameter('steering_center_rate', 0.05)
         self.declare_parameter('velocity_center_rate', 0.1)
         self.declare_parameter('key_hold_timeout', 0.5)
