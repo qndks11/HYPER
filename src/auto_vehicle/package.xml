@@ -21,6 +21,7 @@
   <exec_depend>gz_ros2_control</exec_depend>
   <exec_depend>ros2_control</exec_depend>
   <exec_depend>joy</exec_depend>
+  <exec_depend>rclpy</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>libopencv-dev</exec_depend>
 
