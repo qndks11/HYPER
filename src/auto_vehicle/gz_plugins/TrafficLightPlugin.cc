@@ -33,10 +33,6 @@ class TrafficLightPlugin
     std::string color;
   };
 
-  private:
-    std::chrono::steady_clock::time_point startWallTime;
-    bool wallTimeInitialized{false};
-
   public: void Configure(
       const ignition::gazebo::Entity &_entity,
       const std::shared_ptr<const sdf::Element> &_sdf,
@@ -71,9 +67,6 @@ class TrafficLightPlugin
       this->cycleDuration += phase.duration;
       this->phases.push_back(phase);
     }
-    
-    this->startWallTime = std::chrono::steady_clock::now();
-    this->wallTimeInitialized = true;
   }
 
   public: void PreUpdate(
@@ -83,18 +76,13 @@ class TrafficLightPlugin
     if (_info.paused || this->phases.empty() || this->cycleDuration <= 0.0)
       return;
 
-    // Initialize on first call if not done in Configure
-    if (!this->wallTimeInitialized)
-    {
-      this->startWallTime = std::chrono::steady_clock::now();
-      this->wallTimeInitialized = true;
-    }
+    // Drive the phase cycle off simulation time rather than wall-clock time,
+    // so it stays in lockstep with the rest of the simulation (pauses when
+    // paused, and doesn't drift when running faster/slower than real time).
+    const double simSeconds =
+        std::chrono::duration<double>(_info.simTime).count();
 
-    const double wallSeconds =
-        std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - this->startWallTime).count();
-
-    double t = std::fmod(wallSeconds, this->cycleDuration);
+    double t = std::fmod(simSeconds, this->cycleDuration);
 
     std::string activeColor = this->phases.front().color;
     for (const auto &phase : this->phases)
@@ -106,6 +94,12 @@ class TrafficLightPlugin
       }
       t -= phase.duration;
     }
+
+    // Only touch the joints when the active color actually changes, instead
+    // of forcing a position reset on every single PreUpdate call.
+    if (activeColor == this->lastActiveColor)
+      return;
+    this->lastActiveColor = activeColor;
 
     this->SetOn(_ecm, this->redJoint, activeColor == "red");
     this->SetOn(_ecm, this->greenJoint, activeColor == "green");
@@ -130,6 +124,7 @@ class TrafficLightPlugin
 
   private: std::vector<Phase> phases;
   private: double cycleDuration{0.0};
+  private: std::string lastActiveColor;
 };
 
 }  // namespace auto_vehicle
