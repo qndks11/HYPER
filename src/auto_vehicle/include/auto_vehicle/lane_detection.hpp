@@ -19,8 +19,10 @@ public:
 private:
   struct PolarSearchResult
   {
-    std::vector<cv::Point> points;  // detected right-lane pixel centers, ordered near to far
-    std::vector<cv::Rect> boxes;    // the search box that found each point, for visualization
+    cv::Mat polar_image;                 // yellow mask remapped into (angle row, radius col)
+    std::vector<cv::Point> polar_points;  // hits in polar-image (col=radius, row=angle) coords
+    std::vector<cv::Rect> polar_boxes;    // the qualifying sliding window for each hit
+    std::vector<cv::Point> points;        // the same hits, converted back to BEV (x, y)
   };
 
   struct LaneFitResult
@@ -29,16 +31,18 @@ private:
     double offset_m{0.0};
     double steering_angle_deg{0.0};
     double curvature_radius_px{0.0};
-    std::vector<cv::Point> spline_points;  // densely resampled curve, for drawing
+    std::vector<cv::Point> curve_points;  // densely resampled fitted curve, for drawing
   };
 
   /**
    * @brief Callback invoked for every incoming camera frame.
    *
-   * @details Masks yellow lane paint, warps to a bird's-eye view, runs the polar right-lane
-   * search, fits a parametric cubic spline through the result, publishes offset/steering
-   * angle/curvature-radius on `/lane/center`, and shows a 4-panel debug dashboard (original,
-   * bird's-eye yellow mask, polar search + spline, final overlay).
+   * @details Masks yellow lane paint, warps to a bird's-eye view, remaps the mask into polar
+   * coordinates anchored at the bottom-center of the BEV image, runs a sliding-window search
+   * for the right lane in that polar image, converts the result back to BEV coordinates, fits
+   * a third-degree polynomial through it, publishes offset/steering angle/curvature-radius on
+   * `/lane/center`, and shows a 6-panel debug dashboard (original, BEV mask, polar mask, polar
+   * search result, BEV curve, final overlay).
    *
    * @param msg Incoming camera image.
    */
@@ -65,27 +69,41 @@ private:
   cv::Mat yellow_mask(const cv::Mat & image) const;
 
   /**
-   * @brief Searches for the right lane in polar coordinates, anchored at the bottom-center of
-   * the bird's-eye mask.
+   * @brief Searches for the right lane in polar coordinates over the fixed domain [0, pi/2].
    *
-   * @details For each angle from 0 (due right, along the bottom edge) to pi/2 (due forward) in
-   * kAngleStepRad steps, finds the closest small box along that ray whose fill ratio clears
-   * kSearchBoxFillThreshold, using an exponential-then-binary-search sweep over the radius so
-   * each ray is O(log r) instead of a linear scan. Walking by angle rather than by image row
-   * lets the search follow the lane even where it curves sharply sideways, which a
-   * fixed-direction vertical search cannot. The sweep stops the moment an angle turns up
-   * nothing (a disconnect) rather than continuing on to pi/2 regardless.
+   * @details Remaps `binary` into a polar image anchored at `origin`, with rows spanning
+   * [0, pi/2] (angle, 0 = due right, pi/2 = due forward) and columns spanning [0, max radius]
+   * (radius) -- so radius increases left to right along a row. For each row, a
+   * horizontally-elongated sliding window (wide in radius, narrow in angle) scans left to
+   * right; the first window whose fill ratio clears kWindowFillThreshold is refined down to the
+   * exact nearest yellow column within it, so the result always tracks the true minimum radius
+   * rather than just the coarse window position. The elongated shape lets a window survive
+   * small local deviations without losing the lane.
+   *
+   * Rows before the first hit are skipped rather than treated as a disconnect -- the ROI
+   * trapezoid used for the bird's-eye warp is intentionally wider at its near edge than the
+   * camera's actual field of view (see build_transform), so the small-angle rows walk through
+   * an extrapolated black dead zone before ever reaching real image content. Once the first hit
+   * is found, a row with no qualifying window (a genuine disconnect) stops the sweep.
    *
    * @param binary Binary yellow lane mask (bird's-eye view).
-   * @return The points found (near to far) and the boxes that found them.
+   * @param origin The bottom-center point to anchor the polar transform to.
+   * @return The polar image, the hits in both polar and BEV coordinates, and the windows found.
    */
-  PolarSearchResult polar_search(const cv::Mat & binary) const;
+  PolarSearchResult polar_search(const cv::Mat & binary, const cv::Point2d & origin) const;
 
   /**
-   * @brief Fits a parametric cubic spline through the polar search points and derives the
-   * curvature radius, heading angle, and lateral offset near the vehicle.
+   * @brief Fits a third-degree polynomial x = f(y) through the polar search points by least
+   * squares, and derives the curvature radius, heading angle, and lateral offset at the
+   * vehicle's row.
    *
-   * @param points Right-lane points from polar_search(), ordered near to far.
+   * @details Unlike a per-point interpolating fit, a global least-squares polynomial averages
+   * out point-to-point noise instead of passing through every point exactly, so the fitted
+   * curve is steadier frame to frame. Being single-valued in y, it cannot represent a curve
+   * that folds back in x for a given y (an extremely sharp/hairpin turn) -- a deliberate
+   * simplicity/stability trade-off.
+   *
+   * @param points Right-lane points from polar_search(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the polar search was anchored to.
    * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
    * @return The lane fit result; `valid` is false if there are too few points.
@@ -99,7 +117,7 @@ private:
   cv::Mat make_thumbnail(const cv::Mat & image, const std::string & label) const;
 
   /**
-   * @brief Arranges exactly four labeled views into a 2x2 grid for the debug dashboard.
+   * @brief Arranges exactly six labeled views into a 3x2 grid for the debug dashboard.
    */
   cv::Mat build_dashboard(const std::vector<std::pair<std::string, cv::Mat>> & views) const;
 

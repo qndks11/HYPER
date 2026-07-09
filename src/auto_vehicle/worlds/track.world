@@ -188,7 +188,7 @@
     <include>
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_1</name>
-      <pose>-6.48 -3.97 0 0 0 0</pose>
+      <pose>-9.34 -4.57 0 0 0 0</pose>
       <plugin filename="libTrafficLightPlugin.so" name="auto_vehicle::TrafficLightPlugin">
         <phase duration="6.0" color="red"/>
         <phase duration="4.0" color="red"/>
@@ -216,7 +216,7 @@
     <include>
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_3</name>
-      <pose>11.56 -17.96 0 0 0 3.1416</pose>
+      <pose>11.56 -16.96 0 0 0 3.1416</pose>
       <plugin filename="libTrafficLightPlugin.so" name="auto_vehicle::TrafficLightPlugin">
         <phase duration="6.0" color="right_turn"/>
         <phase duration="4.0" color="yellow"/>

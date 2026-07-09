@@ -505,16 +505,6 @@
 
   <!-- Gazebo Plugins -->
   <gazebo>
-    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
-      <topic>joint_states</topic>
-      <joint_name>front_left_steering_joint</joint_name>
-      <joint_name>front_right_steering_joint</joint_name>
-      <joint_name>front_left_wheel_joint</joint_name>
-      <joint_name>front_right_wheel_joint</joint_name>
-      <joint_name>rear_left_wheel_joint</joint_name>
-      <joint_name>rear_right_wheel_joint</joint_name>
-    </plugin>
-
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
       <parameters>$(find auto_vehicle)/config/gz_ros2_control.yaml</parameters>
     </plugin>
