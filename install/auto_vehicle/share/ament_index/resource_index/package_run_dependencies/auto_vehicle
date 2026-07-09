@@ -1,1 +1,1 @@
-/home/qndks11/HYPER/build/auto_vehicle/ament_cmake_index/share/ament_index/resource_index/package_run_dependencies/auto_vehicle
+rclcpp;std_msgs;ignition-gazebo6;joint_state_publisher;robot_state_publisher;gazebo_ros;xacro;ros_gz_bridge;gz_ros2_control;ros2_control;joy;rclpy;cv_bridge;libopencv-dev;ament_lint_auto;ament_lint_common

@@ -17,14 +17,6 @@ public:
   LaneDetection();
 
 private:
-  struct PolarSearchResult
-  {
-    cv::Mat polar_image;                 // yellow mask remapped into (angle row, radius col)
-    std::vector<cv::Point> polar_points;  // hits in polar-image (col=radius, row=angle) coords
-    std::vector<cv::Rect> polar_boxes;    // the qualifying sliding window for each hit
-    std::vector<cv::Point> points;        // the same hits, converted back to BEV (x, y)
-  };
-
   struct LaneFitResult
   {
     bool valid{false};
@@ -37,26 +29,28 @@ private:
   /**
    * @brief Callback invoked for every incoming camera frame.
    *
-   * @details Masks yellow lane paint, warps to a bird's-eye view, remaps the mask into polar
-   * coordinates anchored at the bottom-center of the BEV image, runs a sliding-window search
-   * for the right lane in that polar image, converts the result back to BEV coordinates, fits
-   * a third-degree polynomial through it, publishes offset/steering angle/curvature-radius on
-   * `/lane/center`, and shows a 6-panel debug dashboard (original, BEV mask, polar mask, polar
-   * search result, BEV curve, final overlay).
+   * @details Masks yellow lane paint, warps to a bird's-eye view, extracts the yellow pixels as
+   * a bare (x, y) point cloud, walks a chain along the right lane from its bottom point via
+   * walk_lane_chain(), fits a pair of third-degree polynomials (x and y, both parameterized by
+   * arc length along the chain) through the walked chain's original BEV coordinates, publishes
+   * offset/steering angle/curvature-radius on `/lane/center`, and shows a 3-panel debug dashboard
+   * (original, BEV yellow mask, final overlay).
    *
    * @param msg Incoming camera image.
    */
   void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
 
   /**
-   * @brief Builds the perspective transform mapping the trapezoidal ROI to a bird's-eye view
-   * of the same size as the source image.
+   * @brief Builds the perspective transform mapping the trapezoidal ROI (sampled from the
+   * source image's own dimensions) to a bird's-eye view of the given destination size.
    *
-   * @param height Source image height [px].
-   * @param width Source image width [px].
+   * @param src_height Source image height [px], used only to locate the ROI corners.
+   * @param src_width Source image width [px], used only to locate the ROI corners.
+   * @param dst_height Output (bird's-eye) image height [px].
+   * @param dst_width Output (bird's-eye) image width [px].
    * @return The 3x3 perspective transform matrix.
    */
-  cv::Mat build_transform(int height, int width) const;
+  cv::Mat build_transform(int src_height, int src_width, int dst_height, int dst_width) const;
 
   /**
    * @brief Warps the input image to a bird's-eye view using build_transform().
@@ -69,42 +63,41 @@ private:
   cv::Mat yellow_mask(const cv::Mat & image) const;
 
   /**
-   * @brief Searches for the right lane in polar coordinates over the fixed domain [0, pi/2].
+   * @brief Walks a chain of yellow pixels along the right lane, starting from its bottom point
+   * and stepping outward one nearby pixel at a time.
    *
-   * @details Remaps `binary` into a polar image anchored at `origin`, with rows spanning
-   * [0, pi/2] (angle, 0 = due right, pi/2 = due forward) and columns spanning [0, max radius]
-   * (radius) -- so radius increases left to right along a row. For each row, a
-   * horizontally-elongated sliding window (wide in radius, narrow in angle) scans left to
-   * right; the first window whose fill ratio clears kWindowFillThreshold is refined down to the
-   * exact nearest yellow column within it, so the result always tracks the true minimum radius
-   * rather than just the coarse window position. The elongated shape lets a window survive
-   * small local deviations without losing the lane.
+   * @details The seed point is the bottommost yellow pixel on the right half of the image
+   * (x >= origin.x), and the initial direction is straight up the image (toward the horizon).
+   * Each step: pixels within kNeighborRadius of the current point are filtered to those whose
+   * displacement from it has a non-negative dot product with the current direction (i.e. within
+   * +/-90 degrees of it); if none remain, the chain stops. The survivors are ranked by the
+   * signed sine of their angle to the current direction (cross product over the product of
+   * norms), smallest magnitude first -- since candidates are already restricted to +/-90
+   * degrees, this orders identically to angle magnitude -- with remaining ties broken by
+   * preferring the pixel farthest from the current point. The winner becomes the new current
+   * point, and the vector from the old point to it becomes the new direction, so the chain
+   * keeps following whatever heading the lane is actually curving toward.
    *
-   * Rows before the first hit are skipped rather than treated as a disconnect -- the ROI
-   * trapezoid used for the bird's-eye warp is intentionally wider at its near edge than the
-   * camera's actual field of view (see build_transform), so the small-angle rows walk through
-   * an extrapolated black dead zone before ever reaching real image content. Once the first hit
-   * is found, a row with no qualifying window (a genuine disconnect) stops the sweep.
-   *
-   * @param binary Binary yellow lane mask (bird's-eye view).
-   * @param origin The bottom-center point to anchor the polar transform to.
-   * @return The polar image, the hits in both polar and BEV coordinates, and the windows found.
+   * @param yellow_points Every yellow mask pixel coordinate (BEV), e.g. from cv::findNonZero.
+   * @param origin The bottom-center point used to pick the right-lane seed (x >= origin.x).
+   * @return The walked chain's original BEV pixel coordinates, near (bottom) to far.
    */
-  PolarSearchResult polar_search(const cv::Mat & binary, const cv::Point2d & origin) const;
+  std::vector<cv::Point> walk_lane_chain(
+    const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const;
 
   /**
-   * @brief Fits a third-degree polynomial x = f(y) through the polar search points by least
-   * squares, and derives the curvature radius, heading angle, and lateral offset at the
-   * vehicle's row.
+   * @brief Fits parametric cubics x(s) and y(s), both against arc length s along the walked lane
+   * chain, by least squares, and derives the curvature radius, heading angle, and lateral offset
+   * at the vehicle's row.
    *
    * @details Unlike a per-point interpolating fit, a global least-squares polynomial averages
-   * out point-to-point noise instead of passing through every point exactly, so the fitted
-   * curve is steadier frame to frame. Being single-valued in y, it cannot represent a curve
-   * that folds back in x for a given y (an extremely sharp/hairpin turn) -- a deliberate
-   * simplicity/stability trade-off.
+   * out point-to-point noise instead of passing through every point exactly, so the fitted curve
+   * is steadier frame to frame. Parameterizing by arc length rather than fitting x = f(y)
+   * directly means the fit stays well-defined -- and curvature/heading stay numerically stable --
+   * through a sharp or even 90-degree turn, where x = f(y) would stop being single-valued.
    *
-   * @param points Right-lane points from polar_search(), in BEV coordinates, near to far.
-   * @param origin The bottom-center point the polar search was anchored to.
+   * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
+   * @param origin The bottom-center point the chain was anchored to.
    * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
    * @return The lane fit result; `valid` is false if there are too few points.
    */
@@ -117,7 +110,7 @@ private:
   cv::Mat make_thumbnail(const cv::Mat & image, const std::string & label) const;
 
   /**
-   * @brief Arranges exactly six labeled views into a 3x2 grid for the debug dashboard.
+   * @brief Arranges labeled views side by side in a single row for the debug dashboard.
    */
   cv::Mat build_dashboard(const std::vector<std::pair<std::string, cv::Mat>> & views) const;
 

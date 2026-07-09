@@ -12,26 +12,27 @@ namespace
 // ROI trapezoid corners as (row_ratio, col_ratio) of the source image
 constexpr double kRoiTopLeftRow = 0.40,  kRoiTopLeftCol = 0.25;
 constexpr double kRoiTopRightRow = 0.40, kRoiTopRightCol = 0.75;
-constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -1;
-constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 2;
+constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -1.4;
+constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 2.4;
 
-constexpr double kMaxAngleRad = CV_PI;    // fallback/clamp bound for the search domain
-// Target angular resolution of the polar image, i.e. how many raw points feed the spline fit
-// per frame. Finer (smaller) gives more detail but also a denser, more numerically twitchy
-// spline that visibly jitters/lags frame to frame; coarser trades some curve detail for a
-// steadier fit.
-constexpr double kAngleStepRad = 0.05;
-
-// Sliding window over the polar (angle-row x radius-col) image. Deliberately wide in radius and
-// narrow in angle: "horizontally long" so a window survives local gaps/deviations in the mask
-// without losing the lane, while staying narrow enough in angle to not blur the search.
-constexpr int kWindowRadiusSpan = 25;    // columns (px along the radius axis)
-constexpr int kWindowAngleSpanRows = 3;  // rows (angle bins)
-constexpr double kWindowFillThreshold = 0.30;
+// Neighborhood radius for each step of the lane chain walk [px]. Also sets the rough spacing
+// between consecutive chain points, since each step prefers the farthest qualifying pixel within
+// this radius.
+constexpr double kChainStepRadius = 30.0;
+// Safety cap on chain length. Real chains are bounded by image size / kChainStepRadius (tens of
+// steps); this just guards against runaway loops.
+constexpr int kMaxChainSteps = 50;
+// Row [px] near the top of the BEV image at which the chain walk stops, since rows this close to
+// the horizon are unreliable and there's nowhere further to walk to anyway.
+constexpr double kTopRowMargin = 20.0;
 
 constexpr int kMinLanePoints = 6;   // a few points of slack past the 4 a cubic needs exactly
 constexpr int kCurveSamples = 40;   // density of the drawn/unwarped curve, not the fit itself
-constexpr double kMinSecondDerivative = 1e-6;
+constexpr double kMinCurvatureDenominator = 1e-6;
+// Floor on |dy/ds| at the chain's near end when inverting the tangent to locate the vehicle's
+// row (see fit_lane): below this the near end is running ~horizontal, so that row can't be
+// reached by extrapolating along the curve and the near point's x is used directly instead.
+constexpr double kMinNearTangentDy = 1e-6;
 
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
@@ -39,20 +40,28 @@ constexpr double kArrowLength = 100.0;
 constexpr int kThumbWidth = 420;
 constexpr int kThumbHeight = 300;
 
-// Fits x = a*y^3 + b*y^2 + c*y + d to the given points by least squares.
-cv::Vec4d fit_cubic(const std::vector<cv::Point> & points)
+// Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
+// down the road the BEV view looks. Width is left unscaled.
+constexpr double kBevHeightScale = 1.4;
+
+// Fits v = a*t^3 + b*t^2 + c*t + d to the given (t, v) pairs by weighted least squares. Used
+// twice per lane fit -- once for x(s), once for y(s), both against the same arc-length
+// parameter t=s and weight -- so it takes t/v/weight as plain vectors rather than cv::Points.
+cv::Vec4d fit_cubic(
+  const std::vector<double> & t, const std::vector<double> & v,
+  const std::vector<double> & weight)
 {
-  const int n = static_cast<int>(points.size());
+  const int n = static_cast<int>(t.size());
   cv::Mat A(n, 4, CV_64F);
   cv::Mat b(n, 1, CV_64F);
 
   for (int i = 0; i < n; ++i) {
-    const double y = points[i].y;
-    A.at<double>(i, 0) = y * y * y;
-    A.at<double>(i, 1) = y * y;
-    A.at<double>(i, 2) = y;
-    A.at<double>(i, 3) = 1.0;
-    b.at<double>(i, 0) = points[i].x;
+    const double w = weight[i];
+    A.at<double>(i, 0) = w * t[i] * t[i] * t[i];
+    A.at<double>(i, 1) = w * t[i] * t[i];
+    A.at<double>(i, 2) = w * t[i];
+    A.at<double>(i, 3) = w;
+    b.at<double>(i, 0) = w * v[i];
   }
 
   cv::Mat coeffs;
@@ -61,28 +70,21 @@ cv::Vec4d fit_cubic(const std::vector<cv::Point> & points)
     coeffs.at<double>(0), coeffs.at<double>(1), coeffs.at<double>(2), coeffs.at<double>(3));
 }
 
-double eval_cubic(const cv::Vec4d & fit, double y)
+double eval_cubic(const cv::Vec4d & fit, double t)
 {
-  return fit[0] * y * y * y + fit[1] * y * y + fit[2] * y + fit[3];
+  return fit[0] * t * t * t + fit[1] * t * t + fit[2] * t + fit[3];
 }
 
-double eval_cubic_first_derivative(const cv::Vec4d & fit, double y)
+double eval_cubic_first_derivative(const cv::Vec4d & fit, double t)
 {
-  return 3.0 * fit[0] * y * y + 2.0 * fit[1] * y + fit[2];
+  return 3.0 * fit[0] * t * t + 2.0 * fit[1] * t + fit[2];
 }
 
-double eval_cubic_second_derivative(const cv::Vec4d & fit, double y)
+double eval_cubic_second_derivative(const cv::Vec4d & fit, double t)
 {
-  return 6.0 * fit[0] * y + 2.0 * fit[1];
+  return 6.0 * fit[0] * t + 2.0 * fit[1];
 }
 
-// Sum of `image`'s pixels within the half-open rect [row0,row1) x [col0,col1), via a precomputed
-// integral image (as returned by cv::integral). O(1) regardless of rect size.
-int box_sum(const cv::Mat & integral, int row0, int col0, int row1, int col1)
-{
-  return integral.at<int>(row1, col1) - integral.at<int>(row0, col1) -
-         integral.at<int>(row1, col0) + integral.at<int>(row0, col0);
-}
 }  // namespace
 
 LaneDetection::LaneDetection() : Node{"lane_detection"}
@@ -93,34 +95,36 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
 
   cv::namedWindow("Dashboard", cv::WINDOW_NORMAL);
-  cv::resizeWindow("Dashboard", kThumbWidth * 3, kThumbHeight * 2);
+  cv::resizeWindow(
+    "Dashboard", kThumbWidth * 3, static_cast<int>(kThumbHeight * kBevHeightScale));
 
   RCLCPP_INFO(get_logger(), "LaneDetection started");
 }
 
-cv::Mat LaneDetection::build_transform(int height, int width) const
+cv::Mat LaneDetection::build_transform(
+  int src_height, int src_width, int dst_height, int dst_width) const
 {
   const std::vector<cv::Point2f> src{
-    {static_cast<float>(width * kRoiTopLeftCol), static_cast<float>(height * kRoiTopLeftRow)},
-    {static_cast<float>(width * kRoiTopRightCol), static_cast<float>(height * kRoiTopRightRow)},
-    {static_cast<float>(width * kRoiBottomRightCol),
-     static_cast<float>(height * kRoiBottomRightRow)},
-    {static_cast<float>(width * kRoiBottomLeftCol), static_cast<float>(height * kRoiBottomLeftRow)}};
+    {static_cast<float>(src_width * kRoiTopLeftCol), static_cast<float>(src_height * kRoiTopLeftRow)},
+    {static_cast<float>(src_width * kRoiTopRightCol), static_cast<float>(src_height * kRoiTopRightRow)},
+    {static_cast<float>(src_width * kRoiBottomRightCol), static_cast<float>(src_height * kRoiBottomRightRow)},
+    {static_cast<float>(src_width * kRoiBottomLeftCol), static_cast<float>(src_height * kRoiBottomLeftRow)}};
 
   const std::vector<cv::Point2f> dst{
     {0.0f, 0.0f},
-    {static_cast<float>(width), 0.0f},
-    {static_cast<float>(width), static_cast<float>(height)},
-    {0.0f, static_cast<float>(height)}};
+    {static_cast<float>(dst_width), 0.0f},
+    {static_cast<float>(dst_width), static_cast<float>(dst_height)},
+    {0.0f, static_cast<float>(dst_height)}};
 
   return cv::getPerspectiveTransform(src, dst);
 }
 
 cv::Mat LaneDetection::bird_eye(const cv::Mat & image) const
 {
-  const cv::Mat transform = build_transform(image.rows, image.cols);
+  const cv::Size dst_size(image.cols, static_cast<int>(image.rows * kBevHeightScale));
+  const cv::Mat transform = build_transform(image.rows, image.cols, dst_size.height, dst_size.width);
   cv::Mat warped;
-  cv::warpPerspective(image, warped, transform, image.size());
+  cv::warpPerspective(image, warped, transform, dst_size);
   return warped;
 }
 
@@ -138,86 +142,104 @@ cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
   return mask;
 }
 
-LaneDetection::PolarSearchResult LaneDetection::polar_search(
-  const cv::Mat & binary, const cv::Point2d & origin) const
+std::vector<cv::Point> LaneDetection::walk_lane_chain(
+  const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const
 {
-  PolarSearchResult result;
-
-  constexpr double kAlpha = 0.0;           // due right
-  constexpr double kBeta = kMaxAngleRad;   // due forward
-  const int theta_samples =
-    std::max(2, static_cast<int>(std::round((kBeta - kAlpha) / kAngleStepRad)) + 1);
-  const int max_radius = static_cast<int>(std::ceil(std::hypot(binary.cols, binary.rows)));
-
-  // Remap the mask into polar space: row = angle in [0, pi/2], col = radius in [0, max_radius).
-  cv::Mat map_x(theta_samples, max_radius, CV_32F);
-  cv::Mat map_y(theta_samples, max_radius, CV_32F);
-  for (int row = 0; row < theta_samples; ++row) {
-    const double theta = kAlpha + (kBeta - kAlpha) * row / (theta_samples - 1);
-    const double cos_t = std::cos(theta);
-    const double sin_t = std::sin(theta);
-    for (int col = 0; col < max_radius; ++col) {
-      map_x.at<float>(row, col) = static_cast<float>(origin.x + col * cos_t);
-      map_y.at<float>(row, col) = static_cast<float>(origin.y - col * sin_t);
-    }
+  std::vector<cv::Point> chain;
+  if (yellow_points.empty()) {
+    return chain;
   }
-  cv::remap(binary, result.polar_image, map_x, map_y, cv::INTER_NEAREST, cv::BORDER_CONSTANT, 0);
 
-  cv::Mat polar_01;
-  cv::threshold(result.polar_image, polar_01, 0, 1, cv::THRESH_BINARY);
-  cv::Mat integral;
-  cv::integral(polar_01, integral, CV_32S);
-
-  bool found_any = false;
-  for (int row = 0; row < theta_samples; ++row) {
-    const int row0 = std::max(0, row - kWindowAngleSpanRows / 2);
-    const int row1 = std::min(theta_samples, row0 + kWindowAngleSpanRows);
-    const int window_area = (row1 - row0) * kWindowRadiusSpan;
-
-    bool found = false;
-    int found_col = 0;
-    for (int col0 = 0; col0 + kWindowRadiusSpan <= max_radius; ++col0) {
-      const int col1 = col0 + kWindowRadiusSpan;
-      const double ratio = static_cast<double>(box_sum(integral, row0, col0, row1, col1)) /
-                            window_area;
-      if (ratio >= kWindowFillThreshold) {
-        found = true;
-        found_col = col0;
-        break;
-      }
-    }
-
-    if (!found) {
-      // Small angles walk through the ROI trapezoid's extrapolated near-field dead zone (see
-      // build_transform) before ever reaching real image content, so a miss there is just "not
-      // yet visible," not a disconnect. Once the lane has actually been picked up, though, a
-      // miss means it genuinely ended -- stop the sweep.
-      if (found_any) {
-        break;
-      }
+  // Seed: the bottommost yellow pixel on the right half of the image (closest to the vehicle,
+  // on the right lane).
+  const cv::Point * seed = nullptr;
+  for (const auto & p : yellow_points) {
+    if (p.x < origin.x) {
       continue;
     }
-    found_any = true;
-
-    // Refine to the exact nearest yellow column within the qualifying window, so a wide window
-    // never reports a coarser radius than what is actually there.
-    int refined_col = found_col + kWindowRadiusSpan - 1;
-    for (int col = found_col; col < found_col + kWindowRadiusSpan; ++col) {
-      if (box_sum(integral, row0, col, row1, col + 1) > 0) {
-        refined_col = col;
-        break;
-      }
+    if (!seed || p.y > seed->y ||
+        (p.y == seed->y && std::abs(p.x - origin.x) < std::abs(seed->x - origin.x))) {
+      seed = &p;
     }
-
-    const double theta = kAlpha + (kBeta - kAlpha) * row / (theta_samples - 1);
-    result.polar_points.emplace_back(refined_col, row);
-    result.polar_boxes.emplace_back(found_col, row0, kWindowRadiusSpan, row1 - row0);
-    result.points.emplace_back(
-      static_cast<int>(std::lround(origin.x + refined_col * std::cos(theta))),
-      static_cast<int>(std::lround(origin.y - refined_col * std::sin(theta))));
+  }
+  if (!seed) {
+    return chain;
   }
 
-  return result;
+  std::vector<cv::Point> pool = yellow_points;
+  cv::Point current = *seed;
+  // Direction is tracked in "flipped-y" terms (dy = current.y - candidate.y), so that (0, 1)
+  // means straight up the image, i.e. toward the horizon/forward, matching how a lane naturally
+  // extends away from the vehicle.
+  cv::Point2d direction(0.0, 1.0);
+
+  chain.push_back(current);
+  pool.erase(std::remove(pool.begin(), pool.end(), current), pool.end());
+
+  for (int step = 0; step < kMaxChainSteps && current.y > kTopRowMargin; ++step) {
+    // Split the pool into pixels within kChainStepRadius of the current point ("passed the
+    // distance test") and everything else. Every pixel that passed the distance test is
+    // consumed this step -- win or lose -- so a pixel the walk swept past but didn't choose can
+    // never be picked up again later and pull the chain backward.
+    std::vector<cv::Point> distance_passed;
+    std::vector<cv::Point> remaining_pool;
+    distance_passed.reserve(pool.size());
+    remaining_pool.reserve(pool.size());
+    for (const auto & p : pool) {
+      const double dx = p.x - current.x;
+      const double dy = current.y - p.y;
+      if (dx * dx + dy * dy < kChainStepRadius * kChainStepRadius) {
+        distance_passed.push_back(p);
+      } else {
+        remaining_pool.push_back(p);
+      }
+    }
+    pool = std::move(remaining_pool);
+
+    // Among those, keep only pixels within +/-90 degrees of the current direction (non-negative
+    // projection onto it) -- the chain never doubles back on itself.
+    std::vector<cv::Point> candidates;
+    candidates.reserve(distance_passed.size());
+    for (const auto & p : distance_passed) {
+      const double dx = p.x - current.x;
+      const double dy = current.y - p.y;
+      if (dx * direction.x + dy * direction.y >= 0.0) {
+        candidates.push_back(p);
+      }
+    }
+    if (candidates.empty()) {
+      break;
+    }
+
+    // Rank candidates by how closely aligned they are with the current direction (smallest
+    // angle first, via the signed sine from the cross product -- valid since candidates are
+    // already restricted to +/-90 degrees), then by distance from the current point, farthest
+    // first.
+    std::sort(
+      candidates.begin(), candidates.end(), [&](const cv::Point & a, const cv::Point & b) {
+        const double adx = a.x - current.x, ady = current.y - a.y;
+        const double bdx = b.x - current.x, bdy = current.y - b.y;
+        const double a_dist = std::hypot(adx, ady);
+        const double b_dist = std::hypot(bdx, bdy);
+        // |sin(a)| < |sin(b)|  <=>  |cross_a| / a_dist < |cross_b| / b_dist  <=>
+        // |cross_a| * b_dist < |cross_b| * a_dist (dir_norm cancels; distances are positive).
+        const double a_cross = direction.x * ady - direction.y * adx;
+        const double b_cross = direction.x * bdy - direction.y * bdx;
+        const double lhs = a_cross * b_dist;
+        const double rhs = b_cross * a_dist;
+        if (lhs != rhs) {
+          return lhs > rhs;
+        }
+        return a_dist > b_dist;
+      });
+
+    const cv::Point next = candidates.front();
+    direction = cv::Point2d(next.x - current.x, current.y - next.y);
+    current = next;
+    chain.push_back(current);
+  }
+
+  return chain;
 }
 
 LaneDetection::LaneFitResult LaneDetection::fit_lane(
@@ -228,32 +250,70 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
     return result;
   }
 
-  const cv::Vec4d fit = fit_cubic(points);
+  // Arc length s along the chain, from the near (vehicle-adjacent) point at s=0 outward. s is
+  // monotonic by construction -- walk_lane_chain only ever extends within +/-90 degrees of the
+  // current heading, never backward -- so unlike y, it stays a valid independent variable through
+  // a sharp turn where many x (or y) values repeat.
+  const int n = static_cast<int>(points.size());
+  std::vector<double> s(n), xs(n), ys(n);
+  s[0] = 0.0;
+  xs[0] = points[0].x;
+  ys[0] = points[0].y;
+  for (int i = 1; i < n; ++i) {
+    s[i] = s[i - 1] + cv::norm(points[i] - points[i - 1]);
+    xs[i] = points[i].x;
+    ys[i] = points[i].y;
+  }
+  const double s_far = s.back();
 
-  // Sample the fitted curve across the y range the points actually span, for drawing.
-  const auto minmax_y = std::minmax_element(
-    points.begin(), points.end(),
-    [](const cv::Point & a, const cv::Point & b) { return a.y < b.y; });
-  const double y_near = minmax_y.second->y;  // closest to the vehicle
-  const double y_far = minmax_y.first->y;    // farthest point found
+  // Weight points by distance from the far end (mirrors the old fit's row-based weighting:
+  // points near the vehicle pull the fit harder than far-field ones). The +1 keeps the farthest
+  // point's weight off exactly zero.
+  std::vector<double> weight(n);
+  for (int i = 0; i < n; ++i) weight[i] = (s_far - s[i]) + 1.0;
+
+  const cv::Vec4d fit_x = fit_cubic(s, xs, weight);
+  const cv::Vec4d fit_y = fit_cubic(s, ys, weight);
+
+  // Sample the fitted curve across the arc length the points actually span, for drawing.
   result.curve_points.reserve(kCurveSamples);
   for (int i = 0; i < kCurveSamples; ++i) {
-    const double y = y_near + (y_far - y_near) * i / (kCurveSamples - 1);
+    const double si = s_far * i / (kCurveSamples - 1);
     result.curve_points.emplace_back(
-      static_cast<int>(std::lround(eval_cubic(fit, y))), static_cast<int>(std::lround(y)));
+      static_cast<int>(std::lround(eval_cubic(fit_x, si))),
+      static_cast<int>(std::lround(eval_cubic(fit_y, si))));
   }
 
-  // Curvature and heading, evaluated at the vehicle's row.
-  const double y_eval = origin.y;
-  const double slope = eval_cubic_first_derivative(fit, y_eval);
-  const double second_derivative = eval_cubic_second_derivative(fit, y_eval);
+  // Curvature and heading, evaluated at s=0 (the closest point the chain actually reached)
+  // rather than the vehicle's exact row. With dashed lane markings especially, a gap can leave no
+  // detected pixel anywhere near the vehicle's row on a given frame; evaluating past s=0 would
+  // extrapolate the cubics past the domain they were fit to, and a little unwarranted
+  // extrapolation swings a derivative far more than it would a position.
+  const double dxds = eval_cubic_first_derivative(fit_x, 0.0);
+  const double dyds = eval_cubic_first_derivative(fit_y, 0.0);
+  const double d2xds2 = eval_cubic_second_derivative(fit_x, 0.0);
+  const double d2yds2 = eval_cubic_second_derivative(fit_y, 0.0);
   result.curvature_radius_px =
-    std::pow(1.0 + slope * slope, 1.5) /
-    std::max(std::abs(second_derivative), kMinSecondDerivative);
-  result.steering_angle_deg = std::atan(slope) * 180.0 / CV_PI;
+    std::pow(dxds * dxds + dyds * dyds, 1.5) /
+    std::max(std::abs(dxds * d2yds2 - dyds * d2xds2), kMinCurvatureDenominator);
+  // Heading relative to straight ahead (up the image, i.e. -y). atan2 stays well-defined even
+  // when the tangent is running flat (dyds ~ 0, a 90-degree turn), unlike atan(dx/dy) on a
+  // single-valued-in-y fit, which blows up right where a turn gets sharp.
+  result.steering_angle_deg = -std::atan2(dxds, -dyds) * 180.0 / CV_PI;
 
+  // Offset stays anchored to the vehicle's actual row (origin.y): the Stanley controller
+  // downstream expects cross-track error at the vehicle, not at s=0. Since y is no longer the fit
+  // parameter, find it by linearly extrapolating from the near tangent -- a position lookup is
+  // far less sensitive to that extrapolation than a derivative is. If the near end is running
+  // ~horizontal (mid-turn), that row can't be reached this way, so fall back to the near point's
+  // x directly.
+  double lane_x_at_vehicle = xs[0];
+  if (std::abs(dyds) > kMinNearTangentDy) {
+    const double s_at_origin = (origin.y - ys[0]) / dyds;
+    lane_x_at_vehicle = eval_cubic(fit_x, s_at_origin);
+  }
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
-  result.offset_m = (eval_cubic(fit, y_eval) - origin.x) * meters_per_pixel;
+  result.offset_m = (lane_x_at_vehicle - origin.x) * meters_per_pixel - 0.5;
 
   result.valid = true;
   return result;
@@ -266,8 +326,13 @@ cv::Mat LaneDetection::make_thumbnail(const cv::Mat & image, const std::string &
     cv::cvtColor(image, bgr, cv::COLOR_GRAY2BGR);
   }
 
+  // Fix the width and derive height from the source aspect ratio, so panels with a taller BEV
+  // (kBevHeightScale != 1) actually show up taller instead of always resizing to kThumbHeight.
+  const int thumb_height = static_cast<int>(
+    std::lround(static_cast<double>(kThumbWidth) * image.rows / image.cols));
+
   cv::Mat thumb;
-  cv::resize(bgr, thumb, cv::Size(kThumbWidth, kThumbHeight));
+  cv::resize(bgr, thumb, cv::Size(kThumbWidth, thumb_height));
   cv::rectangle(thumb, cv::Point(0, 0), cv::Point(kThumbWidth, 24), cv::Scalar(0, 0, 0), -1);
   cv::putText(
     thumb, label, cv::Point(6, 17), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
@@ -283,10 +348,21 @@ cv::Mat LaneDetection::build_dashboard(
     thumbs.push_back(make_thumbnail(image, label));
   }
 
-  cv::Mat row1, row2, dashboard;
-  cv::hconcat(std::vector<cv::Mat>(thumbs.begin(), thumbs.begin() + 3), row1);
-  cv::hconcat(std::vector<cv::Mat>(thumbs.begin() + 3, thumbs.begin() + 6), row2);
-  cv::vconcat(row1, row2, dashboard);
+  // hconcat requires matching row counts, so letterbox every thumbnail up to the tallest one
+  // (typically the BEV panel) before concatenating.
+  const int max_height = std::max_element(
+                            thumbs.begin(), thumbs.end(),
+                            [](const cv::Mat & a, const cv::Mat & b) { return a.rows < b.rows; })
+                            ->rows;
+  for (auto & thumb : thumbs) {
+    if (thumb.rows < max_height) {
+      cv::copyMakeBorder(
+        thumb, thumb, 0, max_height - thumb.rows, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
+    }
+  }
+
+  cv::Mat dashboard;
+  cv::hconcat(thumbs, dashboard);
   return dashboard;
 }
 
@@ -324,10 +400,13 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   masked_view.setTo(cv::Scalar(0, 255, 0), mask);
 
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0);
-  const PolarSearchResult search = polar_search(mask, origin);
+
+  std::vector<cv::Point> yellow_points;
+  cv::findNonZero(mask, yellow_points);
+  const std::vector<cv::Point> chain = walk_lane_chain(yellow_points, origin);
 
   // Fall back to the previous frame's lane when nothing is found this frame
-  std::vector<cv::Point> points = search.points;
+  std::vector<cv::Point> points = chain;
   if (points.empty()) {
     points = prev_points_;
   } else {
@@ -336,33 +415,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   const LaneFitResult fit = fit_lane(points, origin, warped.cols);
 
-  // Panel 3: the raw polar-remapped mask.
-  cv::Mat polar_view;
-  cv::cvtColor(search.polar_image, polar_view, cv::COLOR_GRAY2BGR);
-
-  // Panel 4: the polar mask annotated with the sliding windows and refined hits.
-  cv::Mat polar_search_view = polar_view.clone();
-  for (const auto & box : search.polar_boxes) {
-    cv::rectangle(polar_search_view, box, cv::Scalar(255, 255, 255), 1);
-  }
-  for (const auto & p : search.polar_points) {
-    cv::circle(polar_search_view, p, 2, cv::Scalar(0, 255, 0), -1);
-  }
-
-  // Panel 5: the fitted cubic polynomial back in BEV coordinates.
-  cv::Mat bev_curve_view;
-  cv::cvtColor(mask, bev_curve_view, cv::COLOR_GRAY2BGR);
-  cv::circle(
-    bev_curve_view, cv::Point(static_cast<int>(origin.x), static_cast<int>(origin.y)), 5,
-    cv::Scalar(0, 0, 255), -1);
-  for (const auto & p : points) {
-    cv::circle(bev_curve_view, p, 3, cv::Scalar(0, 255, 0), -1);
-  }
-  if (fit.valid) {
-    cv::polylines(bev_curve_view, fit.curve_points, false, cv::Scalar(255, 0, 0), 2);
-  }
-
-  // Panel 6: the fitted curve unwarped back onto the original frame, with the fit stats.
+  // Panel 3: the fitted curve unwarped back onto the original frame, with the fit stats.
   cv::Mat result = frame.clone();
   if (fit.valid) {
     std::vector<cv::Point2f> bev_points;
@@ -370,7 +423,9 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     for (const auto & p : fit.curve_points) bev_points.emplace_back(p);
 
     std::vector<cv::Point2f> original_points;
-    cv::perspectiveTransform(bev_points, original_points, build_transform(height, width).inv());
+    cv::perspectiveTransform(
+      bev_points, original_points,
+      build_transform(height, width, warped.rows, warped.cols).inv());
 
     std::vector<cv::Point> original_points_i;
     original_points_i.reserve(original_points.size());
@@ -423,9 +478,6 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   const cv::Mat dashboard = build_dashboard({
     {"Original", original_view},
     {"BEV Yellow Mask", masked_view},
-    {"Polar Coordinates", polar_view},
-    {"Closest Yellow Box", polar_search_view},
-    {"Polynomial (BEV)", bev_curve_view},
     {"Result", result}});
 
   cv::imshow("Dashboard", dashboard);
