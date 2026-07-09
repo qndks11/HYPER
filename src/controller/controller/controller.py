@@ -53,7 +53,10 @@ class LaneFollower(Node):
 
         # 속도 관련
         self.cruise = self.declare_parameter('cruise_speed', 0.3).value
-        self.min_speed = self.declare_parameter('min_speed', 0.5).value
+        # min_speed는 급커브에서의 속도 하한선이므로 cruise_speed보다 낮아야 한다.
+        # (이전 기본값 0.5는 cruise_speed=0.3보다 커서 speed_for_curve()의 커브 감속이 항상
+        # 무시되고 속도가 0.5로 고정되는 버그였음)
+        self.min_speed = self.declare_parameter('min_speed', 0.1).value
         self.accel = self.declare_parameter('accel_limit', 1.0).value
         self.decel = self.declare_parameter('decel_limit', 2.0).value
         self.curve_slow = self.declare_parameter('curve_slow_k', 0.5).value
@@ -62,9 +65,13 @@ class LaneFollower(Node):
         self.k_stanley = self.declare_parameter('stanley_k', 0.5).value
         self.v_soft = self.declare_parameter('stanley_v_min', 0.3).value
 
-        # 부호 보정
-        self.sign_off = self.declare_parameter('lane_offset_sign', 0.5).value
-        self.sign_head = self.declare_parameter('lane_heading_sign', 0.5).value
+        # 부호 보정 (±1.0 이어야 함. lane_detection.cpp의 우측 차선 기준 offset/heading
+        # 부호 규약과 vehicle_controller.cpp의 "양수 조향각 = 좌회전" 규약을 맞추기 위한 값.
+        # 이전 기본값 0.5는 부호도 아니고 이득도 아닌 값이라 조향이 절반 세기로 잘못된
+        # 방향에 걸리는 버그였음. 실차/시뮬레이션에서 차량이 차선 중앙으로 수렴하지 않고
+        # 반대로 벗어나면 lane_offset_sign을 -1.0으로 뒤집어 볼 것)
+        self.sign_off = self.declare_parameter('lane_offset_sign', -1.0).value
+        self.sign_head = self.declare_parameter('lane_heading_sign', 1.0).value
 
         # 입력 타임아웃
         self.timeout = self.declare_parameter('input_timeout', 0.3).value
