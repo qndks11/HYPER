@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <sdf version="1.8">
   <model name="cantilevered_light">
-    <static>false</static>
+    <static>true</static>
     
     <link name="base">
       <gravity>false</gravity>

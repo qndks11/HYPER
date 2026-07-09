@@ -1,0 +1,28 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/bean1120/bumperbot/install/bumperbot_planning/include/**",
+        "/home/bean1120/bumperbot/install/bumperbot_msgs/include/**",
+        "/home/bean1120/bumperbot/install/bumperbot_motion/include/**",
+        "/home/bean1120/bumperbot/install/bumperbot_firmware/include/**",
+        "/home/bean1120/bumperbot/install/bumperbot_controller/include/**",
+        "/home/bean1120/turtle_ws/install/turtlebot3_gazebo/include/**",
+        "/home/bean1120/turtle_ws/install/turtlebot3_fake_node/include/**",
+        "/opt/ros/humble/include/**",
+        "/home/bean1120/auto/src/auto_vehicle/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ros2",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++17"
+    }
+  ],
+  "version": 4
+}
