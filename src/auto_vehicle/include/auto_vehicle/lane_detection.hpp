@@ -84,18 +84,20 @@ private:
     const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const;
 
   /**
-   * @brief Fits parametric cubics x(s) and y(s), both against arc length s along the walked lane
-   * chain, by least squares, and derives the curvature radius, heading angle, and lateral offset
-   * at the chain's near point.
+   * @brief Fits a cubic Bezier curve to the walked lane chain by least squares, and derives the
+   * curvature radius, heading angle, and lateral offset at the chain's near point.
    *
-   * @details Unlike a per-point interpolating fit, a global least-squares polynomial averages
-   * out point-to-point noise instead of passing through every point exactly, so the fitted curve
-   * is steadier frame to frame. Parameterizing by arc length rather than fitting x = f(y)
-   * directly means the fit stays well-defined -- and curvature/heading stay numerically stable --
-   * through a sharp or even 90-degree turn, where x = f(y) would stop being single-valued.
-   * Offset is read at the near point (s=0) rather than extrapolated to the vehicle's row, since
-   * the camera sits back from the front wheels and the gap between them isn't safe to extrapolate
-   * across.
+   * @details The curve's endpoints are pinned exactly to the chain's first and last points; only
+   * the two interior control points are fit, one least-squares solve per axis (x and y) against
+   * the Bezier parameter t = s / s_far, where s is arc length along the chain. Unlike a
+   * per-point interpolating fit, this averages out point-to-point noise instead of passing
+   * through every point exactly, so the fitted curve is steadier frame to frame. Parameterizing
+   * by arc length rather than fitting x = f(y) directly means the fit stays well-defined -- and
+   * curvature/heading stay numerically stable -- through a sharp or even 90-degree turn, where
+   * x = f(y) would stop being single-valued. Offset is read at the near point (t=0, which is
+   * pinned exactly to the chain's first point) rather than extrapolated to the vehicle's row,
+   * since the camera sits back from the front wheels and the gap between them isn't safe to
+   * extrapolate across.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the chain was anchored to.

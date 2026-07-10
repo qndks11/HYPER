@@ -26,7 +26,9 @@ constexpr int kMaxChainSteps = 50;
 // the horizon are unreliable and there's nowhere further to walk to anyway.
 constexpr double kTopRowMargin = 20.0;
 
-constexpr int kMinLanePoints = 6;   // a few points of slack past the 4 a cubic needs exactly
+// A few points of slack past the 2 interior points each axis's control-point fit needs exactly
+// (the endpoints are pinned, not fit, so they don't count).
+constexpr int kMinLanePoints = 6;
 constexpr int kCurveSamples = 40;   // density of the drawn/unwarped curve, not the fit itself
 constexpr double kMinCurvatureDenominator = 1e-6;
 
@@ -40,45 +42,53 @@ constexpr int kWindowHeight = 300;
 // down the road the BEV view looks. Width is left unscaled.
 constexpr double kBevHeightScale = 1.4;
 
-// Fits v = a*t^3 + b*t^2 + c*t + d to the given (t, v) pairs by weighted least squares. Used
-// twice per lane fit -- once for x(s), once for y(s), both against the same arc-length
-// parameter t=s and weight -- so it takes t/v/weight as plain vectors rather than cv::Points.
-cv::Vec4d fit_cubic(
+// Fits the two free control points (P1, P2) of a cubic Bezier curve
+// B(t) = (1-t)^3*p0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*p3 to the given (t, v) pairs by
+// weighted least squares, with the endpoints p0 and p3 held fixed at the chain's first and last
+// points. Used twice per lane fit -- once for x, once for y, both against the same t and weight
+// -- so it takes t/v/weight as plain vectors rather than cv::Points, and p0/p3 as plain scalars.
+cv::Vec2d fit_bezier_control_points(
   const std::vector<double> & t, const std::vector<double> & v,
-  const std::vector<double> & weight)
+  const std::vector<double> & weight, double p0, double p3)
 {
   const int n = static_cast<int>(t.size());
-  cv::Mat A(n, 4, CV_64F);
+  cv::Mat A(n, 2, CV_64F);
   cv::Mat b(n, 1, CV_64F);
 
   for (int i = 0; i < n; ++i) {
     const double w = weight[i];
-    A.at<double>(i, 0) = w * t[i] * t[i] * t[i];
-    A.at<double>(i, 1) = w * t[i] * t[i];
-    A.at<double>(i, 2) = w * t[i];
-    A.at<double>(i, 3) = w;
-    b.at<double>(i, 0) = w * v[i];
+    const double u = 1.0 - t[i];
+    const double basis1 = 3.0 * u * u * t[i];  // P1's coefficient
+    const double basis2 = 3.0 * u * t[i] * t[i];  // P2's coefficient
+    A.at<double>(i, 0) = w * basis1;
+    A.at<double>(i, 1) = w * basis2;
+    // Subtract the fixed endpoints' contribution so the least squares only has to explain the
+    // part of v that P1 and P2 are actually responsible for.
+    const double endpoints = u * u * u * p0 + t[i] * t[i] * t[i] * p3;
+    b.at<double>(i, 0) = w * (v[i] - endpoints);
   }
 
   cv::Mat coeffs;
   cv::solve(A, b, coeffs, cv::DECOMP_SVD);
-  return cv::Vec4d(
-    coeffs.at<double>(0), coeffs.at<double>(1), coeffs.at<double>(2), coeffs.at<double>(3));
+  return cv::Vec2d(coeffs.at<double>(0), coeffs.at<double>(1));
 }
 
-double eval_cubic(const cv::Vec4d & fit, double t)
+double eval_bezier(double p0, double p1, double p2, double p3, double t)
 {
-  return fit[0] * t * t * t + fit[1] * t * t + fit[2] * t + fit[3];
+  const double u = 1.0 - t;
+  return u * u * u * p0 + 3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t * p3;
 }
 
-double eval_cubic_first_derivative(const cv::Vec4d & fit, double t)
+double eval_bezier_first_derivative(double p0, double p1, double p2, double p3, double t)
 {
-  return 3.0 * fit[0] * t * t + 2.0 * fit[1] * t + fit[2];
+  const double u = 1.0 - t;
+  return 3.0 * u * u * (p1 - p0) + 6.0 * u * t * (p2 - p1) + 3.0 * t * t * (p3 - p2);
 }
 
-double eval_cubic_second_derivative(const cv::Vec4d & fit, double t)
+double eval_bezier_second_derivative(double p0, double p1, double p2, double p3, double t)
 {
-  return 6.0 * fit[0] * t + 2.0 * fit[1];
+  const double u = 1.0 - t;
+  return 6.0 * u * (p2 - 2.0 * p1 + p0) + 6.0 * t * (p3 - 2.0 * p2 + p1);
 }
 
 }  // namespace
@@ -261,47 +271,74 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
     ys[i] = points[i].y;
   }
   const double s_far = s.back();
+  // s_far == 0 would make t undefined below; in practice this can't happen (each chain step
+  // moves at least kChainStepRadius), but this keeps a degenerate chain from producing NaNs.
+  if (s_far < kMinCurvatureDenominator) {
+    return result;
+  }
+
+  // Bezier parameter t = s / s_far, so the chain's near and far points land exactly on t=0 and
+  // t=1 -- the curve's fixed endpoints.
+  std::vector<double> t(n);
+  for (int i = 0; i < n; ++i) t[i] = s[i] / s_far;
 
   // Weight points by distance from the far end (mirrors the old fit's row-based weighting:
   // points near the vehicle pull the fit harder than far-field ones). The +1 keeps the farthest
-  // point's weight off exactly zero.
+  // point's weight off exactly zero. Only interior points are passed to the control-point fit --
+  // the endpoints contribute nothing to it, since the Bezier basis functions for P1 and P2
+  // vanish at t=0 and t=1.
   std::vector<double> weight(n);
   for (int i = 0; i < n; ++i) weight[i] = (s_far - s[i]) + 1.0;
+  const std::vector<double> t_interior(t.begin() + 1, t.end() - 1);
+  const std::vector<double> xs_interior(xs.begin() + 1, xs.end() - 1);
+  const std::vector<double> ys_interior(ys.begin() + 1, ys.end() - 1);
+  const std::vector<double> weight_interior(weight.begin() + 1, weight.end() - 1);
 
-  const cv::Vec4d fit_x = fit_cubic(s, xs, weight);
-  const cv::Vec4d fit_y = fit_cubic(s, ys, weight);
+  const cv::Vec2d control_x =
+    fit_bezier_control_points(t_interior, xs_interior, weight_interior, xs[0], xs[n - 1]);
+  const cv::Vec2d control_y =
+    fit_bezier_control_points(t_interior, ys_interior, weight_interior, ys[0], ys[n - 1]);
 
-  // Sample the fitted curve across the arc length the points actually span, for drawing.
+  // Sample the fitted curve across its full [0, 1] domain, for drawing.
   result.curve_points.reserve(kCurveSamples);
   for (int i = 0; i < kCurveSamples; ++i) {
-    const double si = s_far * i / (kCurveSamples - 1);
+    const double ti = static_cast<double>(i) / (kCurveSamples - 1);
     result.curve_points.emplace_back(
-      static_cast<int>(std::lround(eval_cubic(fit_x, si))),
-      static_cast<int>(std::lround(eval_cubic(fit_y, si))));
+      static_cast<int>(
+        std::lround(eval_bezier(xs[0], control_x[0], control_x[1], xs[n - 1], ti))),
+      static_cast<int>(
+        std::lround(eval_bezier(ys[0], control_y[0], control_y[1], ys[n - 1], ti))));
   }
 
-  // Curvature and heading, evaluated at s=0 (the closest point the chain actually reached)
-  // rather than the vehicle's exact row. With dashed lane markings especially, a gap can leave no
-  // detected pixel anywhere near the vehicle's row on a given frame; evaluating past s=0 would
-  // extrapolate the cubics past the domain they were fit to, and a little unwarranted
-  // extrapolation swings a derivative far more than it would a position.
-  const double dxds = eval_cubic_first_derivative(fit_x, 0.0);
-  const double dyds = eval_cubic_first_derivative(fit_y, 0.0);
-  const double d2xds2 = eval_cubic_second_derivative(fit_x, 0.0);
-  const double d2yds2 = eval_cubic_second_derivative(fit_y, 0.0);
+  // Curvature and heading, evaluated at t=0 (the closest point the chain actually reached, since
+  // the curve is pinned to it exactly) rather than the vehicle's exact row. With dashed lane
+  // markings especially, a gap can leave no detected pixel anywhere near the vehicle's row on a
+  // given frame; evaluating past t=0 would extrapolate past the curve's start, and a little
+  // unwarranted extrapolation swings a derivative far more than it would a position. The
+  // curvature formula below is parameterization-invariant, so using the raw t-derivatives here
+  // (rather than rescaling them to arc length) still gives the true geometric curvature.
+  const double dxdt =
+    eval_bezier_first_derivative(xs[0], control_x[0], control_x[1], xs[n - 1], 0.0);
+  const double dydt =
+    eval_bezier_first_derivative(ys[0], control_y[0], control_y[1], ys[n - 1], 0.0);
+  const double d2xdt2 =
+    eval_bezier_second_derivative(xs[0], control_x[0], control_x[1], xs[n - 1], 0.0);
+  const double d2ydt2 =
+    eval_bezier_second_derivative(ys[0], control_y[0], control_y[1], ys[n - 1], 0.0);
   result.curvature_radius_px =
-    std::pow(dxds * dxds + dyds * dyds, 1.5) /
-    std::max(std::abs(dxds * d2yds2 - dyds * d2xds2), kMinCurvatureDenominator);
+    std::pow(dxdt * dxdt + dydt * dydt, 1.5) /
+    std::max(std::abs(dxdt * d2ydt2 - dydt * d2xdt2), kMinCurvatureDenominator);
   // Heading relative to straight ahead (up the image, i.e. -y). atan2 stays well-defined even
-  // when the tangent is running flat (dyds ~ 0, a 90-degree turn), unlike atan(dx/dy) on a
+  // when the tangent is running flat (dydt ~ 0, a 90-degree turn), unlike atan(dx/dy) on a
   // single-valued-in-y fit, which blows up right where a turn gets sharp.
-  result.steering_angle_deg = -std::atan2(dxds, -dyds) * 180.0 / CV_PI;
+  result.steering_angle_deg = -std::atan2(dxdt, -dydt) * 180.0 / CV_PI;
 
-  // Offset is taken at the chain's near point (s=0) rather than extrapolated out to the
-  // vehicle's actual row (origin.y). The camera sits back from the front wheels now, so the
-  // visible lane can start well short of the vehicle row; extrapolating that gap with the near
-  // tangent would swing the offset far more than the position error it's meant to fix,
-  // especially mid-turn. The near point is the closest actual observation, so it's used as-is.
+  // Offset is taken at the chain's near point (t=0, pinned exactly to points[0]) rather than
+  // extrapolated out to the vehicle's actual row (origin.y). The camera sits back from the front
+  // wheels now, so the visible lane can start well short of the vehicle row; extrapolating that
+  // gap with the near tangent would swing the offset far more than the position error it's meant
+  // to fix, especially mid-turn. The near point is the closest actual observation, so it's used
+  // as-is.
   const double lane_x_at_vehicle = xs[0];
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
   result.offset_m = (lane_x_at_vehicle - origin.x) * meters_per_pixel - 0.5;
