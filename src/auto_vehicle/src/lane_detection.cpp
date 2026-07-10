@@ -26,11 +26,16 @@ constexpr int kMaxChainSteps = 50;
 // the horizon are unreliable and there's nowhere further to walk to anyway.
 constexpr double kTopRowMargin = 20.0;
 
-// A few points of slack past the 2 interior points each axis's control-point fit needs exactly
-// (the endpoints are pinned, not fit, so they don't count).
+// A few points of slack past the minimum a stable tangent-scale fit needs: at least
+// kTangentLookahead+1 points to estimate each end's tangent direction, and at least one interior
+// point to fit the two shared scalars against.
 constexpr int kMinLanePoints = 6;
 constexpr int kCurveSamples = 40;   // density of the drawn/unwarped curve, not the fit itself
 constexpr double kMinCurvatureDenominator = 1e-6;
+// How many points in from each end of the chain to look when estimating that end's tangent
+// direction, so a single noisy pixel doesn't dominate the direction the fitted curve gets locked
+// to (see fit_lane).
+constexpr int kTangentLookahead = 3;
 
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
@@ -42,35 +47,49 @@ constexpr int kWindowHeight = 300;
 // down the road the BEV view looks. Width is left unscaled.
 constexpr double kBevHeightScale = 1.4;
 
-// Fits the two free control points (P1, P2) of a cubic Bezier curve
-// B(t) = (1-t)^3*p0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*p3 to the given (t, v) pairs by
-// weighted least squares, with the endpoints p0 and p3 held fixed at the chain's first and last
-// points. Used twice per lane fit -- once for x, once for y, both against the same t and weight
-// -- so it takes t/v/weight as plain vectors rather than cv::Points, and p0/p3 as plain scalars.
-cv::Vec2d fit_bezier_control_points(
-  const std::vector<double> & t, const std::vector<double> & v,
-  const std::vector<double> & weight, double p0, double p3)
+// Fits the two tangent-scale unknowns (k1, k2) of a cubic Bezier curve whose control points are
+// constrained to lie along the chain's own tangent directions at each end --
+// P1 = p0 + k1*dir0, P2 = p3 - k2*dir_end -- rather than left free in the plane. Locking each
+// control point's *direction* to the observed chain tangent keeps the curve's shape tied to what
+// was actually seen: B'(0) = 3*k1*dir0 and B'(1) = 3*k2*dir_end always point along dir0/dir_end
+// for any k1, k2 > 0, so the fit can no longer swing the curve's start/end heading off in some
+// direction the data didn't suggest -- which is what let a fully free control-point fit produce
+// unrealistically sharp curvature on a noisy chain. k1 and k2 (returned clamped to >= 0, since a
+// negative scale would fold the curve back on itself) are still found by weighted least squares,
+// with the x and y residual of every interior chain point stacked into one system, since a
+// single pair of scalars is shared between both axes.
+cv::Vec2d fit_bezier_tangent_scales(
+  const std::vector<double> & t, const std::vector<cv::Point2d> & pts,
+  const std::vector<double> & weight, const cv::Point2d & p0, const cv::Point2d & p3,
+  const cv::Point2d & dir0, const cv::Point2d & dir_end)
 {
   const int n = static_cast<int>(t.size());
-  cv::Mat A(n, 2, CV_64F);
-  cv::Mat b(n, 1, CV_64F);
+  cv::Mat A(2 * n, 2, CV_64F);
+  cv::Mat b(2 * n, 1, CV_64F);
 
   for (int i = 0; i < n; ++i) {
     const double w = weight[i];
     const double u = 1.0 - t[i];
-    const double basis1 = 3.0 * u * u * t[i];  // P1's coefficient
-    const double basis2 = 3.0 * u * t[i] * t[i];  // P2's coefficient
-    A.at<double>(i, 0) = w * basis1;
-    A.at<double>(i, 1) = w * basis2;
-    // Subtract the fixed endpoints' contribution so the least squares only has to explain the
-    // part of v that P1 and P2 are actually responsible for.
-    const double endpoints = u * u * u * p0 + t[i] * t[i] * t[i] * p3;
-    b.at<double>(i, 0) = w * (v[i] - endpoints);
+    const double basis1 = 3.0 * u * u * t[i];       // k1's coefficient
+    const double basis2 = 3.0 * u * t[i] * t[i];     // k2's coefficient (subtracted, see below)
+    // p0 and p3's Bezier weights collapse to the cubic Hermite blend functions once P1 and P2 are
+    // expressed via dir0/dir_end instead of standing on their own.
+    const double blend0 = u * u * (1.0 + 2.0 * t[i]);
+    const double blend3 = t[i] * t[i] * (3.0 - 2.0 * t[i]);
+    const cv::Point2d residual = pts[i] - (blend0 * p0 + blend3 * p3);
+
+    const int row_x = 2 * i, row_y = 2 * i + 1;
+    A.at<double>(row_x, 0) = w * basis1 * dir0.x;
+    A.at<double>(row_x, 1) = -w * basis2 * dir_end.x;
+    A.at<double>(row_y, 0) = w * basis1 * dir0.y;
+    A.at<double>(row_y, 1) = -w * basis2 * dir_end.y;
+    b.at<double>(row_x, 0) = w * residual.x;
+    b.at<double>(row_y, 0) = w * residual.y;
   }
 
   cv::Mat coeffs;
   cv::solve(A, b, coeffs, cv::DECOMP_SVD);
-  return cv::Vec2d(coeffs.at<double>(0), coeffs.at<double>(1));
+  return cv::Vec2d(std::max(0.0, coeffs.at<double>(0)), std::max(0.0, coeffs.at<double>(1)));
 }
 
 double eval_bezier(double p0, double p1, double p2, double p3, double t)
@@ -282,32 +301,47 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   std::vector<double> t(n);
   for (int i = 0; i < n; ++i) t[i] = s[i] / s_far;
 
+  // Tangent directions at each end, estimated a few points in from the endpoint rather than from
+  // a single adjacent segment, so one noisy pixel doesn't dominate the direction the curve gets
+  // locked to. kTangentLookahead is clamped to n-1 so this stays valid for a chain right at
+  // kMinLanePoints.
+  const int lookahead = std::min(kTangentLookahead, n - 1);
+  const cv::Point2d dir0(
+    points[lookahead].x - points[0].x, points[lookahead].y - points[0].y);
+  const cv::Point2d dir_end(
+    points[n - 1].x - points[n - 1 - lookahead].x, points[n - 1].y - points[n - 1 - lookahead].y);
+  const double dir0_norm = cv::norm(dir0);
+  const double dir_end_norm = cv::norm(dir_end);
+  if (dir0_norm < kMinCurvatureDenominator || dir_end_norm < kMinCurvatureDenominator) {
+    return result;
+  }
+
   // Weight points by distance from the far end (mirrors the old fit's row-based weighting:
   // points near the vehicle pull the fit harder than far-field ones). The +1 keeps the farthest
-  // point's weight off exactly zero. Only interior points are passed to the control-point fit --
+  // point's weight off exactly zero. Only interior points are passed to the tangent-scale fit --
   // the endpoints contribute nothing to it, since the Bezier basis functions for P1 and P2
   // vanish at t=0 and t=1.
   std::vector<double> weight(n);
   for (int i = 0; i < n; ++i) weight[i] = (s_far - s[i]) + 1.0;
   const std::vector<double> t_interior(t.begin() + 1, t.end() - 1);
-  const std::vector<double> xs_interior(xs.begin() + 1, xs.end() - 1);
-  const std::vector<double> ys_interior(ys.begin() + 1, ys.end() - 1);
   const std::vector<double> weight_interior(weight.begin() + 1, weight.end() - 1);
+  std::vector<cv::Point2d> pts_interior(n - 2);
+  for (int i = 1; i < n - 1; ++i) pts_interior[i - 1] = cv::Point2d(xs[i], ys[i]);
 
-  const cv::Vec2d control_x =
-    fit_bezier_control_points(t_interior, xs_interior, weight_interior, xs[0], xs[n - 1]);
-  const cv::Vec2d control_y =
-    fit_bezier_control_points(t_interior, ys_interior, weight_interior, ys[0], ys[n - 1]);
+  const cv::Point2d p0(xs[0], ys[0]);
+  const cv::Point2d p3(xs[n - 1], ys[n - 1]);
+  const cv::Vec2d tangent_scales = fit_bezier_tangent_scales(
+    t_interior, pts_interior, weight_interior, p0, p3, dir0 / dir0_norm, dir_end / dir_end_norm);
+  const cv::Point2d p1 = p0 + tangent_scales[0] * (dir0 / dir0_norm);
+  const cv::Point2d p2 = p3 - tangent_scales[1] * (dir_end / dir_end_norm);
 
   // Sample the fitted curve across its full [0, 1] domain, for drawing.
   result.curve_points.reserve(kCurveSamples);
   for (int i = 0; i < kCurveSamples; ++i) {
     const double ti = static_cast<double>(i) / (kCurveSamples - 1);
     result.curve_points.emplace_back(
-      static_cast<int>(
-        std::lround(eval_bezier(xs[0], control_x[0], control_x[1], xs[n - 1], ti))),
-      static_cast<int>(
-        std::lround(eval_bezier(ys[0], control_y[0], control_y[1], ys[n - 1], ti))));
+      static_cast<int>(std::lround(eval_bezier(p0.x, p1.x, p2.x, p3.x, ti))),
+      static_cast<int>(std::lround(eval_bezier(p0.y, p1.y, p2.y, p3.y, ti))));
   }
 
   // Curvature and heading, evaluated at t=0 (the closest point the chain actually reached, since
@@ -317,14 +351,10 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // unwarranted extrapolation swings a derivative far more than it would a position. The
   // curvature formula below is parameterization-invariant, so using the raw t-derivatives here
   // (rather than rescaling them to arc length) still gives the true geometric curvature.
-  const double dxdt =
-    eval_bezier_first_derivative(xs[0], control_x[0], control_x[1], xs[n - 1], 0.0);
-  const double dydt =
-    eval_bezier_first_derivative(ys[0], control_y[0], control_y[1], ys[n - 1], 0.0);
-  const double d2xdt2 =
-    eval_bezier_second_derivative(xs[0], control_x[0], control_x[1], xs[n - 1], 0.0);
-  const double d2ydt2 =
-    eval_bezier_second_derivative(ys[0], control_y[0], control_y[1], ys[n - 1], 0.0);
+  const double dxdt = eval_bezier_first_derivative(p0.x, p1.x, p2.x, p3.x, 0.0);
+  const double dydt = eval_bezier_first_derivative(p0.y, p1.y, p2.y, p3.y, 0.0);
+  const double d2xdt2 = eval_bezier_second_derivative(p0.x, p1.x, p2.x, p3.x, 0.0);
+  const double d2ydt2 = eval_bezier_second_derivative(p0.y, p1.y, p2.y, p3.y, 0.0);
   result.curvature_radius_px =
     std::pow(dxdt * dxdt + dydt * dydt, 1.5) /
     std::max(std::abs(dxdt * d2ydt2 - dydt * d2xdt2), kMinCurvatureDenominator);

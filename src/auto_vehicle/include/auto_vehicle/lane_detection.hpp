@@ -87,17 +87,20 @@ private:
    * @brief Fits a cubic Bezier curve to the walked lane chain by least squares, and derives the
    * curvature radius, heading angle, and lateral offset at the chain's near point.
    *
-   * @details The curve's endpoints are pinned exactly to the chain's first and last points; only
-   * the two interior control points are fit, one least-squares solve per axis (x and y) against
-   * the Bezier parameter t = s / s_far, where s is arc length along the chain. Unlike a
-   * per-point interpolating fit, this averages out point-to-point noise instead of passing
-   * through every point exactly, so the fitted curve is steadier frame to frame. Parameterizing
-   * by arc length rather than fitting x = f(y) directly means the fit stays well-defined -- and
-   * curvature/heading stay numerically stable -- through a sharp or even 90-degree turn, where
-   * x = f(y) would stop being single-valued. Offset is read at the near point (t=0, which is
-   * pinned exactly to the chain's first point) rather than extrapolated to the vehicle's row,
-   * since the camera sits back from the front wheels and the gap between them isn't safe to
-   * extrapolate across.
+   * @details The curve's endpoints are pinned exactly to the chain's first and last points, and
+   * its control points are constrained to lie along the chain's own tangent directions at each
+   * end (estimated a few points in from the endpoint, not from a single adjacent segment) --
+   * only how far each control point sits along that fixed direction is fit, one least-squares
+   * solve shared across both axes (x and y), against the Bezier parameter t = s / s_far, where s
+   * is arc length along the chain. Locking the control points' directions this way keeps the
+   * curve's start/end heading tied to what the chain actually showed, rather than a fully free
+   * control-point fit that could swing the curve's shape toward whatever noisy far points pulled
+   * it, producing unrealistically sharp curvature. Parameterizing by arc length rather than
+   * fitting x = f(y) directly means the fit stays well-defined -- and curvature/heading stay
+   * numerically stable -- through a sharp or even 90-degree turn, where x = f(y) would stop being
+   * single-valued. Offset is read at the near point (t=0, which is pinned exactly to the chain's
+   * first point) rather than extrapolated to the vehicle's row, since the camera sits back from
+   * the front wheels and the gap between them isn't safe to extrapolate across.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the chain was anchored to.
