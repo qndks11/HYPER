@@ -98,11 +98,13 @@ private:
    * least squares formulation (as opposed to regressing x on y or y on x) has no axis it breaks
    * down along, so it stays well-conditioned for a lane running in any direction, including
    * near-horizontal. A straight-line model has no curvature to derive, so curvature_radius_px is
-   * always a large sentinel value. Offset is read at the anchor point itself rather than
-   * extrapolated to the vehicle's row, since the camera sits back from the front wheels and the
-   * gap between them isn't safe to extrapolate across; the constant term converting "distance
-   * from the tracked line to the vehicle" into "distance from lane center to the vehicle" flips
-   * sign depending on which of the two lane boundaries is being tracked.
+   * always a large sentinel value. Offset is extrapolated from the fitted line out to the
+   * vehicle's actual row (origin.y) rather than read at the anchor point: unlike the old curve
+   * fits, which were only valid within the span of points they were fit to, a straight line has
+   * the same direction everywhere, so walking it out to any row is exact rather than an
+   * approximation that degrades with distance. The constant term converting "distance from the
+   * tracked line to the vehicle" into "distance from lane center to the vehicle" flips sign
+   * depending on which of the two lane boundaries is being tracked.
    *
    * @param points The lane chain from walk_lane_chain() (possibly mirrored back from a left-lane
    * walk -- see image_callback), in BEV coordinates, near to far.
