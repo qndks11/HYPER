@@ -49,9 +49,9 @@ constexpr double kBevHeightScale = 1.35;
 
 // How far right (in degrees) the chain's start has to already be curving before the right lane
 // is judged about to sweep out of frame -- see is_right_turn().
-constexpr double kRightTurnAngleDeg = 30.0;
+constexpr double kRightTurnAngleDeg = 15.0;
 
-// A lane chain's start is judged to be curving right if the direction toward its 3rd point (c2)
+// A lane chain's start is judged to be curving right if the direction toward its last point (cl)
 // sits more than kRightTurnAngleDeg to the right of the direction toward its 2nd point (c1),
 // both measured from the chain's first point (c0) -- i.e. the chain has already swung right
 // between those two points, not just angled that way from the start. This looks at only the
@@ -59,11 +59,11 @@ constexpr double kRightTurnAngleDeg = 30.0;
 // possible, before the rest of the right lane has actually left the frame.
 bool is_right_turn(const std::vector<cv::Point> & chain)
 {
-  if (chain.size() < 3) {
+  if (chain.size() < 4) {
     return false;
   }
-  const cv::Point baseline = chain[1] - chain[0];  // c0 -> c1
-  const cv::Point test = chain[2] - chain[0];      // c0 -> c2
+  const cv::Point baseline = chain[3] - chain[0];  // c3 -> c0
+  const cv::Point test = chain[chain.size()-1] - chain[0];      // c[l-1] -> c0
   const double cross =
     static_cast<double>(baseline.x) * test.y - static_cast<double>(baseline.y) * test.x;
   const double dot =
@@ -156,7 +156,7 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
   // on the right lane).
   const cv::Point * seed = nullptr;
   for (const auto & p : yellow_points) {
-    if (p.x < origin.x) {
+    if (p.x < origin.x || p.y < 1.2 * kWindowHeight) {
       continue;
     }
     if (!seed || p.y > seed->y ||
@@ -399,10 +399,6 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
                     fit.valid ? 1.0 : 0.0};
   lane_center_publisher_->publish(lane_msg);
 
-  RCLCPP_INFO_THROTTLE(
-    get_logger(), *get_clock(), 2000,
-    "[/lane/center] offset=%.3f m, angle=%.2f deg, radius=%.1f px, valid=%s", fit.offset_m,
-    fit.steering_angle_deg, fit.curvature_radius_px, fit.valid ? "true" : "false");
 
   const cv::Scalar text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
@@ -414,11 +410,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   std::snprintf(angle_text, sizeof(angle_text), "Angle: %.2f deg", fit.steering_angle_deg);
   cv::putText(view, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
-  if (!fit.valid) {
-    cv::putText(
-      view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Lane not detected");
-  }
+  if (!fit.valid) cv::putText(view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   cv::imshow("Lane Detection", view);
   cv::waitKey(1);

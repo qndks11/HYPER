@@ -52,7 +52,7 @@ class LaneFollower(Node):
         self.steer_rate = self.declare_parameter('steer_rate', 1.0).value
 
         # 속도 관련
-        self.cruise = self.declare_parameter('cruise_speed', 6.0).value
+        self.cruise = self.declare_parameter('cruise_speed', 10.0).value
         # min_speed는 급커브에서의 속도 하한선이므로 cruise_speed보다 낮아야 한다.
         # (이전 기본값 0.5는 cruise_speed=0.3보다 커서 speed_for_curve()의 커브 감속이 항상
         # 무시되고 속도가 0.5로 고정되는 버그였음)
@@ -68,7 +68,7 @@ class LaneFollower(Node):
         self.curve_radius_ref = self.declare_parameter('curve_radius_ref_px', 300.0).value
 
         # Stanley 제어 게인
-        self.k_stanley = self.declare_parameter('stanley_k', 0.5).value
+        self.k_stanley = self.declare_parameter('stanley_k', 5.0).value
         self.v_soft = self.declare_parameter('stanley_v_min', 0.3).value
 
         # 부호 보정 (±1.0 이어야 함. lane_detection.cpp의 우측 차선 기준 offset/heading
