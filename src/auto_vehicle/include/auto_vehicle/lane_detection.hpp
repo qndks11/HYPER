@@ -84,29 +84,18 @@ private:
     const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const;
 
   /**
-   * @brief Removes points around a sharp kink in the chain, where the walk likely jumped onto a
-   * stray yellow pixel off the true lane.
-   *
-   * @details For each interior point, computes the turn angle between the segment entering it
-   * and the segment leaving it. Any point whose turn angle exceeds kSharpTurnAngleDeg (in either
-   * direction) is dropped along with kSharpTurnPruneRadius neighbors on each side, since a real
-   * kink corrupts the chain's heading in its immediate vicinity, not just at the single point.
-   *
-   * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
-   * @return The chain with sharp-kink neighborhoods removed, in the original order.
-   */
-  std::vector<cv::Point> prune_sharp_turns(const std::vector<cv::Point> & points) const;
-
-  /**
    * @brief Fits parametric cubics x(s) and y(s), both against arc length s along the walked lane
    * chain, by least squares, and derives the curvature radius, heading angle, and lateral offset
-   * at the vehicle's row.
+   * at the chain's near point.
    *
    * @details Unlike a per-point interpolating fit, a global least-squares polynomial averages
    * out point-to-point noise instead of passing through every point exactly, so the fitted curve
    * is steadier frame to frame. Parameterizing by arc length rather than fitting x = f(y)
    * directly means the fit stays well-defined -- and curvature/heading stay numerically stable --
    * through a sharp or even 90-degree turn, where x = f(y) would stop being single-valued.
+   * Offset is read at the near point (s=0) rather than extrapolated to the vehicle's row, since
+   * the camera sits back from the front wheels and the gap between them isn't safe to extrapolate
+   * across.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the chain was anchored to.

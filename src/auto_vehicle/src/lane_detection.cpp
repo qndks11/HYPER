@@ -29,10 +29,6 @@ constexpr double kTopRowMargin = 20.0;
 constexpr int kMinLanePoints = 6;   // a few points of slack past the 4 a cubic needs exactly
 constexpr int kCurveSamples = 40;   // density of the drawn/unwarped curve, not the fit itself
 constexpr double kMinCurvatureDenominator = 1e-6;
-// Floor on |dy/ds| at the chain's near end when inverting the tangent to locate the vehicle's
-// row (see fit_lane): below this the near end is running ~horizontal, so that row can't be
-// reached by extrapolating along the curve and the near point's x is used directly instead.
-constexpr double kMinNearTangentDy = 1e-6;
 
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
@@ -301,17 +297,12 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // single-valued-in-y fit, which blows up right where a turn gets sharp.
   result.steering_angle_deg = -std::atan2(dxds, -dyds) * 180.0 / CV_PI;
 
-  // Offset stays anchored to the vehicle's actual row (origin.y): the Stanley controller
-  // downstream expects cross-track error at the vehicle, not at s=0. Since y is no longer the fit
-  // parameter, find it by linearly extrapolating from the near tangent -- a position lookup is
-  // far less sensitive to that extrapolation than a derivative is. If the near end is running
-  // ~horizontal (mid-turn), that row can't be reached this way, so fall back to the near point's
-  // x directly.
-  double lane_x_at_vehicle = xs[0];
-  if (std::abs(dyds) > kMinNearTangentDy) {
-    const double s_at_origin = (origin.y - ys[0]) / dyds;
-    lane_x_at_vehicle = eval_cubic(fit_x, s_at_origin);
-  }
+  // Offset is taken at the chain's near point (s=0) rather than extrapolated out to the
+  // vehicle's actual row (origin.y). The camera sits back from the front wheels now, so the
+  // visible lane can start well short of the vehicle row; extrapolating that gap with the near
+  // tangent would swing the offset far more than the position error it's meant to fix,
+  // especially mid-turn. The near point is the closest actual observation, so it's used as-is.
+  const double lane_x_at_vehicle = xs[0];
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
   result.offset_m = (lane_x_at_vehicle - origin.x) * meters_per_pixel - 0.5;
 

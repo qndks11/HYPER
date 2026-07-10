@@ -19,6 +19,7 @@
   <xacro:arg name="camera_stick_size" default="0.2" />
   <xacro:arg name="camera_height" default="1.5" />
   <xacro:arg name="camera_pitch" default="0.1" />
+  <xacro:arg name="camera_setback" default="0.3" />
   <xacro:arg name="camera_fov" default="1.396263" />
   <xacro:arg name="camera_fps" default="30" />
   <xacro:arg name="image_width" default="640" />
@@ -44,6 +45,7 @@
   <xacro:property name="camera_stick_size" value="$(arg camera_stick_size)"/>
   <xacro:property name="camera_height" value="$(arg camera_height)"/>
   <xacro:property name="camera_pitch" value="$(arg camera_pitch)"/>
+  <xacro:property name="camera_setback" value="$(arg camera_setback)"/>
   <xacro:property name="camera_fov" value="$(arg camera_fov)"/>
   <xacro:property name="camera_fps" value="$(arg camera_fps)"/>
   <xacro:property name="image_width" value="$(arg image_width)"/>
@@ -414,7 +416,7 @@
   <!-- Camera Stick Joint -->
   <joint name="camera_stick_joint" type="fixed">
     <axis xyz="0 1 0" />
-    <origin xyz="${body_length/2 - camera_stick_size/2} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 0.0"/>
+    <origin xyz="${body_length/2 - camera_stick_size/2 - camera_setback} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 0.0"/>
     <parent link="body_link"/>
     <child link="camera_stick_link"/>
   </joint>
