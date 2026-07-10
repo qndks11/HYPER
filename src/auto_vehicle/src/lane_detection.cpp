@@ -47,6 +47,46 @@ constexpr int kWindowHeight = 300;
 // down the road the BEV view looks. Width is left unscaled.
 constexpr double kBevHeightScale = 1.4;
 
+// How far right (in degrees) the chain's start has to already be curving before the right lane
+// is judged about to sweep out of frame -- see is_right_turn().
+constexpr double kRightTurnAngleDeg = 30.0;
+
+// A lane chain's start is judged to be curving right if the direction toward its 3rd point (c2)
+// sits more than kRightTurnAngleDeg to the right of the direction toward its 2nd point (c1),
+// both measured from the chain's first point (c0) -- i.e. the chain has already swung right
+// between those two points, not just angled that way from the start. This looks at only the
+// chain's first three points -- right where the vehicle is -- so it catches the turn as early as
+// possible, before the rest of the right lane has actually left the frame.
+bool is_right_turn(const std::vector<cv::Point> & chain)
+{
+  if (chain.size() < 3) {
+    return false;
+  }
+  const cv::Point baseline = chain[1] - chain[0];  // c0 -> c1
+  const cv::Point test = chain[2] - chain[0];      // c0 -> c2
+  const double cross =
+    static_cast<double>(baseline.x) * test.y - static_cast<double>(baseline.y) * test.x;
+  const double dot =
+    static_cast<double>(baseline.x) * test.x + static_cast<double>(baseline.y) * test.y;
+  return std::atan2(cross, dot) * 180.0 / CV_PI > kRightTurnAngleDeg;
+}
+
+// Reflects every point's x coordinate about axis_x, leaving y unchanged; applying it twice with
+// the same axis returns the original points exactly. Used to walk the left lane with the exact
+// same seed and ranking logic that normally walks the right one: reflection reverses
+// orientation, so on the mirrored cloud, walk_lane_chain()'s right-half seed condition picks up
+// what were originally left-half pixels, and its candidate ranking's handedness comes out
+// reversed too -- exactly the two changes needed to walk the other lane, with no changes to
+// walk_lane_chain() itself.
+std::vector<cv::Point> mirror_points_x(const std::vector<cv::Point> & points, double axis_x)
+{
+  const int axis = static_cast<int>(std::lround(2.0 * axis_x));
+  std::vector<cv::Point> mirrored;
+  mirrored.reserve(points.size());
+  for (const auto & p : points) mirrored.emplace_back(axis - p.x, p.y);
+  return mirrored;
+}
+
 }  // namespace
 
 LaneDetection::LaneDetection() : Node{"lane_detection"}
@@ -205,7 +245,8 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
 }
 
 LaneDetection::LaneFitResult LaneDetection::fit_lane(
-  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const
+  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
+  bool tracking_left_lane) const
 {
   LaneFitResult result;
   if (static_cast<int>(points.size()) < kMinLanePoints) {
@@ -271,8 +312,15 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // vehicle's actual row (origin.y). The camera sits back from the front wheels, so the visible
   // lane can start well short of the vehicle row; extrapolating that gap isn't safe, especially
   // mid-turn. The near point is the closest actual observation, so it's used as-is.
+  //
+  // The chain tracks whichever lane boundary is currently visible -- normally the right one, but
+  // the left one when the right lane has swept out of frame in a turn (see image_callback) -- and
+  // since the two boundaries sit on opposite sides of lane center, the constant term converting
+  // "distance from the tracked line to the vehicle" into "distance from lane center to the
+  // vehicle" flips sign between them.
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
-  result.offset_m = (p0.x - origin.x) * meters_per_pixel - 0.5;
+  const double lane_center_bias = tracking_left_lane ? 0.5 : -0.5;
+  result.offset_m = (p0.x - origin.x) * meters_per_pixel + lane_center_bias;
 
   result.valid = true;
   return result;
@@ -302,19 +350,37 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   std::vector<cv::Point> yellow_points;
   cv::findNonZero(mask, yellow_points);
-  const std::vector<cv::Point> chain = walk_lane_chain(yellow_points, origin);
+  std::vector<cv::Point> chain = walk_lane_chain(yellow_points, origin);
+  bool tracking_left_lane = false;
 
-  // Fall back to the previous frame's lane when nothing is found this frame
+  // The right lane sweeps out of frame fast in a right turn, so fall back to the left lane
+  // boundary as soon as the right chain is either unusable or already curving sharply right at
+  // its start. Walking the left lane reuses walk_lane_chain() unmodified on a mirrored point
+  // cloud -- see mirror_points_x() -- so the seed and ranking both come out flipped to the left
+  // side for free.
+  if (static_cast<int>(chain.size()) < kMinLanePoints || is_right_turn(chain)) {
+    const std::vector<cv::Point> mirrored_yellow = mirror_points_x(yellow_points, origin.x);
+    const std::vector<cv::Point> mirrored_chain = walk_lane_chain(mirrored_yellow, origin);
+    if (!mirrored_chain.empty()) {
+      chain = mirror_points_x(mirrored_chain, origin.x);
+      tracking_left_lane = true;
+    }
+  }
+
+  // Fall back to the previous frame's lane (and which boundary it tracked) when nothing is found
+  // this frame.
   std::vector<cv::Point> points = chain;
   if (points.empty()) {
     points = prev_points_;
+    tracking_left_lane = prev_tracking_left_lane_;
   } else {
     prev_points_ = points;
+    prev_tracking_left_lane_ = tracking_left_lane;
   }
 
   for (const auto & p : points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
 
-  const LaneFitResult fit = fit_lane(points, origin, warped.cols);
+  const LaneFitResult fit = fit_lane(points, origin, warped.cols, tracking_left_lane);
 
   if (fit.valid) {
     cv::polylines(view, fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
