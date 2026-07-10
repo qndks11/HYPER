@@ -36,9 +36,6 @@ constexpr double kMinLineFitVariance = 1e-6;
 // place rather than infinity, so downstream consumers (e.g. the controller's curvature-based
 // speed throttle) see "very straight" instead of a non-finite value.
 constexpr double kMaxCurvatureRadiusPx = 1e6;
-// Floor on |direction.y| when extrapolating the fitted line out to the vehicle's row (see
-// fit_lane): below this the line is running ~horizontal, so that row can't be reached this way.
-constexpr double kMinLineDirectionDy = 1e-6;
 
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
@@ -119,7 +116,7 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
   // on the right lane).
   const cv::Point * seed = nullptr;
   for (const auto & p : yellow_points) {
-    if (p.x < origin.x || p.y < 1.2 * kWindowHeight) {
+    if (p.x < origin.x) {
       continue;
     }
     if (!seed || p.y > seed->y ||
@@ -270,22 +267,8 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // A straight line has zero curvature everywhere; see kMaxCurvatureRadiusPx.
   result.curvature_radius_px = kMaxCurvatureRadiusPx;
 
-  // Offset is extrapolated from the fitted line out to the vehicle's actual row (origin.y): the
-  // Stanley controller downstream expects cross-track error at the vehicle, not at the chain's
-  // near point, and the camera sits back from the front wheels, so the visible lane can start
-  // well short of that row. Unlike the old curve fits -- only valid within the span of points
-  // they were fit to, so extrapolating them swung the result unpredictably -- a straight line has
-  // the same direction everywhere, so walking it out to any row is exact, not an approximation
-  // that degrades with distance. If the line is running ~horizontal (direction.y ~ 0), that row
-  // can't be reached this way, so fall back to the near point's x directly.
-  double lane_x_at_vehicle = p0.x;
-  if (std::abs(direction.y) > kMinLineDirectionDy) {
-    const double t_at_origin = (origin.y - p0.y) / direction.y;
-    lane_x_at_vehicle = p0.x + t_at_origin * direction.x;
-  }
-
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
-  result.offset_m = (lane_x_at_vehicle - origin.x) * meters_per_pixel - 0.55;
+  result.offset_m = (p0.x - origin.x) * meters_per_pixel - 0.6;
 
   result.valid = true;
   return result;

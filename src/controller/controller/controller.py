@@ -58,14 +58,8 @@ class LaneFollower(Node):
         # 무시되고 속도가 0.5로 고정되는 버그였음)
         self.min_speed = self.declare_parameter('min_speed', 0.1).value
         self.accel = self.declare_parameter('accel_limit', 1.0).value
-        self.decel = self.declare_parameter('decel_limit', 2.0).value
-        self.curve_slow = self.declare_parameter('curve_slow_k', 0.5).value
-
-        # 곡률 기반 감속: lane_detection.cpp가 알려주는 곡률 반경(픽셀)이 이 값 이상이면
-        # (거의 직선) 감속하지 않고, 작을수록(급커브) cruise_speed를 비례해서 줄인다.
-        # 조향각 기반 감속(curve_slow_k)은 이미 계산된 delta에 반응하는 반면, 이건 차선의
-        # 곡률 자체를 보므로 조향이 커지기 전에 미리 감속할 수 있다.
-        self.curve_radius_ref = self.declare_parameter('curve_radius_ref_px', 300.0).value
+        self.decel = self.declare_parameter('decel_limit', 3.0).value
+        self.curve_slow = self.declare_parameter('curve_slow_k', 0.3).value
 
         # Stanley 제어 게인
         self.k_stanley = self.declare_parameter('stanley_k', 5.0).value
@@ -178,10 +172,7 @@ class LaneFollower(Node):
         """
         speed_from_steer = self.cruise * max(0.0, 1.0 - self.curve_slow * abs(delta))
 
-        curve_factor = clamp(self.lane_curv_radius_px / self.curve_radius_ref, 0.0, 1.0)
-        speed_from_curvature = self.cruise * curve_factor
-
-        target_speed = min(speed_from_steer, speed_from_curvature)
+        target_speed = speed_from_steer
         return max(self.min_speed, target_speed)
 
     # ----------------------- 메인 제어 루프 -----------------------
