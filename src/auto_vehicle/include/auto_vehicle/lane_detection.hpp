@@ -84,6 +84,20 @@ private:
     const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const;
 
   /**
+   * @brief Removes points around a sharp kink in the chain, where the walk likely jumped onto a
+   * stray yellow pixel off the true lane.
+   *
+   * @details For each interior point, computes the turn angle between the segment entering it
+   * and the segment leaving it. Any point whose turn angle exceeds kSharpTurnAngleDeg (in either
+   * direction) is dropped along with kSharpTurnPruneRadius neighbors on each side, since a real
+   * kink corrupts the chain's heading in its immediate vicinity, not just at the single point.
+   *
+   * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
+   * @return The chain with sharp-kink neighborhoods removed, in the original order.
+   */
+  std::vector<cv::Point> prune_sharp_turns(const std::vector<cv::Point> & points) const;
+
+  /**
    * @brief Fits parametric cubics x(s) and y(s), both against arc length s along the walked lane
    * chain, by least squares, and derives the curvature radius, heading angle, and lateral offset
    * at the vehicle's row.

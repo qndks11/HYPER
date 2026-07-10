@@ -26,6 +26,12 @@ constexpr int kMaxChainSteps = 50;
 // the horizon are unreliable and there's nowhere further to walk to anyway.
 constexpr double kTopRowMargin = 20.0;
 
+// A chain point whose turn angle (between the segment entering it and the segment leaving it)
+// exceeds this is treated as an outlier -- e.g. the walk jumping onto a stray yellow pixel off
+// the true lane -- and pruned along with kSharpTurnPruneRadius neighbors on each side.
+constexpr double kSharpTurnAngleDeg = 60.0;
+constexpr int kSharpTurnPruneRadius = 5;
+
 constexpr int kMinLanePoints = 6;   // a few points of slack past the 4 a cubic needs exactly
 constexpr int kCurveSamples = 40;   // density of the drawn/unwarped curve, not the fit itself
 constexpr double kMinCurvatureDenominator = 1e-6;
@@ -242,6 +248,40 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
   return chain;
 }
 
+std::vector<cv::Point> LaneDetection::prune_sharp_turns(const std::vector<cv::Point> & points) const
+{
+  const int n = static_cast<int>(points.size());
+  std::vector<bool> remove(n, false);
+
+  for (int i = 1; i + 1 < n; ++i) {
+    const cv::Point prev_dir = points[i] - points[i - 1];
+    const cv::Point next_dir = points[i + 1] - points[i];
+    const double prev_norm = cv::norm(prev_dir);
+    const double next_norm = cv::norm(next_dir);
+    if (prev_norm < 1e-6 || next_norm < 1e-6) {
+      continue;
+    }
+
+    const double dot = static_cast<double>(prev_dir.x) * next_dir.x +
+                        static_cast<double>(prev_dir.y) * next_dir.y;
+    const double cos_angle = std::clamp(dot / (prev_norm * next_norm), -1.0, 1.0);
+    const double turn_angle_deg = std::acos(cos_angle) * 180.0 / CV_PI;
+
+    if (turn_angle_deg > kSharpTurnAngleDeg) {
+      const int lo = std::max(0, i - kSharpTurnPruneRadius);
+      const int hi = std::min(n - 1, i + kSharpTurnPruneRadius);
+      std::fill(remove.begin() + lo, remove.begin() + hi + 1, true);
+    }
+  }
+
+  std::vector<cv::Point> pruned;
+  pruned.reserve(n);
+  for (int i = 0; i < n; ++i) {
+    if (!remove[i]) pruned.push_back(points[i]);
+  }
+  return pruned;
+}
+
 LaneDetection::LaneFitResult LaneDetection::fit_lane(
   const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const
 {
@@ -343,7 +383,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   std::vector<cv::Point> yellow_points;
   cv::findNonZero(mask, yellow_points);
-  const std::vector<cv::Point> chain = walk_lane_chain(yellow_points, origin);
+  const std::vector<cv::Point> chain = prune_sharp_turns(walk_lane_chain(yellow_points, origin));
 
   // Fall back to the previous frame's lane when nothing is found this frame
   std::vector<cv::Point> points = chain;
