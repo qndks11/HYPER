@@ -21,7 +21,7 @@ private:
     double offset_m{0.0};
     double steering_angle_deg{0.0};
     double curvature_radius_px{0.0};
-    std::vector<cv::Point> curve_points;  // densely resampled fitted curve, for drawing
+    std::vector<cv::Point> curve_points;  // the fitted line's two endpoints, for drawing
   };
 
   /**
@@ -29,10 +29,9 @@ private:
    *
    * @details Masks yellow lane paint, warps to a bird's-eye view, extracts the yellow pixels as
    * a bare (x, y) point cloud, walks a chain along the right lane from its bottom point via
-   * walk_lane_chain(), fits a pair of third-degree polynomials (x and y, both parameterized by
-   * arc length along the chain) through the walked chain's original BEV coordinates, publishes
+   * walk_lane_chain(), fits a straight line through the walked chain via fit_lane(), publishes
    * offset/steering angle/curvature-radius on `/lane/center`, and shows a single BEV debug view
-   * (yellow mask, walked chain, fitted curve, and offset/angle stats).
+   * (yellow mask, walked chain, fitted line, and offset/angle stats).
    *
    * @param msg Incoming camera image.
    */
@@ -84,23 +83,19 @@ private:
     const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const;
 
   /**
-   * @brief Fits a cubic Bezier curve to the walked lane chain by least squares, and derives the
-   * curvature radius, heading angle, and lateral offset at the chain's near point.
+   * @brief Fits a straight line through the walked lane chain by weighted total least squares,
+   * pinned to the chain's near point, and derives the heading angle and lateral offset from it.
    *
-   * @details The curve's endpoints are pinned exactly to the chain's first and last points, and
-   * its control points are constrained to lie along the chain's own tangent directions at each
-   * end (estimated a few points in from the endpoint, not from a single adjacent segment) --
-   * only how far each control point sits along that fixed direction is fit, one least-squares
-   * solve shared across both axes (x and y), against the Bezier parameter t = s / s_far, where s
-   * is arc length along the chain. Locking the control points' directions this way keeps the
-   * curve's start/end heading tied to what the chain actually showed, rather than a fully free
-   * control-point fit that could swing the curve's shape toward whatever noisy far points pulled
-   * it, producing unrealistically sharp curvature. Parameterizing by arc length rather than
-   * fitting x = f(y) directly means the fit stays well-defined -- and curvature/heading stay
-   * numerically stable -- through a sharp or even 90-degree turn, where x = f(y) would stop being
-   * single-valued. Offset is read at the near point (t=0, which is pinned exactly to the chain's
-   * first point) rather than extrapolated to the vehicle's row, since the camera sits back from
-   * the front wheels and the gap between them isn't safe to extrapolate across.
+   * @details The line is anchored exactly at the chain's first (near) point; its direction is
+   * the eigenvector, of the weighted scatter matrix of the other chain points relative to that
+   * anchor, with the largest eigenvalue -- the axis the points are most spread along, which
+   * minimizes the weighted sum of squared perpendicular distances to the line. This total
+   * least squares formulation (as opposed to regressing x on y or y on x) has no axis it breaks
+   * down along, so it stays well-conditioned for a lane running in any direction, including
+   * near-horizontal. A straight-line model has no curvature to derive, so curvature_radius_px is
+   * always a large sentinel value. Offset is read at the anchor point itself rather than
+   * extrapolated to the vehicle's row, since the camera sits back from the front wheels and the
+   * gap between them isn't safe to extrapolate across.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the chain was anchored to.
