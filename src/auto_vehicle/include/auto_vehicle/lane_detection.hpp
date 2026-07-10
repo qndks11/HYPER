@@ -1,8 +1,6 @@
 #ifndef LANE_DETECTION_HPP
 #define LANE_DETECTION_HPP
 
-#include <string>
-#include <utility>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
@@ -33,8 +31,8 @@ private:
    * a bare (x, y) point cloud, walks a chain along the right lane from its bottom point via
    * walk_lane_chain(), fits a pair of third-degree polynomials (x and y, both parameterized by
    * arc length along the chain) through the walked chain's original BEV coordinates, publishes
-   * offset/steering angle/curvature-radius on `/lane/center`, and shows a 3-panel debug dashboard
-   * (original, BEV yellow mask, final overlay).
+   * offset/steering angle/curvature-radius on `/lane/center`, and shows a single BEV debug view
+   * (yellow mask, walked chain, fitted curve, and offset/angle stats).
    *
    * @param msg Incoming camera image.
    */
@@ -103,16 +101,6 @@ private:
    */
   LaneFitResult fit_lane(
     const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const;
-
-  /**
-   * @brief Resizes an image to the dashboard thumbnail size and stamps a label on it.
-   */
-  cv::Mat make_thumbnail(const cv::Mat & image, const std::string & label) const;
-
-  /**
-   * @brief Arranges labeled views side by side in a single row for the debug dashboard.
-   */
-  cv::Mat build_dashboard(const std::vector<std::pair<std::string, cv::Mat>> & views) const;
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;

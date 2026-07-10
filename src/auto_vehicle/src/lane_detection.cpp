@@ -37,8 +37,8 @@ constexpr double kMinNearTangentDy = 1e-6;
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
 
-constexpr int kThumbWidth = 420;
-constexpr int kThumbHeight = 300;
+constexpr int kWindowWidth = 420;
+constexpr int kWindowHeight = 300;
 
 // Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
 // down the road the BEV view looks. Width is left unscaled.
@@ -94,9 +94,9 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
 
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
 
-  cv::namedWindow("Dashboard", cv::WINDOW_NORMAL);
+  cv::namedWindow("Lane Detection", cv::WINDOW_NORMAL);
   cv::resizeWindow(
-    "Dashboard", kThumbWidth * 3, static_cast<int>(kThumbHeight * kBevHeightScale));
+    "Lane Detection", kWindowWidth, static_cast<int>(kWindowHeight * kBevHeightScale));
 
   RCLCPP_INFO(get_logger(), "LaneDetection started");
 }
@@ -319,53 +319,6 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   return result;
 }
 
-cv::Mat LaneDetection::make_thumbnail(const cv::Mat & image, const std::string & label) const
-{
-  cv::Mat bgr = image;
-  if (image.channels() == 1) {
-    cv::cvtColor(image, bgr, cv::COLOR_GRAY2BGR);
-  }
-
-  // Fix the width and derive height from the source aspect ratio, so panels with a taller BEV
-  // (kBevHeightScale != 1) actually show up taller instead of always resizing to kThumbHeight.
-  const int thumb_height = static_cast<int>(
-    std::lround(static_cast<double>(kThumbWidth) * image.rows / image.cols));
-
-  cv::Mat thumb;
-  cv::resize(bgr, thumb, cv::Size(kThumbWidth, thumb_height));
-  cv::rectangle(thumb, cv::Point(0, 0), cv::Point(kThumbWidth, 24), cv::Scalar(0, 0, 0), -1);
-  cv::putText(
-    thumb, label, cv::Point(6, 17), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
-  return thumb;
-}
-
-cv::Mat LaneDetection::build_dashboard(
-  const std::vector<std::pair<std::string, cv::Mat>> & views) const
-{
-  std::vector<cv::Mat> thumbs;
-  thumbs.reserve(views.size());
-  for (const auto & [label, image] : views) {
-    thumbs.push_back(make_thumbnail(image, label));
-  }
-
-  // hconcat requires matching row counts, so letterbox every thumbnail up to the tallest one
-  // (typically the BEV panel) before concatenating.
-  const int max_height = std::max_element(
-                            thumbs.begin(), thumbs.end(),
-                            [](const cv::Mat & a, const cv::Mat & b) { return a.rows < b.rows; })
-                            ->rows;
-  for (auto & thumb : thumbs) {
-    if (thumb.rows < max_height) {
-      cv::copyMakeBorder(
-        thumb, thumb, 0, max_height - thumb.rows, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
-    }
-  }
-
-  cv::Mat dashboard;
-  cv::hconcat(thumbs, dashboard);
-  return dashboard;
-}
-
 void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
   cv_bridge::CvImageConstPtr cv_ptr;
@@ -377,27 +330,14 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   }
 
   const cv::Mat frame = cv_ptr->image;
-  const int height = frame.rows;
-  const int width = frame.cols;
-
-  // Panel 1: mark the ROI trapezoid corners on the original frame.
-  cv::Mat original_view = frame.clone();
-  {
-    const std::vector<cv::Point> roi_corners{
-      {static_cast<int>(width * kRoiTopLeftCol), static_cast<int>(height * kRoiTopLeftRow)},
-      {static_cast<int>(width * kRoiBottomLeftCol), static_cast<int>(height * kRoiBottomLeftRow)},
-      {static_cast<int>(width * kRoiTopRightCol), static_cast<int>(height * kRoiTopRightRow)},
-      {static_cast<int>(width * kRoiBottomRightCol),
-       static_cast<int>(height * kRoiBottomRightRow)}};
-    for (const auto & p : roi_corners) cv::circle(original_view, p, 5, cv::Scalar(0, 0, 255), -1);
-  }
 
   const cv::Mat warped = bird_eye(frame);
   const cv::Mat mask = yellow_mask(warped);
 
-  // Panel 2: BEV with the yellow mask highlighted.
-  cv::Mat masked_view = warped.clone();
-  masked_view.setTo(cv::Scalar(0, 255, 0), mask);
+  // BEV with the yellow mask highlighted; this is also the single debug view, so the chain,
+  // fitted curve, and fit stats all get drawn on top of it below.
+  cv::Mat view = warped.clone();
+  view.setTo(cv::Scalar(0, 255, 0), mask);
 
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0);
 
@@ -413,32 +353,20 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     prev_points_ = points;
   }
 
+  for (const auto & p : points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
+
   const LaneFitResult fit = fit_lane(points, origin, warped.cols);
 
-  // Panel 3: the fitted curve unwarped back onto the original frame, with the fit stats.
-  cv::Mat result = frame.clone();
   if (fit.valid) {
-    std::vector<cv::Point2f> bev_points;
-    bev_points.reserve(fit.curve_points.size());
-    for (const auto & p : fit.curve_points) bev_points.emplace_back(p);
+    cv::polylines(view, fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
 
-    std::vector<cv::Point2f> original_points;
-    cv::perspectiveTransform(
-      bev_points, original_points,
-      build_transform(height, width, warped.rows, warped.cols).inv());
-
-    std::vector<cv::Point> original_points_i;
-    original_points_i.reserve(original_points.size());
-    for (const auto & p : original_points) {
-      original_points_i.emplace_back(static_cast<int>(p.x), static_cast<int>(p.y));
-    }
-    cv::polylines(result, original_points_i, false, cv::Scalar(255, 0, 255), 3);
-
-    const cv::Point arrow_start(width / 2, height);
+    const cv::Point arrow_start(static_cast<int>(origin.x), static_cast<int>(origin.y));
     const cv::Point arrow_end(
-      static_cast<int>(width / 2 + kArrowLength * std::sin(fit.steering_angle_deg * CV_PI / 180.0)),
-      static_cast<int>(height - kArrowLength * std::cos(fit.steering_angle_deg * CV_PI / 180.0)));
-    cv::line(result, arrow_start, arrow_end, cv::Scalar(255, 0, 0), 2);
+      static_cast<int>(
+        origin.x + kArrowLength * std::sin(fit.steering_angle_deg * CV_PI / 180.0)),
+      static_cast<int>(
+        origin.y - kArrowLength * std::cos(fit.steering_angle_deg * CV_PI / 180.0)));
+    cv::line(view, arrow_start, arrow_end, cv::Scalar(255, 0, 0), 2);
   }
 
   std_msgs::msg::Float64MultiArray lane_msg;
@@ -453,34 +381,21 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   const cv::Scalar text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
-  char radius_text[64];
-  std::snprintf(radius_text, sizeof(radius_text), "Radius: %.1f px", fit.curvature_radius_px);
-  cv::putText(
-    result, radius_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
-
   char offset_text[64];
   std::snprintf(offset_text, sizeof(offset_text), "Offset: %.2f m", fit.offset_m);
-  cv::putText(
-    result, offset_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(view, offset_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   char angle_text[64];
   std::snprintf(angle_text, sizeof(angle_text), "Angle: %.2f deg", fit.steering_angle_deg);
-  cv::putText(
-    result, angle_text, cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(view, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   if (!fit.valid) {
     cv::putText(
-      result, "Lane not detected", cv::Point(30, 150), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color,
-      2);
+      view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Lane not detected");
   }
 
-  const cv::Mat dashboard = build_dashboard({
-    {"Original", original_view},
-    {"BEV Yellow Mask", masked_view},
-    {"Result", result}});
-
-  cv::imshow("Dashboard", dashboard);
+  cv::imshow("Lane Detection", view);
   cv::waitKey(1);
 }
 
