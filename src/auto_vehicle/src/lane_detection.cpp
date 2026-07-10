@@ -26,21 +26,6 @@ constexpr int kMaxChainSteps = 50;
 // the horizon are unreliable and there's nowhere further to walk to anyway.
 constexpr double kTopRowMargin = 20.0;
 
-// Corner-cutting: an interior chain point whose turn angle exceeds this is chamfered (its vertex
-// is cut and replaced by two points pulled in from each neighboring edge) so a sharp turn is
-// rounded before fitting, instead of forcing a single global cubic through an actual vertex.
-constexpr double kCornerAngleThresholdDeg = 45.0;
-// Fraction of each adjacent edge length consumed when chamfering a corner vertex -- how far the
-// cut points sit back from the original corner.
-constexpr double kCornerCutRatio = 0.3;
-
-// Distance [px] over which a fit point's weight decays to ~1/e, measured from the chain's near
-// (vehicle-adjacent) end. Keeps the fit's near-end derivative (steering angle) local to the
-// vehicle's immediate surroundings, so a corner farther down the chain phases in smoothly as the
-// vehicle approaches it rather than jumping as the chain's length/composition shifts frame to
-// frame.
-constexpr double kFitWeightDecayLength = 80.0;
-
 constexpr int kMinLanePoints = 6;   // a few points of slack past the 4 a cubic needs exactly
 constexpr int kCurveSamples = 40;   // density of the drawn/unwarped curve, not the fit itself
 constexpr double kMinCurvatureDenominator = 1e-6;
@@ -98,51 +83,6 @@ double eval_cubic_first_derivative(const cv::Vec4d & fit, double t)
 double eval_cubic_second_derivative(const cv::Vec4d & fit, double t)
 {
   return 6.0 * fit[0] * t + 2.0 * fit[1];
-}
-
-// Chamfers sharp interior turns in a chain so the polynomial fit sees a rounded corner instead of
-// a true vertex. Points whose turn angle is at or below kCornerAngleThresholdDeg pass through
-// unchanged; sharper ones (e.g. a right-angle turn) are replaced by two points pulled in from
-// each neighboring edge by kCornerCutRatio, cutting the corner toward the inside of the turn.
-std::vector<cv::Point> smooth_lane_chain_corners(const std::vector<cv::Point> & chain)
-{
-  if (chain.size() < 3) {
-    return chain;
-  }
-
-  std::vector<cv::Point> smoothed;
-  smoothed.reserve(chain.size() + 4);
-  smoothed.push_back(chain.front());
-
-  for (size_t i = 1; i + 1 < chain.size(); ++i) {
-    const cv::Point2d v1(chain[i].x - chain[i - 1].x, chain[i].y - chain[i - 1].y);
-    const cv::Point2d v2(chain[i + 1].x - chain[i].x, chain[i + 1].y - chain[i].y);
-    const double n1 = cv::norm(v1);
-    const double n2 = cv::norm(v2);
-    if (n1 < 1e-6 || n2 < 1e-6) {
-      smoothed.push_back(chain[i]);
-      continue;
-    }
-
-    const double cos_turn = std::clamp((v1.x * v2.x + v1.y * v2.y) / (n1 * n2), -1.0, 1.0);
-    const double turn_deg = std::acos(cos_turn) * 180.0 / CV_PI;
-    if (turn_deg <= kCornerAngleThresholdDeg) {
-      smoothed.push_back(chain[i]);
-      continue;
-    }
-
-    const cv::Point2d cut_in(
-      chain[i].x - kCornerCutRatio * v1.x, chain[i].y - kCornerCutRatio * v1.y);
-    const cv::Point2d cut_out(
-      chain[i].x + kCornerCutRatio * v2.x, chain[i].y + kCornerCutRatio * v2.y);
-    smoothed.emplace_back(
-      static_cast<int>(std::lround(cut_in.x)), static_cast<int>(std::lround(cut_in.y)));
-    smoothed.emplace_back(
-      static_cast<int>(std::lround(cut_out.x)), static_cast<int>(std::lround(cut_out.y)));
-  }
-
-  smoothed.push_back(chain.back());
-  return smoothed;
 }
 
 }  // namespace
@@ -326,13 +266,11 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   }
   const double s_far = s.back();
 
-  // Weight points by an exponential decay in absolute distance from the near (vehicle-adjacent)
-  // end, rather than relative to s_far. This localizes the fit around the vehicle regardless of
-  // how far the chain happens to reach that frame, so a corner farther down the chain phases
-  // into the fit smoothly as it gets closer instead of its influence jumping whenever the total
-  // chain length/composition changes frame to frame.
+  // Weight points by distance from the far end (mirrors the old fit's row-based weighting:
+  // points near the vehicle pull the fit harder than far-field ones). The +1 keeps the farthest
+  // point's weight off exactly zero.
   std::vector<double> weight(n);
-  for (int i = 0; i < n; ++i) weight[i] = std::exp(-s[i] / kFitWeightDecayLength);
+  for (int i = 0; i < n; ++i) weight[i] = (s_far - s[i]) + 1.0;
 
   const cv::Vec4d fit_x = fit_cubic(s, xs, weight);
   const cv::Vec4d fit_y = fit_cubic(s, ys, weight);
@@ -465,8 +403,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   std::vector<cv::Point> yellow_points;
   cv::findNonZero(mask, yellow_points);
-  const std::vector<cv::Point> raw_chain = walk_lane_chain(yellow_points, origin);
-  const std::vector<cv::Point> chain = smooth_lane_chain_corners(raw_chain);
+  const std::vector<cv::Point> chain = walk_lane_chain(yellow_points, origin);
 
   // Fall back to the previous frame's lane when nothing is found this frame
   std::vector<cv::Point> points = chain;
