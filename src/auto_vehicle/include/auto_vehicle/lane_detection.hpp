@@ -28,15 +28,10 @@ private:
    * @brief Callback invoked for every incoming camera frame.
    *
    * @details Masks yellow lane paint, warps to a bird's-eye view, extracts the yellow pixels as
-   * a bare (x, y) point cloud, and walks a chain along the right lane from its bottom point via
-   * walk_lane_chain(). If that chain is too short to fit or is_right_turn() judges it to already
-   * be curving sharply right (a sign the right lane is about to sweep out of frame), the yellow
-   * cloud is mirrored about the vehicle's x position and walked again -- picking up the left lane
-   * instead, since mirroring flips both walk_lane_chain()'s right-half seed and the handedness of
-   * its candidate ranking -- and the result mirrored back before use. Whichever chain is settled
-   * on is fit to a straight line via fit_lane(), publishing offset/steering angle/curvature-radius
-   * on `/lane/center`, and shown on a single BEV debug view (yellow mask, walked chain, fitted
-   * line, and offset/angle stats).
+   * a bare (x, y) point cloud, walks a chain along the right lane from its bottom point via
+   * walk_lane_chain(), fits a straight line through the walked chain via fit_lane(), publishes
+   * offset/steering angle/curvature-radius on `/lane/center`, and shows a single BEV debug view
+   * (yellow mask, walked chain, fitted line, and offset/angle stats).
    *
    * @param msg Incoming camera image.
    */
@@ -102,29 +97,20 @@ private:
    * vehicle's actual row (origin.y) rather than read at the anchor point: unlike the old curve
    * fits, which were only valid within the span of points they were fit to, a straight line has
    * the same direction everywhere, so walking it out to any row is exact rather than an
-   * approximation that degrades with distance. The constant term converting "distance from the
-   * tracked line to the vehicle" into "distance from lane center to the vehicle" flips sign
-   * depending on which of the two lane boundaries is being tracked.
+   * approximation that degrades with distance.
    *
-   * @param points The lane chain from walk_lane_chain() (possibly mirrored back from a left-lane
-   * walk -- see image_callback), in BEV coordinates, near to far.
+   * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the chain was anchored to.
    * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
-   * @param tracking_left_lane Whether `points` came from the left lane boundary instead of the
-   * right one, so the offset's lane-center bias is applied with the correct sign.
    * @return The lane fit result; `valid` is false if there are too few points.
    */
   LaneFitResult fit_lane(
-    const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
-    bool tracking_left_lane) const;
+    const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const;
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
 
   std::vector<cv::Point> prev_points_;
-  // Which lane boundary prev_points_ came from, so a frame that falls back to it (see
-  // image_callback) still applies the matching offset bias.
-  bool prev_tracking_left_lane_{false};
 };
 
 #endif  // LANE_DETECTION_HPP
