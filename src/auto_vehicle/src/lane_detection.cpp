@@ -45,7 +45,7 @@ constexpr int kWindowHeight = 300;
 
 // Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
 // down the road the BEV view looks. Width is left unscaled.
-constexpr double kBevHeightScale = 1.4;
+constexpr double kBevHeightScale = 1.35;
 
 // How far right (in degrees) the chain's start has to already be curving before the right lane
 // is judged about to sweep out of frame -- see is_right_turn().
@@ -319,7 +319,7 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // "distance from the tracked line to the vehicle" into "distance from lane center to the
   // vehicle" flips sign between them.
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
-  const double lane_center_bias = tracking_left_lane ? 0.5 : -0.5;
+  const double lane_center_bias = tracking_left_lane ? 0.55 : -0.55;
   result.offset_m = (p0.x - origin.x) * meters_per_pixel + lane_center_bias;
 
   result.valid = true;
