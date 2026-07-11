@@ -32,7 +32,7 @@ add_library(TrafficLightPlugin SHARED gz_plugins/TrafficLightPlugin.cc)
 target_link_libraries(TrafficLightPlugin ignition-gazebo6::core)
 
 install(
-  DIRECTORY launch urdf config worlds
+  DIRECTORY launch urdf config worlds models
   DESTINATION share/${PROJECT_NAME}
 )
 
@@ -52,6 +52,12 @@ install(PROGRAMS
   scripts/keyboard_controller.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME keyboard_controller
+)
+
+install(PROGRAMS
+  scripts/object_detection.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME object_detection
 )
 
 if(BUILD_TESTING)

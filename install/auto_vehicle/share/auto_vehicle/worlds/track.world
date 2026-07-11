@@ -190,12 +190,12 @@
       <name>cantilevered_light_1</name>
       <pose>-9.34 -4.57 0 0 0 0</pose>
       <plugin filename="libTrafficLightPlugin.so" name="auto_vehicle::TrafficLightPlugin">
-        <phase duration="6.0" color="red"/>
-        <phase duration="4.0" color="red"/>
+        <!-- <phase duration="6.0" color="red"/>
+        <phase duration="4.0" color="red"/> -->
         <phase duration="6.0" color="green"/>
-        <phase duration="4.0" color="yellow"/>
+        <!-- <phase duration="4.0" color="yellow"/>
         <phase duration="6.0" color="red"/>
-        <phase duration="4.0" color="red"/>
+        <phase duration="4.0" color="red"/> -->
       </plugin>
     </include>
 
@@ -219,11 +219,11 @@
       <pose>11.56 -16.96 0 0 0 3.1416</pose>
       <plugin filename="libTrafficLightPlugin.so" name="auto_vehicle::TrafficLightPlugin">
         <phase duration="6.0" color="right_turn"/>
-        <phase duration="4.0" color="yellow"/>
+        <!-- <phase duration="4.0" color="yellow"/>
         <phase duration="6.0" color="red"/>
         <phase duration="4.0" color="red"/>
         <phase duration="6.0" color="red"/>
-        <phase duration="4.0" color="red"/>
+        <phase duration="4.0" color="red"/> -->
       </plugin>
     </include>
 
