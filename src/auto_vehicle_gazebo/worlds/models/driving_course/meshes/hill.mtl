@@ -1,0 +1,11 @@
+newmtl course
+Ka 1 1 1
+Kd 1 1 1
+d 1
+illum 1
+map_Kd course.png
+newmtl wall
+Ka 0.35 0.35 0.35
+Kd 0.35 0.35 0.35
+d 1
+illum 1

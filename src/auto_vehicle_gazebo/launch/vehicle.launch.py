@@ -73,13 +73,17 @@ def start_vehicle_control():
 
 
 def generate_launch_description():
-    package_name = "auto_vehicle"
-    package_path = get_package_share_directory(package_name)
+    # 시뮬레이션 전용 리소스(월드, gz 플러그인, ros_gz_bridge 설정)는 auto_vehicle_gazebo에,
+    # 차량 자체(urdf, 파라미터, vehicle_controller 실행 파일)는 실차에서도 쓰는 auto_vehicle에 있다.
+    sim_package_name = "auto_vehicle_gazebo"
+    sim_package_path = get_package_share_directory(sim_package_name)
+
+    vehicle_package_name = "auto_vehicle"
+    vehicle_package_path = get_package_share_directory(vehicle_package_name)
 
     # 기본 Gazebo world 파일 경로
-    # 현재 네 구조: auto_vehicle/worlds/track
     default_world_path = os.path.join(
-        package_path,
+        sim_package_path,
         'worlds',
         'track.world'
     )
@@ -88,12 +92,12 @@ def generate_launch_description():
     gz_resource_path = SetEnvironmentVariable(
         name='GZ_SIM_RESOURCE_PATH',
         value=[
-            package_path,
+            sim_package_path,
             os.pathsep,
-            os.path.join(package_path, 'worlds'),
+            os.path.join(sim_package_path, 'worlds'),
             os.pathsep,
             # 💡 worlds 폴더 안의 models 폴더를 직접 바라보도록 수정합니다.
-            os.path.join(package_path, 'worlds', 'models'), 
+            os.path.join(sim_package_path, 'worlds', 'models'),
             os.pathsep,
             os.environ.get('GZ_SIM_RESOURCE_PATH', '')
         ]
@@ -103,7 +107,7 @@ def generate_launch_description():
     gz_plugin_path = SetEnvironmentVariable(
         name='GZ_SIM_SYSTEM_PLUGIN_PATH',
         value=[
-            os.path.join(get_package_prefix(package_name), 'lib', package_name),
+            os.path.join(get_package_prefix(sim_package_name), 'lib', sim_package_name),
             os.pathsep,
             os.environ.get('GZ_SIM_SYSTEM_PLUGIN_PATH', '')
         ]
@@ -160,19 +164,19 @@ def generate_launch_description():
     yaw = LaunchConfiguration('Y')
 
     robot_description_path = os.path.join(
-        package_path,
+        vehicle_package_path,
         'urdf',
         'vehicle.xacro'
     )
 
     gz_bridge_params_path = os.path.join(
-        package_path,
+        sim_package_path,
         'config',
         'ros_gz_bridge.yaml'
     )
 
     vehicle_params_path = os.path.join(
-        package_path,
+        vehicle_package_path,
         'config',
         'parameters.yaml'
     )
