@@ -12,11 +12,19 @@
     wheel_density: 900.0 # Density of the wheel material, e.g., rubber [kg/m^3]
 
     # Kinematics and dynamics params
+<<<<<<< Updated upstream
     max_steering_angle: 0.6108652 # Maximum steering angle of the vehicle [rad]
     max_steering_angular_velocity: 1.570796 # Maximum steering angular velocity [rad/s]
     max_steering_effort: 1.0 # Maximum steering torque [Nm]
     max_velocity: 2.0 # Maximum wheel velocity [m/s]
     max_effort: 10.0 # Maximum wheel torque [Nm]
+=======
+    max_steering_angle: 0.5235988 # 최대 조향각 약 30도 (실차 주행 및 서보 보호용) [rad]
+    max_steering_angular_velocity: 2.0 # 고성능 조향 모터/서보 반영으로 상향 [rad/s]
+    max_steering_effort: 15.0 # 대형 차체를 돌리기 위한 조향 토크 상향 [Nm]
+    max_velocity: 10.0 # T8 Sport 순정 최고 속도 약 16km/h 반영 [m/s]
+    max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
+>>>>>>> Stashed changes
 
     # Camera and image params
     camera_box_size: 0.05 # Size of the camera enclosure [m]
