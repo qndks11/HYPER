@@ -3,25 +3,23 @@
 <package format="3">
   <name>auto_vehicle</name>
   <version>0.0.0</version>
-  <description>A ROS 2 package for simulating an Ackermann steering vehicle. Includes robot modeling, control, and Gazebo simulation integration.</description>
+  <description>Ackermann steering vehicle: robot model (urdf), control nodes, and perception. Usable on real hardware and in simulation (see auto_vehicle_gazebo for sim-only launch/worlds).</description>
   <maintainer email="workabotic@gmail.com">Lucas Mazzetto</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
-  
+
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
 
   <exec_depend>joint_state_publisher</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>gazebo_ros</exec_depend>
-  <exec_depend>xacro</exec_depend>
-  <exec_depend>ros_gz_bridge</exec_depend>
-  <exec_depend>gz_ros2_control</exec_depend>
   <exec_depend>ros2_control</exec_depend>
   <exec_depend>joy</exec_depend>
+  <exec_depend>rclpy</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>libopencv-dev</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

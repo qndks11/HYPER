@@ -1,0 +1,29 @@
+{
+    "ROS2.distro": "humble",
+    "python.autoComplete.extraPaths": [
+        "/home/bean1120/bumperbot/install/position/lib/python3.10/site-packages",
+        "/home/bean1120/bumperbot/install/example/lib/python3.10/site-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_utils/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_planning/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_msgs/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_motion/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_mapping/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_firmware/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_controller/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/bean1120/bumperbot/install/position/lib/python3.10/site-packages",
+        "/home/bean1120/bumperbot/install/example/lib/python3.10/site-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_utils/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_planning/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_msgs/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_motion/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_mapping/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_firmware/local/lib/python3.10/dist-packages",
+        "/home/bean1120/bumperbot/install/bumperbot_controller/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}
