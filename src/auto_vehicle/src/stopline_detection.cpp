@@ -1,5 +1,7 @@
 #include "auto_vehicle/stopline_detection.hpp"
 
+#include "auto_vehicle/image_overlay.hpp"
+
 #include <cstdio>
 
 #include <cv_bridge/cv_bridge.h>
@@ -30,6 +32,7 @@ StoplineDetection::StoplineDetection() : Node{"stopline_detection"}
 
   stopline_publisher_ =
     create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/detection", 10);
+  stopline_overlay_publisher_ = create_publisher<sensor_msgs::msg::Image>("/stopline/overlay", 10);
 
   cv::namedWindow("Stopline Detection", cv::WINDOW_NORMAL);
   cv::resizeWindow("Stopline Detection", kWindowWidth, kWindowHeight);
@@ -103,8 +106,10 @@ void StoplineDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr 
   const cv::Mat & warped = cv_ptr->image;
   const cv::Mat mask = white_mask(warped);
 
-  cv::Mat view = warped.clone();
-  view.setTo(cv::Scalar(0, 255, 0), mask);
+  // Annotations only, on an otherwise-black canvas the same size as the BEV frame; see
+  // lane_detection's overlay for why, and compose_overlay() for how it's composed and shared.
+  cv::Mat overlay = cv::Mat::zeros(warped.size(), warped.type());
+  overlay.setTo(cv::Scalar(0, 255, 0), mask);
 
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0);
   const double meters_per_pixel =
@@ -113,7 +118,7 @@ void StoplineDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr 
   const StoplineResult result = find_stopline(mask, origin, meters_per_pixel);
 
   if (result.valid) {
-    cv::rectangle(view, result.bounding_box, cv::Scalar(0, 0, 255), 3);
+    cv::rectangle(overlay, result.bounding_box, cv::Scalar(0, 0, 255), 3);
   }
 
   std_msgs::msg::Float64MultiArray stopline_msg;
@@ -122,17 +127,26 @@ void StoplineDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr 
 
   const cv::Scalar text_color = result.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
+  // Anchored to the bottom of the frame, unlike lane_detection's top-anchored text, so the two
+  // don't collide when visualizer stacks both overlays onto one shared frame.
   char distance_text[64];
   std::snprintf(distance_text, sizeof(distance_text), "Distance: %.2f m", result.distance_m);
   cv::putText(
-    view, distance_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+    overlay, distance_text, cv::Point(30, overlay.rows - 60), cv::FONT_HERSHEY_SIMPLEX, 1.0,
+    text_color, 2);
 
   if (!result.valid) {
     cv::putText(
-      view, "Stopline not detected", cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color,
-      2);
+      overlay, "Stopline not detected", cv::Point(30, overlay.rows - 20),
+      cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
   }
 
+  const sensor_msgs::msg::Image::SharedPtr overlay_msg =
+    cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::BGR8, overlay).toImageMsg();
+  stopline_overlay_publisher_->publish(*overlay_msg);
+
+  cv::Mat view = warped.clone();
+  compose_overlay(view, overlay);
   cv::imshow("Stopline Detection", view);
   cv::waitKey(1);
 }
