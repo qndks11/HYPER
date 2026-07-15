@@ -27,38 +27,22 @@ private:
   };
 
   /**
-   * @brief Callback invoked for every incoming camera frame.
+   * @brief Callback invoked for every incoming bird's-eye-view frame (published by
+   * bev_producer, which owns the raw-camera-to-BEV warp).
    *
-   * @details Masks yellow lane paint, warps to a bird's-eye view, extracts the yellow pixels as
-   * a bare (x, y) point cloud, and walks a chain from each side (left and right of the vehicle's
-   * assumed centerline) via walk_lane_chain(), dropping any chain that crosses to the other side
-   * without getting farther from the vehicle -- see walk_lane_chain()'s doc for why that indicates
-   * both sides latched onto the same physical lane line. Each surviving chain is fit to a straight
-   * line via fit_lane(); when both are valid the two are averaged into a true lane-center estimate
-   * (see kLaneCenterOffsetBiasM), otherwise whichever single side is valid is used as-is. Publishes
+   * @details Masks yellow lane paint, extracts the yellow pixels as a bare (x, y) point cloud,
+   * and walks a chain from each side (left and right of the vehicle's assumed centerline) via
+   * walk_lane_chain(), dropping any chain that crosses to the other side without getting farther
+   * from the vehicle -- see walk_lane_chain()'s doc for why that indicates both sides latched
+   * onto the same physical lane line. Each surviving chain is fit to a straight line via
+   * fit_lane(); when both are valid the two are averaged into a true lane-center estimate (see
+   * kLaneCenterOffsetBiasM), otherwise whichever single side is valid is used as-is. Publishes
    * offset/steering angle/curvature-radius on `/lane/center`, and shows a single BEV debug view
    * (yellow mask, both walked chains, both fitted lines, and offset/angle stats).
    *
-   * @param msg Incoming camera image.
+   * @param msg Incoming BEV image.
    */
   void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
-
-  /**
-   * @brief Builds the perspective transform mapping the trapezoidal ROI (sampled from the
-   * source image's own dimensions) to a bird's-eye view of the given destination size.
-   *
-   * @param src_height Source image height [px], used only to locate the ROI corners.
-   * @param src_width Source image width [px], used only to locate the ROI corners.
-   * @param dst_height Output (bird's-eye) image height [px].
-   * @param dst_width Output (bird's-eye) image width [px].
-   * @return The 3x3 perspective transform matrix.
-   */
-  cv::Mat build_transform(int src_height, int src_width, int dst_height, int dst_width) const;
-
-  /**
-   * @brief Warps the input image to a bird's-eye view using build_transform().
-   */
-  cv::Mat bird_eye(const cv::Mat & image) const;
 
   /**
    * @brief Produces a binary mask isolating yellow lane paint in HSV space.

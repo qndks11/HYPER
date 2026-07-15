@@ -9,12 +9,6 @@
 
 namespace
 {
-// ROI trapezoid corners as (row_ratio, col_ratio) of the source image
-constexpr double kRoiTopLeftRow = 0.40,  kRoiTopLeftCol = 0.25;
-constexpr double kRoiTopRightRow = 0.40, kRoiTopRightCol = 0.75;
-constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -1.4;
-constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 2.4;
-
 // Neighborhood radius for each step of the lane chain walk [px]. Also sets the rough spacing
 // between consecutive chain points, since each step prefers the farthest qualifying pixel within
 // this radius.
@@ -57,10 +51,6 @@ constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
 
-// Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
-// down the road the BEV view looks. Width is left unscaled.
-constexpr double kBevHeightScale = 1.35;
-
 // True if `chain` starts on one side of origin.x and ends on the other, but its endpoint isn't
 // farther from the vehicle (smaller row) than its start point. A chain that genuinely walks a
 // curving lane across the centerline still gets farther from the vehicle as it goes; a chain that
@@ -85,42 +75,14 @@ bool is_spurious_cross_lane(const std::vector<cv::Point> & chain, const cv::Poin
 LaneDetection::LaneDetection() : Node{"lane_detection"}
 {
   image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-    "/image_raw", 10, std::bind(&LaneDetection::image_callback, this, std::placeholders::_1));
+    "/bev/image", 10, std::bind(&LaneDetection::image_callback, this, std::placeholders::_1));
 
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
 
   cv::namedWindow("Lane Detection", cv::WINDOW_NORMAL);
-  cv::resizeWindow(
-    "Lane Detection", kWindowWidth, static_cast<int>(kWindowHeight * kBevHeightScale));
+  cv::resizeWindow("Lane Detection", kWindowWidth, kWindowHeight);
 
   RCLCPP_INFO(get_logger(), "LaneDetection started");
-}
-
-cv::Mat LaneDetection::build_transform(
-  int src_height, int src_width, int dst_height, int dst_width) const
-{
-  const std::vector<cv::Point2f> src{
-    {static_cast<float>(src_width * kRoiTopLeftCol), static_cast<float>(src_height * kRoiTopLeftRow)},
-    {static_cast<float>(src_width * kRoiTopRightCol), static_cast<float>(src_height * kRoiTopRightRow)},
-    {static_cast<float>(src_width * kRoiBottomRightCol), static_cast<float>(src_height * kRoiBottomRightRow)},
-    {static_cast<float>(src_width * kRoiBottomLeftCol), static_cast<float>(src_height * kRoiBottomLeftRow)}};
-
-  const std::vector<cv::Point2f> dst{
-    {0.0f, 0.0f},
-    {static_cast<float>(dst_width), 0.0f},
-    {static_cast<float>(dst_width), static_cast<float>(dst_height)},
-    {0.0f, static_cast<float>(dst_height)}};
-
-  return cv::getPerspectiveTransform(src, dst);
-}
-
-cv::Mat LaneDetection::bird_eye(const cv::Mat & image) const
-{
-  const cv::Size dst_size(image.cols, static_cast<int>(image.rows * kBevHeightScale));
-  const cv::Mat transform = build_transform(image.rows, image.cols, dst_size.height, dst_size.width);
-  cv::Mat warped;
-  cv::warpPerspective(image, warped, transform, dst_size);
-  return warped;
 }
 
 cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
@@ -324,9 +286,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     return;
   }
 
-  const cv::Mat frame = cv_ptr->image;
-
-  const cv::Mat warped = bird_eye(frame);
+  const cv::Mat & warped = cv_ptr->image;
   const cv::Mat mask = yellow_mask(warped);
 
   // BEV with the yellow mask highlighted; this is also the single debug view, so the chain,
