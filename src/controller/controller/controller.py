@@ -62,7 +62,7 @@ class LaneFollower(Node):
         self.curve_slow = self.declare_parameter('curve_slow_k', 0.3).value
 
         # Stanley 제어 게인
-        self.k_stanley = self.declare_parameter('stanley_k', 5.0).value
+        self.k_stanley = self.declare_parameter('stanley_k', 3.0).value
         self.v_soft = self.declare_parameter('stanley_v_min', 0.3).value
 
         # 부호 보정 (±1.0 이어야 함. lane_detection.cpp의 우측 차선 기준 offset/heading

@@ -28,7 +28,7 @@ constexpr double kTopRowMargin = 20.0;
 
 // A few points of slack past the minimum a well-conditioned line-direction fit needs (2 points
 // determine a direction exactly; more give the weighted eigen solve something to average over).
-constexpr int kMinLanePoints = 6;
+constexpr int kMinLanePoints = 3;
 // Floor on the fitted line direction's weighted variance (see fit_lane): below this the chain is
 // numerically degenerate (points effectively coincident), so the eigen solve isn't trustworthy.
 constexpr double kMinLineFitVariance = 1e-6;
@@ -38,12 +38,13 @@ constexpr double kMinLineFitVariance = 1e-6;
 constexpr double kMaxCurvatureRadiusPx = 1e6;
 
 constexpr double kLaneWidthMeters = 3.7;
+constexpr double kNumLaneInScreen = 3.2;  // how many lanes fit across the BEV image width
 constexpr double kArrowLength = 100.0;
 
 // Tolerance above kLaneWidthMeters before two simultaneously-detected lines are treated as
 // implausibly far apart to be the same lane's pair (e.g. one side actually latched onto an
 // adjacent lane's paint). Loose enough to tolerate normal fit noise on a real lane.
-constexpr double kMaxPlausibleLaneWidthMeters = kLaneWidthMeters * 1.5;
+constexpr double kMaxPlausibleLaneWidthMeters = kLaneWidthMeters * 1.4;
 
 // Empirical half-lane-width offset [m] from a single tracked lane line to the estimated lane
 // center, calibrated back when only the right lane was tracked. Baked into fit_lane()'s offset_m,
@@ -51,7 +52,7 @@ constexpr double kMaxPlausibleLaneWidthMeters = kLaneWidthMeters * 1.5;
 // opposite sides of each line), so the single-lane fallback (only one side detected this frame)
 // still reports a centered estimate. When both sides are valid, the opposite signs cancel when
 // averaged, so image_callback's combined offset is just the plain average -- no bias to add back.
-constexpr double kLaneCenterOffsetBiasM = 0.6;
+constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
@@ -302,7 +303,7 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // A straight line has zero curvature everywhere; see kMaxCurvatureRadiusPx.
   result.curvature_radius_px = kMaxCurvatureRadiusPx;
 
-  const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
+  const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(width);
   // The lane center sits on the vehicle's side of a right lane line, but on the far side of a
   // left lane line, so the bias flips sign between the two -- see kLaneCenterOffsetBiasM.
   const double center_bias_m =
@@ -373,9 +374,10 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   // whichever single side is valid, unchanged from the single-lane behavior.
   LaneFitResult fit;
   if (right_fit.valid && left_fit.valid) {
-    const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(warped.cols);
+    const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(warped.cols);
     const double lane_width_m =
       (right_points.front().x - left_points.front().x) * meters_per_pixel;
+    printf("Lane width: %.2f m\n", lane_width_m);
     if (lane_width_m > kMaxPlausibleLaneWidthMeters) {
       // The two lines are farther apart than a real lane, so at least one of them isn't this
       // lane's own line -- trust whichever side is physically closer to the vehicle rather than
