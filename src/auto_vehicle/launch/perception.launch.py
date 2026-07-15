@@ -9,22 +9,10 @@ def generate_launch_description():
     model_path = os.path.join(
         get_package_share_directory('auto_vehicle'), 'models', 'best.pt')
 
-    bev_producer_node = Node(
+    perception_node = Node(
         package='auto_vehicle',
-        executable='bev_producer',
+        executable='perception',
         remappings=[('/image_raw', '/camera/image_raw')],
-        output='screen'
-    )
-
-    lane_detection_node = Node(
-        package='auto_vehicle',
-        executable='lane_detection',
-        output='screen'
-    )
-
-    stopline_detection_node = Node(
-        package='auto_vehicle',
-        executable='stopline_detection',
         output='screen'
     )
 
@@ -36,6 +24,4 @@ def generate_launch_description():
         output='screen'
     )
 
-    return LaunchDescription([
-        bev_producer_node, lane_detection_node, stopline_detection_node, object_detection_node
-    ])
+    return LaunchDescription([perception_node, object_detection_node])

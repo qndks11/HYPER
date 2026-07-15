@@ -1,4 +1,4 @@
-#include "auto_vehicle/lane_detection.hpp"
+#include "auto_vehicle/perception.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +9,16 @@
 
 namespace
 {
+// ROI trapezoid corners as (row_ratio, col_ratio) of the source image
+constexpr double kRoiTopLeftRow = 0.40,  kRoiTopLeftCol = 0.25;
+constexpr double kRoiTopRightRow = 0.40, kRoiTopRightCol = 0.75;
+constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -1.4;
+constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 2.4;
+
+// Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
+// down the road the BEV view looks. Width is left unscaled.
+constexpr double kBevHeightScale = 1.35;
+
 // Neighborhood radius for each step of the lane chain walk [px]. Also sets the rough spacing
 // between consecutive chain points, since each step prefers the farthest qualifying pixel within
 // this radius.
@@ -31,6 +41,8 @@ constexpr double kMinLineFitVariance = 1e-6;
 // speed throttle) see "very straight" instead of a non-finite value.
 constexpr double kMaxCurvatureRadiusPx = 1e6;
 
+// Shared by both lane and stop-line meters-per-pixel scaling -- previously duplicated across
+// lane_detection.cpp and stopline_detection.cpp.
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kNumLaneInScreen = 3.2;  // how many lanes fit across the BEV image width
 constexpr double kArrowLength = 100.0;
@@ -47,6 +59,15 @@ constexpr double kMaxPlausibleLaneWidthMeters = kLaneWidthMeters * 1.4;
 // still reports a centered estimate. When both sides are valid, the opposite signs cancel when
 // averaged, so image_callback's combined offset is just the plain average -- no bias to add back.
 constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
+
+// A stop-line bar spans most of the lane, so its bounding box is much wider than it is tall; a
+// single zebra-crossing stripe is comparatively close to square. This floor separates the two.
+constexpr double kMinStoplineAspectRatio = 3.0;
+// The stop-line bar must span at least this fraction of the BEV image width to count -- rules
+// out narrower marks (e.g. a single crossing stripe) that happen to pass the aspect ratio test.
+constexpr double kMinStoplineWidthFraction = 0.25;
+// Floor on contour area [px^2] to reject small mask noise before the shape checks run.
+constexpr double kMinStoplineAreaPx = 200.0;
 
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
@@ -72,20 +93,49 @@ bool is_spurious_cross_lane(const std::vector<cv::Point> & chain, const cv::Poin
 
 }  // namespace
 
-LaneDetection::LaneDetection() : Node{"lane_detection"}
+Perception::Perception() : Node{"perception"}
 {
   image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-    "/bev/image", 10, std::bind(&LaneDetection::image_callback, this, std::placeholders::_1));
+    "/image_raw", 10, std::bind(&Perception::image_callback, this, std::placeholders::_1));
 
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
+  stopline_publisher_ =
+    create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/detection", 10);
 
-  cv::namedWindow("Lane Detection", cv::WINDOW_NORMAL);
-  cv::resizeWindow("Lane Detection", kWindowWidth, kWindowHeight);
+  cv::namedWindow("Perception", cv::WINDOW_NORMAL);
+  cv::resizeWindow("Perception", kWindowWidth, static_cast<int>(kWindowHeight * kBevHeightScale));
 
-  RCLCPP_INFO(get_logger(), "LaneDetection started");
+  RCLCPP_INFO(get_logger(), "Perception started");
 }
 
-cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
+cv::Mat Perception::build_transform(
+  int src_height, int src_width, int dst_height, int dst_width) const
+{
+  const std::vector<cv::Point2f> src{
+    {static_cast<float>(src_width * kRoiTopLeftCol), static_cast<float>(src_height * kRoiTopLeftRow)},
+    {static_cast<float>(src_width * kRoiTopRightCol), static_cast<float>(src_height * kRoiTopRightRow)},
+    {static_cast<float>(src_width * kRoiBottomRightCol), static_cast<float>(src_height * kRoiBottomRightRow)},
+    {static_cast<float>(src_width * kRoiBottomLeftCol), static_cast<float>(src_height * kRoiBottomLeftRow)}};
+
+  const std::vector<cv::Point2f> dst{
+    {0.0f, 0.0f},
+    {static_cast<float>(dst_width), 0.0f},
+    {static_cast<float>(dst_width), static_cast<float>(dst_height)},
+    {0.0f, static_cast<float>(dst_height)}};
+
+  return cv::getPerspectiveTransform(src, dst);
+}
+
+cv::Mat Perception::bird_eye(const cv::Mat & image) const
+{
+  const cv::Size dst_size(image.cols, static_cast<int>(image.rows * kBevHeightScale));
+  const cv::Mat transform = build_transform(image.rows, image.cols, dst_size.height, dst_size.width);
+  cv::Mat warped;
+  cv::warpPerspective(image, warped, transform, dst_size);
+  return warped;
+}
+
+cv::Mat Perception::yellow_mask(const cv::Mat & image) const
 {
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
@@ -99,7 +149,21 @@ cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
   return mask;
 }
 
-std::vector<cv::Point> LaneDetection::walk_lane_chain(
+cv::Mat Perception::white_mask(const cv::Mat & image) const
+{
+  cv::Mat hsv;
+  cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
+
+  cv::Mat mask;
+  cv::inRange(hsv, cv::Scalar(0, 0, 180), cv::Scalar(180, 60, 255), mask);
+
+  const cv::Mat kernel = cv::Mat::ones(3, 3, CV_8U);
+  cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+
+  return mask;
+}
+
+std::vector<cv::Point> Perception::walk_lane_chain(
   const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin, LaneSide side) const
 {
   std::vector<cv::Point> chain;
@@ -201,7 +265,7 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
   return chain;
 }
 
-LaneDetection::LaneFitResult LaneDetection::fit_lane(
+Perception::LaneFitResult Perception::fit_lane(
   const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
   LaneSide side) const
 {
@@ -276,7 +340,46 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   return result;
 }
 
-void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+Perception::StoplineResult Perception::find_stopline(
+  const cv::Mat & mask, const cv::Point2d & origin, double meters_per_pixel) const
+{
+  StoplineResult result;
+
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+  const double min_width_px = mask.cols * kMinStoplineWidthFraction;
+
+  bool found = false;
+  cv::Rect best_box;
+  for (const auto & contour : contours) {
+    if (cv::contourArea(contour) < kMinStoplineAreaPx) {
+      continue;
+    }
+    const cv::Rect box = cv::boundingRect(contour);
+    const double aspect_ratio = static_cast<double>(box.width) / box.height;
+    if (aspect_ratio < kMinStoplineAspectRatio || box.width < min_width_px) {
+      continue;
+    }
+    // Closest to the vehicle wins: the stop line that actually governs the next stop.
+    if (!found || box.y + box.height > best_box.y + best_box.height) {
+      best_box = box;
+      found = true;
+    }
+  }
+
+  if (!found) {
+    return result;
+  }
+
+  result.valid = true;
+  result.bounding_box = best_box;
+  const double stopline_row = best_box.y + best_box.height;  // bottom edge, closest to vehicle
+  result.distance_m = (origin.y - stopline_row) * meters_per_pixel;
+  return result;
+}
+
+void Perception::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
   cv_bridge::CvImageConstPtr cv_ptr;
   try {
@@ -286,18 +389,27 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     return;
   }
 
-  const cv::Mat & warped = cv_ptr->image;
-  const cv::Mat mask = yellow_mask(warped);
-
-  // BEV with the yellow mask highlighted; this is also the single debug view, so the chain,
-  // fitted curve, and fit stats all get drawn on top of it below.
-  cv::Mat view = warped.clone();
-  view.setTo(cv::Scalar(0, 255, 0), mask);
-
+  const cv::Mat warped = bird_eye(cv_ptr->image);
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0);
+  // Shared by the lane-width plausibility check and stop-line distance below; fit_lane() also
+  // derives this internally per side, since it only receives `width` rather than this node's
+  // full image_callback scope.
+  const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(warped.cols);
+
+  const cv::Mat yellow = yellow_mask(warped);
+  const cv::Mat white = white_mask(warped);
+
+  // Single shared debug view: both masks are highlighted first (different colors so the two
+  // don't read as one blob), before either detector's annotations are drawn on top -- so a mask
+  // fill never overwrites an annotation drawn earlier.
+  cv::Mat view = warped.clone();
+  view.setTo(cv::Scalar(0, 255, 0), yellow);
+  view.setTo(cv::Scalar(180, 180, 180), white);
+
+  // --- Lane detection ---
 
   std::vector<cv::Point> yellow_points;
-  cv::findNonZero(mask, yellow_points);
+  cv::findNonZero(yellow, yellow_points);
   std::vector<cv::Point> right_chain = walk_lane_chain(yellow_points, origin, LaneSide::kRight);
   std::vector<cv::Point> left_chain = walk_lane_chain(yellow_points, origin, LaneSide::kLeft);
 
@@ -334,7 +446,6 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   // whichever single side is valid, unchanged from the single-lane behavior.
   LaneFitResult fit;
   if (right_fit.valid && left_fit.valid) {
-    const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(warped.cols);
     const double lane_width_m =
       (right_points.front().x - left_points.front().x) * meters_per_pixel;
     printf("Lane width: %.2f m\n", lane_width_m);
@@ -375,33 +486,68 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
                     fit.valid ? 1.0 : 0.0};
   lane_center_publisher_->publish(lane_msg);
 
-
-  const cv::Scalar text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
+  const cv::Scalar lane_text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
   char offset_text[64];
   std::snprintf(offset_text, sizeof(offset_text), "Offset: %.2f m", fit.offset_m);
-  cv::putText(view, offset_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(
+    view, offset_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, lane_text_color, 2);
 
   char angle_text[64];
   std::snprintf(angle_text, sizeof(angle_text), "Angle: %.2f deg", fit.steering_angle_deg);
-  cv::putText(view, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(
+    view, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, lane_text_color, 2);
 
-  if (!fit.valid) cv::putText(view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  if (!fit.valid) {
+    cv::putText(
+      view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0,
+      lane_text_color, 2);
+  }
 
   char sides_text[64];
   std::snprintf(
     sides_text, sizeof(sides_text), "L: %s  R: %s", left_fit.valid ? "OK" : "--",
     right_fit.valid ? "OK" : "--");
-  cv::putText(view, sides_text, cv::Point(30, 150), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(
+    view, sides_text, cv::Point(30, 150), cv::FONT_HERSHEY_SIMPLEX, 1.0, lane_text_color, 2);
 
-  cv::imshow("Lane Detection", view);
+  // --- Stop-line detection ---
+
+  const StoplineResult stopline = find_stopline(white, origin, meters_per_pixel);
+
+  if (stopline.valid) {
+    cv::rectangle(view, stopline.bounding_box, cv::Scalar(0, 0, 255), 3);
+  }
+
+  std_msgs::msg::Float64MultiArray stopline_msg;
+  stopline_msg.data = {stopline.distance_m, stopline.valid ? 1.0 : 0.0};
+  stopline_publisher_->publish(stopline_msg);
+
+  const cv::Scalar stopline_text_color =
+    stopline.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
+
+  // Anchored to the bottom of the frame so it doesn't collide with the lane section's
+  // top-anchored text above.
+  char distance_text[64];
+  std::snprintf(distance_text, sizeof(distance_text), "Distance: %.2f m", stopline.distance_m);
+  cv::putText(
+    view, distance_text, cv::Point(30, view.rows - 60), cv::FONT_HERSHEY_SIMPLEX, 1.0,
+    stopline_text_color, 2);
+
+  if (!stopline.valid) {
+    cv::putText(
+      view, "Stopline not detected", cv::Point(30, view.rows - 20), cv::FONT_HERSHEY_SIMPLEX, 1.0,
+      stopline_text_color, 2);
+  }
+
+  cv::imshow("Perception", view);
   cv::waitKey(1);
 }
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<LaneDetection>());
+  rclcpp::spin(std::make_shared<Perception>());
   rclcpp::shutdown();
   return 0;
 }
