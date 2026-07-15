@@ -30,35 +30,47 @@
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_1</name> 
-      <pose>-14.7 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>-20.50 -27.08 0.0 0.0 0.0 0.0</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_2</name> 
-      <pose>-15.2 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>-20.10 -27.08 0.0 0.0 0.0 0.0</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_3</name> 
-      <pose>-15.7 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>-19.70 -27.08 0.0 0.0 0.0 0.0</pose>
     </include>
     
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_4</name> 
-      <pose>-16.2 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>-19.30 -27.08 0.0 0.0 0.0 0.0</pose>
     </include>
     
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_5</name> 
-      <pose>-16.7 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>-18.90 -27.08 0.0 0.0 0.0 0.0</pose>
+    </include>
+    
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_15</name> 
+      <pose>-18.50 -27.08 0.0 0.0 0.0 0.0</pose>
+    </include>
+    
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_16</name> 
+      <pose>-18.10 -27.08 0.0 0.0 0.0 0.0</pose>
     </include>
 
     <model name="yellow_cube_1">
-      <pose>-17.3 -27.08 0.5 0.0 0.0 0.0</pose>
+      <pose>-17.40 -27.08 0.5 0.0 0.0 0.0</pose>
       <static>false</static> <link name="box_link">
         <inertial>
           <mass>1.0</mass>
