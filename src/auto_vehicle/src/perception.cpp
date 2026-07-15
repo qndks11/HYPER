@@ -67,7 +67,7 @@ constexpr double kMinStoplineAspectRatio = 3.0;
 // out narrower marks (e.g. a single crossing stripe) that happen to pass the aspect ratio test.
 constexpr double kMinStoplineWidthFraction = 0.25;
 // Floor on contour area [px^2] to reject small mask noise before the shape checks run.
-constexpr double kMinStoplineAreaPx = 200.0;
+constexpr double kMinStoplineAreaPx = 500.0;
 
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
@@ -356,8 +356,8 @@ Perception::StoplineResult Perception::find_stopline(
   // vehicle's own lane center (origin.x). One lane spans mask.cols / kNumLaneInScreen px, the same
   // scale used everywhere else in this file.
   const double lane_width_px = mask.cols / kNumLaneInScreen;
-  const double band_min_x = origin.x - lane_width_px / 2.0;
-  const double band_max_x = origin.x + lane_width_px / 2.0;
+  const double band_min_x = origin.x - 1.2 * lane_width_px / 2.0;
+  const double band_max_x = origin.x + 1.2 * lane_width_px / 2.0;
 
   bool found = false;
   cv::Rect best_box;
@@ -461,7 +461,6 @@ void Perception::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   if (right_fit.valid && left_fit.valid) {
     const double lane_width_m =
       (right_points.front().x - left_points.front().x) * meters_per_pixel;
-    printf("Lane width: %.2f m\n", lane_width_m);
     if (lane_width_m > kMaxPlausibleLaneWidthMeters) {
       // The two lines are farther apart than a real lane, so at least one of them isn't this
       // lane's own line -- trust whichever side is physically closer to the vehicle rather than
