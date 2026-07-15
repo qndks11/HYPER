@@ -40,6 +40,11 @@ constexpr double kMaxCurvatureRadiusPx = 1e6;
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
 
+// Tolerance above kLaneWidthMeters before two simultaneously-detected lines are treated as
+// implausibly far apart to be the same lane's pair (e.g. one side actually latched onto an
+// adjacent lane's paint). Loose enough to tolerate normal fit noise on a real lane.
+constexpr double kMaxPlausibleLaneWidthMeters = kLaneWidthMeters * 1.5;
+
 // Empirical half-lane-width offset [m] from a single tracked lane line to the estimated lane
 // center, calibrated back when only the right lane was tracked. Baked into fit_lane()'s offset_m,
 // signed per side (subtracted for the right lane, added for the left, since the center sits on
@@ -368,10 +373,22 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   // whichever single side is valid, unchanged from the single-lane behavior.
   LaneFitResult fit;
   if (right_fit.valid && left_fit.valid) {
-    fit.valid = true;
-    fit.offset_m = (right_fit.offset_m + left_fit.offset_m) / 2.0;
-    fit.steering_angle_deg = (right_fit.steering_angle_deg + left_fit.steering_angle_deg) / 2.0;
-    fit.curvature_radius_px = (right_fit.curvature_radius_px + left_fit.curvature_radius_px) / 2.0;
+    const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(warped.cols);
+    const double lane_width_m =
+      (right_points.front().x - left_points.front().x) * meters_per_pixel;
+    if (lane_width_m > kMaxPlausibleLaneWidthMeters) {
+      // The two lines are farther apart than a real lane, so at least one of them isn't this
+      // lane's own line -- trust whichever side is physically closer to the vehicle rather than
+      // averaging in a bogus far side.
+      const bool right_closer =
+        std::abs(right_points.front().x - origin.x) < std::abs(left_points.front().x - origin.x);
+      fit = right_closer ? right_fit : left_fit;
+    } else {
+      fit.valid = true;
+      fit.offset_m = (right_fit.offset_m + left_fit.offset_m) / 2.0;
+      fit.steering_angle_deg = (right_fit.steering_angle_deg + left_fit.steering_angle_deg) / 2.0;
+      fit.curvature_radius_px = (right_fit.curvature_radius_px + left_fit.curvature_radius_px) / 2.0;
+    }
   } else if (right_fit.valid) {
     fit = right_fit;
   } else if (left_fit.valid) {
