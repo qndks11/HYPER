@@ -28,12 +28,6 @@ def generate_launch_description():
         output='screen'
     )
 
-    visualizer_node = Node(
-        package='auto_vehicle',
-        executable='visualizer',
-        output='screen'
-    )
-
     object_detection_node = Node(
         package='auto_vehicle',
         executable='object_detection',
@@ -43,6 +37,5 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        bev_producer_node, lane_detection_node, stopline_detection_node, visualizer_node,
-        object_detection_node
+        bev_producer_node, lane_detection_node, stopline_detection_node, object_detection_node
     ])

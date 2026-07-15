@@ -74,6 +74,9 @@ void BevProducer::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   const sensor_msgs::msg::Image::SharedPtr bev_msg =
     cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::BGR8, warped).toImageMsg();
   bev_publisher_->publish(*bev_msg);
+
+  cv::imshow("BEV", warped);
+  cv::waitKey(1);
 }
 
 int main(int argc, char ** argv)

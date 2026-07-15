@@ -26,10 +26,8 @@ private:
    *
    * @details Masks white paint, then hands the mask to find_stopline() to pick out the stop-line
    * bar by shape. Publishes whether a stop line is visible and, if so, its distance ahead of the
-   * vehicle on `/stopline/detection`. The white mask highlight, matched bounding box, and distance
-   * readout are drawn onto a black canvas the same size as the BEV frame, published on
-   * `/stopline/overlay` (for visualizer to combine with other detectors' views), and also composed
-   * onto this node's own BEV frame for its own debug view.
+   * vehicle on `/stopline/detection`, and shows a debug view (white mask, matched bounding box,
+   * distance readout).
    *
    * @param msg Incoming BEV image.
    */
@@ -64,7 +62,6 @@ private:
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_publisher_;
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr stopline_overlay_publisher_;
 };
 
 #endif  // STOPLINE_DETECTION_HPP

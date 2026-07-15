@@ -1,7 +1,5 @@
 #include "auto_vehicle/lane_detection.hpp"
 
-#include "auto_vehicle/image_overlay.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -80,7 +78,6 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
     "/bev/image", 10, std::bind(&LaneDetection::image_callback, this, std::placeholders::_1));
 
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
-  lane_overlay_publisher_ = create_publisher<sensor_msgs::msg::Image>("/lane/overlay", 10);
 
   cv::namedWindow("Lane Detection", cv::WINDOW_NORMAL);
   cv::resizeWindow("Lane Detection", kWindowWidth, kWindowHeight);
@@ -292,12 +289,10 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   const cv::Mat & warped = cv_ptr->image;
   const cv::Mat mask = yellow_mask(warped);
 
-  // Annotations only, on an otherwise-black canvas the same size as the BEV frame: the yellow
-  // mask highlight, then the chain, fitted curve, and fit stats all drawn on top of it below.
-  // Published as-is on /lane/overlay and also composed onto this node's own BEV frame further
-  // down for its own debug view -- see compose_overlay().
-  cv::Mat overlay = cv::Mat::zeros(warped.size(), warped.type());
-  overlay.setTo(cv::Scalar(0, 255, 0), mask);
+  // BEV with the yellow mask highlighted; this is also the single debug view, so the chain,
+  // fitted curve, and fit stats all get drawn on top of it below.
+  cv::Mat view = warped.clone();
+  view.setTo(cv::Scalar(0, 255, 0), mask);
 
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0);
 
@@ -327,8 +322,8 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     prev_left_points_ = left_points;
   }
 
-  for (const auto & p : right_points) cv::circle(overlay, p, 3, cv::Scalar(0, 165, 255), -1);
-  for (const auto & p : left_points) cv::circle(overlay, p, 3, cv::Scalar(255, 0, 0), -1);
+  for (const auto & p : right_points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
+  for (const auto & p : left_points) cv::circle(view, p, 3, cv::Scalar(255, 0, 0), -1);
 
   const LaneFitResult right_fit = fit_lane(right_points, origin, warped.cols, LaneSide::kRight);
   const LaneFitResult left_fit = fit_lane(left_points, origin, warped.cols, LaneSide::kLeft);
@@ -342,6 +337,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(warped.cols);
     const double lane_width_m =
       (right_points.front().x - left_points.front().x) * meters_per_pixel;
+    printf("Lane width: %.2f m\n", lane_width_m);
     if (lane_width_m > kMaxPlausibleLaneWidthMeters) {
       // The two lines are farther apart than a real lane, so at least one of them isn't this
       // lane's own line -- trust whichever side is physically closer to the vehicle rather than
@@ -361,8 +357,8 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     fit = left_fit;
   }
 
-  if (right_fit.valid) cv::polylines(overlay, right_fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
-  if (left_fit.valid) cv::polylines(overlay, left_fit.curve_points, false, cv::Scalar(0, 255, 255), 3);
+  if (right_fit.valid) cv::polylines(view, right_fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
+  if (left_fit.valid) cv::polylines(view, left_fit.curve_points, false, cv::Scalar(0, 255, 255), 3);
 
   if (fit.valid) {
     const cv::Point arrow_start(static_cast<int>(origin.x), static_cast<int>(origin.y));
@@ -371,7 +367,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
         origin.x + kArrowLength * std::sin(fit.steering_angle_deg * CV_PI / 180.0)),
       static_cast<int>(
         origin.y - kArrowLength * std::cos(fit.steering_angle_deg * CV_PI / 180.0)));
-    cv::line(overlay, arrow_start, arrow_end, cv::Scalar(255, 0, 0), 2);
+    cv::line(view, arrow_start, arrow_end, cv::Scalar(255, 0, 0), 2);
   }
 
   std_msgs::msg::Float64MultiArray lane_msg;
@@ -384,26 +380,22 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   char offset_text[64];
   std::snprintf(offset_text, sizeof(offset_text), "Offset: %.2f m", fit.offset_m);
-  cv::putText(overlay, offset_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(view, offset_text, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   char angle_text[64];
   std::snprintf(angle_text, sizeof(angle_text), "Angle: %.2f deg", fit.steering_angle_deg);
-  cv::putText(overlay, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(view, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
-  if (!fit.valid) cv::putText(overlay, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  if (!fit.valid) cv::putText(view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   char sides_text[64];
   std::snprintf(
     sides_text, sizeof(sides_text), "L: %s  R: %s", left_fit.valid ? "OK" : "--",
     right_fit.valid ? "OK" : "--");
-  cv::putText(overlay, sides_text, cv::Point(30, 150), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+  cv::putText(view, sides_text, cv::Point(30, 150), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
-  const sensor_msgs::msg::Image::SharedPtr overlay_msg =
-    cv_bridge::CvImage(msg->header, sensor_msgs::image_encodings::BGR8, overlay).toImageMsg();
-  lane_overlay_publisher_->publish(*overlay_msg);
-
-  cv::Mat view = warped.clone();
-  compose_overlay(view, overlay);
+  cv::imshow("Lane Detection", view);
+  cv::waitKey(1);
 }
 
 int main(int argc, char ** argv)

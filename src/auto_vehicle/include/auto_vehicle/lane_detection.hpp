@@ -37,10 +37,8 @@ private:
    * onto the same physical lane line. Each surviving chain is fit to a straight line via
    * fit_lane(); when both are valid the two are averaged into a true lane-center estimate (see
    * kLaneCenterOffsetBiasM), otherwise whichever single side is valid is used as-is. Publishes
-   * offset/steering angle/curvature-radius on `/lane/center`. The mask highlight, walked chains,
-   * fitted lines, and offset/angle stats are drawn onto a black canvas the same size as the BEV
-   * frame, published on `/lane/overlay` (for visualizer to combine with other detectors' views),
-   * and also composed onto this node's own BEV frame for its own debug view.
+   * offset/steering angle/curvature-radius on `/lane/center`, and shows a single BEV debug view
+   * (yellow mask, both walked chains, both fitted lines, and offset/angle stats).
    *
    * @param msg Incoming BEV image.
    */
@@ -115,7 +113,6 @@ private:
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr lane_overlay_publisher_;
 
   std::vector<cv::Point> prev_left_points_;
   std::vector<cv::Point> prev_right_points_;

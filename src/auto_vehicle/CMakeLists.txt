@@ -33,9 +33,6 @@ ament_target_dependencies(bev_producer rclcpp sensor_msgs cv_bridge OpenCV)
 add_executable(stopline_detection src/stopline_detection.cpp)
 ament_target_dependencies(stopline_detection rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
 
-add_executable(visualizer src/visualizer.cpp)
-ament_target_dependencies(visualizer rclcpp sensor_msgs cv_bridge OpenCV)
-
 install(
   DIRECTORY launch urdf config models
   DESTINATION share/${PROJECT_NAME}
@@ -47,7 +44,6 @@ install(TARGETS
   lane_detection
   bev_producer
   stopline_detection
-  visualizer
   DESTINATION lib/${PROJECT_NAME}
 )
 
