@@ -19,6 +19,7 @@
   <xacro:arg name="camera_stick_size" default="0.2" />
   <xacro:arg name="camera_height" default="1.5" />
   <xacro:arg name="camera_pitch" default="0.1" />
+  <xacro:arg name="camera_setback" default="0.3" />
   <xacro:arg name="camera_fov" default="1.396263" />
   <xacro:arg name="camera_fps" default="30" />
   <xacro:arg name="image_width" default="640" />
@@ -44,6 +45,7 @@
   <xacro:property name="camera_stick_size" value="$(arg camera_stick_size)"/>
   <xacro:property name="camera_height" value="$(arg camera_height)"/>
   <xacro:property name="camera_pitch" value="$(arg camera_pitch)"/>
+  <xacro:property name="camera_setback" value="$(arg camera_setback)"/>
   <xacro:property name="camera_fov" value="$(arg camera_fov)"/>
   <xacro:property name="camera_fps" value="$(arg camera_fps)"/>
   <xacro:property name="image_width" value="$(arg image_width)"/>
@@ -414,7 +416,7 @@
   <!-- Camera Stick Joint -->
   <joint name="camera_stick_joint" type="fixed">
     <axis xyz="0 1 0" />
-    <origin xyz="${body_length/2 - camera_stick_size/2} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 0.0"/>
+    <origin xyz="${body_length/2 - camera_stick_size/2 - camera_setback} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 0.0"/>
     <parent link="body_link"/>
     <child link="camera_stick_link"/>
   </joint>
@@ -505,16 +507,6 @@
 
   <!-- Gazebo Plugins -->
   <gazebo>
-    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
-      <topic>joint_states</topic>
-      <joint_name>front_left_steering_joint</joint_name>
-      <joint_name>front_right_steering_joint</joint_name>
-      <joint_name>front_left_wheel_joint</joint_name>
-      <joint_name>front_right_wheel_joint</joint_name>
-      <joint_name>rear_left_wheel_joint</joint_name>
-      <joint_name>rear_right_wheel_joint</joint_name>
-    </plugin>
-
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
       <parameters>$(find auto_vehicle)/config/gz_ros2_control.yaml</parameters>
     </plugin>
@@ -547,8 +539,7 @@
       <update_rate>${camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera</topic>
-      <pose>0 0 0 0 0 0</pose>
-      <always_on>true</always_on>
+
       <camera name="head">
         <horizontal_fov>${camera_fov}</horizontal_fov>
         <image>
@@ -558,22 +549,26 @@
         </image>
         <clip>
           <near>0.02</near>
-          <far>300</far>
-        </clip>    
-        <distortion>
-          <k1>0.0</k1>
-          <k2>0.0</k2>
-          <k3>0.0</k3>
-          <p1>0.0</p1>
-          <p2>0.0</p2>
-          <center>0.5 0.5</center>
-        </distortion>
+          <far>550</far>
+        </clip>
         <noise>
           <type>gaussian</type>
           <mean>0.0</mean>
           <stddev>0.007</stddev>
         </noise>
       </camera>
+      <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>0.0</updateRate>
+        <cameraName>vehicle_front_camera</cameraName>
+        <frameName>camera_link</frameName>
+        <hackBaseline>0.07</hackBaseline>
+        <distortionK1>0.0</distortionK1>
+        <distortionK2>0.0</distortionK2>
+        <distortionK3>0.0</distortionK3>
+        <distortionT1>0.0</distortionT1>
+        <distortionT2>0.0</distortionT2>
+      </plugin>
     </sensor>
   </gazebo>
 

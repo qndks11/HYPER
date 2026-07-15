@@ -17,6 +17,7 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 | `vehicle_controller` | `src/vehicle_controller.cpp` | Ackermann 조향/속도 명령 처리 |
 | `joystick_controller` | `src/joystick_controller.cpp` | 조이스틱 입력 → `/cmd_vel` 변환 |
 | `lane_detection` | `src/lane_detection.cpp` | 카메라 영상 기반 차선 감지 + OpenCV 디버그 대시보드 |
+| `object_detection` | `scripts/object_detection.py` | YOLO 기반 객체 탐지 + OpenCV 디버그 대시보드 |
 
 ---
 
@@ -33,7 +34,7 @@ HYPER/
 │       ├── include/auto_vehicle/   # 헤더 파일
 │       ├── launch/                 # ROS 2 launch 파일
 │       │   ├── joystick.launch.py
-│       │   ├── lane.launch.py
+│       │   ├── perception.launch.py
 │       │   └── vehicle.launch.py
 │       ├── src/                    # 노드 소스 코드 (위 표 참고)
 │       ├── urdf/                   # 로봇 모델 (URDF/xacro)
@@ -116,13 +117,13 @@ ros2 launch auto_vehicle vehicle.launch.py x:=2.0 y:=1.0 z:=0.1 R:=0.0 P:=0.0 Y:
 
 ---
 
-## 차선 감지 노드 실행
+## 인지(perception) 노드 실행
 
-`vehicle.launch.py`는 차선 감지 노드를 포함하지 않으므로, 별도로 실행해야 합니다. 시뮬레이션 카메라(`/camera/image_raw`)와 실제 카메라/rosbag 모두 동일하게 사용할 수 있습니다.
+`vehicle.launch.py`는 차선/객체 감지 노드를 포함하지 않으므로, 별도로 실행해야 합니다. 시뮬레이션 카메라(`/camera/image_raw`)와 실제 카메라/rosbag 모두 동일하게 사용할 수 있습니다.
 
 ```bash
-# 차선 감지 → /lane/center 퍼블리시 + OpenCV 디버그 대시보드 표시
-ros2 launch auto_vehicle lane.launch.py
+# 차선 감지(/lane/center 퍼블리시) + 객체 감지(YOLO), 각각 OpenCV 디버그 대시보드 표시
+ros2 launch auto_vehicle perception.launch.py
 ```
 
 시뮬레이션과 함께 사용하려면 `vehicle.launch.py`를 먼저 실행한 뒤, 별도 터미널에서 위 명령을 실행하면 됩니다.

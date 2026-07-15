@@ -1,0 +1,485 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="gazebo_traffic_light">
+    <static>false</static>
+
+    <link name="light_fixture">
+      <gravity>false</gravity>
+      <pose>0 0 0 0 0 0</pose>
+      <visual name="visual">
+        <pose>0 0.535 -0.175 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.1 0.4 1.6</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.02 0.02 0.02 1</ambient>
+          <diffuse>0.02 0.02 0.02 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="red_off">
+      <gravity>false</gravity>
+      <pose>0.075 0.535 0.35 0 1.5707 0</pose>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>1 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Visor covering the upper ~70% of the lens, open on the underside -->
+      <visual name="visor_visual">
+        <geometry>
+          <polyline>
+            <point>-0.1618 -0.1176</point>
+            <point>-0.1932 -0.0518</point>
+            <point>-0.1989 0.0209</point>
+            <point>-0.1782 0.0908</point>
+            <point>-0.1338 0.1486</point>
+            <point>-0.0717 0.1867</point>
+            <point>-0.0000 0.2000</point>
+            <point>0.0717 0.1867</point>
+            <point>0.1338 0.1486</point>
+            <point>0.1782 0.0908</point>
+            <point>0.1989 0.0209</point>
+            <point>0.1932 -0.0518</point>
+            <point>0.1618 -0.1176</point>
+            <point>0.1294 -0.0940</point>
+            <point>0.1545 -0.0414</point>
+            <point>0.1591 0.0167</point>
+            <point>0.1426 0.0726</point>
+            <point>0.1071 0.1189</point>
+            <point>0.0573 0.1494</point>
+            <point>-0.0000 0.1600</point>
+            <point>-0.0573 0.1494</point>
+            <point>-0.1071 0.1189</point>
+            <point>-0.1426 0.0726</point>
+            <point>-0.1591 0.0167</point>
+            <point>-0.1545 -0.0414</point>
+            <point>-0.1294 -0.0940</point>
+            <height>0.15</height>
+          </polyline>
+        </geometry>
+        <material>
+          <ambient>0.02 0.02 0.02 1</ambient>
+          <diffuse>0.02 0.02 0.02 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="red_on">
+      <gravity>false</gravity>
+      <pose>0 0.535 0.35 0 1.5707 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>1 0 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+
+    <link name="yellow_off">
+      <gravity>false</gravity>
+      <pose>0.075 0.535 0 0 1.5707 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>1 1 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Visor covering the upper ~70% of the lens, open on the underside -->
+      <visual name="visor_visual">
+        <geometry>
+          <polyline>
+            <point>-0.1618 -0.1176</point>
+            <point>-0.1932 -0.0518</point>
+            <point>-0.1989 0.0209</point>
+            <point>-0.1782 0.0908</point>
+            <point>-0.1338 0.1486</point>
+            <point>-0.0717 0.1867</point>
+            <point>-0.0000 0.2000</point>
+            <point>0.0717 0.1867</point>
+            <point>0.1338 0.1486</point>
+            <point>0.1782 0.0908</point>
+            <point>0.1989 0.0209</point>
+            <point>0.1932 -0.0518</point>
+            <point>0.1618 -0.1176</point>
+            <point>0.1294 -0.0940</point>
+            <point>0.1545 -0.0414</point>
+            <point>0.1591 0.0167</point>
+            <point>0.1426 0.0726</point>
+            <point>0.1071 0.1189</point>
+            <point>0.0573 0.1494</point>
+            <point>-0.0000 0.1600</point>
+            <point>-0.0573 0.1494</point>
+            <point>-0.1071 0.1189</point>
+            <point>-0.1426 0.0726</point>
+            <point>-0.1591 0.0167</point>
+            <point>-0.1545 -0.0414</point>
+            <point>-0.1294 -0.0940</point>
+            <height>0.15</height>
+          </polyline>
+        </geometry>
+        <material>
+          <ambient>0.02 0.02 0.02 1</ambient>
+          <diffuse>0.02 0.02 0.02 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="yellow_on">
+      <gravity>false</gravity>
+      <pose>0 0.535 0 0 1.5707 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>1 0.65 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+
+    <link name="right_turn_off">
+      <gravity>false</gravity>
+      <pose>0.075 0.535 -0.35 0 1.5707 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 1 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Visor covering the upper ~70% of the lens, open on the underside -->
+      <visual name="visor_visual">
+        <geometry>
+          <polyline>
+            <point>-0.1618 -0.1176</point>
+            <point>-0.1932 -0.0518</point>
+            <point>-0.1989 0.0209</point>
+            <point>-0.1782 0.0908</point>
+            <point>-0.1338 0.1486</point>
+            <point>-0.0717 0.1867</point>
+            <point>-0.0000 0.2000</point>
+            <point>0.0717 0.1867</point>
+            <point>0.1338 0.1486</point>
+            <point>0.1782 0.0908</point>
+            <point>0.1989 0.0209</point>
+            <point>0.1932 -0.0518</point>
+            <point>0.1618 -0.1176</point>
+            <point>0.1294 -0.0940</point>
+            <point>0.1545 -0.0414</point>
+            <point>0.1591 0.0167</point>
+            <point>0.1426 0.0726</point>
+            <point>0.1071 0.1189</point>
+            <point>0.0573 0.1494</point>
+            <point>-0.0000 0.1600</point>
+            <point>-0.0573 0.1494</point>
+            <point>-0.1071 0.1189</point>
+            <point>-0.1426 0.0726</point>
+            <point>-0.1591 0.0167</point>
+            <point>-0.1545 -0.0414</point>
+            <point>-0.1294 -0.0940</point>
+            <height>0.15</height>
+          </polyline>
+        </geometry>
+        <material>
+          <ambient>0.02 0.02 0.02 1</ambient>
+          <diffuse>0.02 0.02 0.02 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="right_turn_on">
+      <gravity>false</gravity>
+      <pose>0 0.535 -0.35 0 1.5707 0</pose>
+
+      <!-- Chevron ">" -->
+      <visual name="chevron_visual">
+        <geometry>
+          <polyline>
+            <point>-0.171 0.000</point>
+            <point>-0.055 0.117</point>
+            <point>-0.033 0.096</point>
+            <point>-0.129 0.000</point>
+            <point>-0.033 -0.096</point>
+            <point>-0.055 -0.117</point>
+            <height>0.002</height>
+          </polyline>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 1 0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Dash "-" -->
+      <visual name="dash_visual">
+        <geometry>
+          <polyline>
+            <point>-0.060 0.017</point>
+            <point>0.060 0.017</point>
+            <point>0.060 -0.013</point>
+            <point>-0.060 -0.013</point>
+            <height>0.002</height>
+          </polyline>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 1 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+
+    <link name="green_off">
+      <gravity>false</gravity>
+      <pose>0.075 0.535 -0.7 0 1.5707 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 1 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0 0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Visor covering the upper ~70% of the lens, open on the underside -->
+      <visual name="visor_visual">
+        <geometry>
+          <polyline>
+            <point>-0.1618 -0.1176</point>
+            <point>-0.1932 -0.0518</point>
+            <point>-0.1989 0.0209</point>
+            <point>-0.1782 0.0908</point>
+            <point>-0.1338 0.1486</point>
+            <point>-0.0717 0.1867</point>
+            <point>-0.0000 0.2000</point>
+            <point>0.0717 0.1867</point>
+            <point>0.1338 0.1486</point>
+            <point>0.1782 0.0908</point>
+            <point>0.1989 0.0209</point>
+            <point>0.1932 -0.0518</point>
+            <point>0.1618 -0.1176</point>
+            <point>0.1294 -0.0940</point>
+            <point>0.1545 -0.0414</point>
+            <point>0.1591 0.0167</point>
+            <point>0.1426 0.0726</point>
+            <point>0.1071 0.1189</point>
+            <point>0.0573 0.1494</point>
+            <point>-0.0000 0.1600</point>
+            <point>-0.0573 0.1494</point>
+            <point>-0.1071 0.1189</point>
+            <point>-0.1426 0.0726</point>
+            <point>-0.1591 0.0167</point>
+            <point>-0.1545 -0.0414</point>
+            <point>-0.1294 -0.0940</point>
+            <height>0.15</height>
+          </polyline>
+        </geometry>
+        <material>
+          <ambient>0.02 0.02 0.02 1</ambient>
+          <diffuse>0.02 0.02 0.02 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="green_on">
+      <gravity>false</gravity>
+      <pose>0 0.535 -0.7 0 1.5707 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.15</radius>
+            <length>0.002</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 0 0 1</ambient>
+          <diffuse>0 0 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 1 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="green_switch" type="prismatic" >
+      <parent>green_off</parent>
+      <child>green_on</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0.101</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="green_base" type="fixed" >
+      <parent>light_fixture</parent>
+      <child>green_off</child>
+    </joint>
+
+    <joint name="yellow_switch" type="prismatic" >
+      <parent>yellow_off</parent>
+      <child>yellow_on</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0.101</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="yellow_base" type="fixed" >
+      <parent>light_fixture</parent>
+      <child>yellow_off</child>
+    </joint>
+
+    <joint name="red_switch" type="prismatic" >
+      <parent>red_off</parent>
+      <child>red_on</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0.101</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="red_base" type="fixed" >
+      <parent>light_fixture</parent>
+      <child>red_off</child>
+    </joint>
+
+    <joint name="right_turn_switch" type="prismatic" >
+      <parent>right_turn_off</parent>
+      <child>right_turn_on</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0.101</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="right_turn_base" type="fixed" >
+      <parent>light_fixture</parent>
+      <child>right_turn_off</child>
+    </joint>
+  </model>
+</sdf>
