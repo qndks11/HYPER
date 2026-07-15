@@ -154,9 +154,12 @@ private:
    * kMinStoplineAspectRatio) and wide relative to the frame (spans at least
    * kMinStoplineWidthFraction of the image width). The width-fraction check is what rules out a
    * zebra crossing's individual stripes, which can pass the aspect-ratio test on their own but
-   * don't individually span the lane the way an unbroken stop-line bar does. Among survivors, the
-   * one closest to the vehicle (largest row) is returned, since that's the stop line that
-   * actually governs the vehicle's next stop.
+   * don't individually span the lane the way an unbroken stop-line bar does. A shape match alone
+   * isn't enough at a multi-lane intersection, though, since an adjacent lane's stop-line bar can
+   * look identical -- candidates are also rejected if their horizontal center falls outside a
+   * one-lane-wide band centered on `origin`'s x, so only a bar actually in the vehicle's own lane
+   * survives. Among what's left, the one closest to the vehicle (largest row) is returned, since
+   * that's the stop line that actually governs the vehicle's next stop.
    *
    * @param mask White paint mask (BEV, from white_mask()).
    * @param origin The bottom-center point representing the vehicle's position.

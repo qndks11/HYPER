@@ -350,6 +350,15 @@ Perception::StoplineResult Perception::find_stopline(
 
   const double min_width_px = mask.cols * kMinStoplineWidthFraction;
 
+  // A stop-line bar belonging to some other lane at a multi-lane intersection can still pass the
+  // aspect-ratio and min-width checks above, so it's not enough to look at a candidate's shape --
+  // gate on lateral position too: reject anything centered more than half a lane away from the
+  // vehicle's own lane center (origin.x). One lane spans mask.cols / kNumLaneInScreen px, the same
+  // scale used everywhere else in this file.
+  const double lane_width_px = mask.cols / kNumLaneInScreen;
+  const double band_min_x = origin.x - lane_width_px / 2.0;
+  const double band_max_x = origin.x + lane_width_px / 2.0;
+
   bool found = false;
   cv::Rect best_box;
   for (const auto & contour : contours) {
@@ -359,6 +368,10 @@ Perception::StoplineResult Perception::find_stopline(
     const cv::Rect box = cv::boundingRect(contour);
     const double aspect_ratio = static_cast<double>(box.width) / box.height;
     if (aspect_ratio < kMinStoplineAspectRatio || box.width < min_width_px) {
+      continue;
+    }
+    const double box_center_x = box.x + box.width / 2.0;
+    if (box_center_x < band_min_x || box_center_x > band_max_x) {
       continue;
     }
     // Closest to the vehicle wins: the stop line that actually governs the next stop.
