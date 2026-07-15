@@ -40,12 +40,39 @@ constexpr double kMaxCurvatureRadiusPx = 1e6;
 constexpr double kLaneWidthMeters = 3.7;
 constexpr double kArrowLength = 100.0;
 
+// Empirical half-lane-width offset [m] from a single tracked lane line to the estimated lane
+// center, calibrated back when only the right lane was tracked. Baked into fit_lane()'s offset_m,
+// signed per side (subtracted for the right lane, added for the left, since the center sits on
+// opposite sides of each line), so the single-lane fallback (only one side detected this frame)
+// still reports a centered estimate. When both sides are valid, the opposite signs cancel when
+// averaged, so image_callback's combined offset is just the plain average -- no bias to add back.
+constexpr double kLaneCenterOffsetBiasM = 0.6;
+
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
 
 // Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
 // down the road the BEV view looks. Width is left unscaled.
 constexpr double kBevHeightScale = 1.35;
+
+// True if `chain` starts on one side of origin.x and ends on the other, but its endpoint isn't
+// farther from the vehicle (smaller row) than its start point. A chain that genuinely walks a
+// curving lane across the centerline still gets farther from the vehicle as it goes; a chain that
+// fails that check instead indicates the left- and right-side seeds latched onto the same
+// physical lane line (e.g. a single lane straddling origin.x), so the caller should discard it
+// rather than report it as a second, distinct lane.
+bool is_spurious_cross_lane(const std::vector<cv::Point> & chain, const cv::Point2d & origin)
+{
+  if (chain.size() < 2) {
+    return false;
+  }
+  const bool start_left = chain.front().x < origin.x;
+  const bool end_left = chain.back().x < origin.x;
+  if (start_left == end_left) {
+    return false;
+  }
+  return chain.front().y <= chain.back().y;
+}
 
 }  // namespace
 
@@ -105,18 +132,19 @@ cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
 }
 
 std::vector<cv::Point> LaneDetection::walk_lane_chain(
-  const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin) const
+  const std::vector<cv::Point> & yellow_points, const cv::Point2d & origin, LaneSide side) const
 {
   std::vector<cv::Point> chain;
   if (yellow_points.empty()) {
     return chain;
   }
 
-  // Seed: the bottommost yellow pixel on the right half of the image (closest to the vehicle,
-  // on the right lane).
+  // Seed: the bottommost yellow pixel on the requested half of the image (closest to the
+  // vehicle, on that side's lane).
   const cv::Point * seed = nullptr;
   for (const auto & p : yellow_points) {
-    if (p.x < origin.x) {
+    const bool wrong_side = side == LaneSide::kRight ? (p.x < origin.x) : (p.x >= origin.x);
+    if (wrong_side) {
       continue;
     }
     if (!seed || p.y > seed->y ||
@@ -173,24 +201,25 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
       break;
     }
 
-    // Rank candidates by how closely aligned they are with the current direction (smallest
-    // angle first, via the signed sine from the cross product -- valid since candidates are
-    // already restricted to +/-90 degrees), then by distance from the current point, farthest
-    // first.
+    // Rank candidates by their signed angle to the current direction (cross product over the
+    // product of norms -- valid without abs() since candidates are already restricted to +/-90
+    // degrees, so the sign alone orders them). The right lane is walked most-positive-angle
+    // first; the left lane is walked in the opposite order, most-negative first (see LaneSide).
+    // Ties are broken by distance from the current point, farthest first.
     std::sort(
       candidates.begin(), candidates.end(), [&](const cv::Point & a, const cv::Point & b) {
         const double adx = a.x - current.x, ady = current.y - a.y;
         const double bdx = b.x - current.x, bdy = current.y - b.y;
         const double a_dist = std::hypot(adx, ady);
         const double b_dist = std::hypot(bdx, bdy);
-        // |sin(a)| < |sin(b)|  <=>  |cross_a| / a_dist < |cross_b| / b_dist  <=>
-        // |cross_a| * b_dist < |cross_b| * a_dist (dir_norm cancels; distances are positive).
+        // sin(a) vs sin(b): cross_a / a_dist vs cross_b / b_dist <=> cross_a * b_dist vs
+        // cross_b * a_dist (dir_norm cancels; distances are positive).
         const double a_cross = direction.x * ady - direction.y * adx;
         const double b_cross = direction.x * bdy - direction.y * bdx;
         const double lhs = a_cross * b_dist;
         const double rhs = b_cross * a_dist;
         if (lhs != rhs) {
-          return lhs > rhs;
+          return side == LaneSide::kRight ? lhs > rhs : lhs < rhs;
         }
         return a_dist > b_dist;
       });
@@ -205,7 +234,8 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
 }
 
 LaneDetection::LaneFitResult LaneDetection::fit_lane(
-  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width) const
+  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
+  LaneSide side) const
 {
   LaneFitResult result;
   if (static_cast<int>(points.size()) < kMinLanePoints) {
@@ -268,7 +298,11 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   result.curvature_radius_px = kMaxCurvatureRadiusPx;
 
   const double meters_per_pixel = kLaneWidthMeters / static_cast<double>(width);
-  result.offset_m = (p0.x - origin.x) * meters_per_pixel - 0.6;
+  // The lane center sits on the vehicle's side of a right lane line, but on the far side of a
+  // left lane line, so the bias flips sign between the two -- see kLaneCenterOffsetBiasM.
+  const double center_bias_m =
+    side == LaneSide::kRight ? -kLaneCenterOffsetBiasM : kLaneCenterOffsetBiasM;
+  result.offset_m = (p0.x - origin.x) * meters_per_pixel + center_bias_m;
 
   result.valid = true;
   return result;
@@ -298,23 +332,56 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   std::vector<cv::Point> yellow_points;
   cv::findNonZero(mask, yellow_points);
-  const std::vector<cv::Point> chain = walk_lane_chain(yellow_points, origin);
+  std::vector<cv::Point> right_chain = walk_lane_chain(yellow_points, origin, LaneSide::kRight);
+  std::vector<cv::Point> left_chain = walk_lane_chain(yellow_points, origin, LaneSide::kLeft);
 
-  // Fall back to the previous frame's lane when nothing is found this frame.
-  std::vector<cv::Point> points = chain;
-  if (points.empty()) {
-    points = prev_points_;
+  // A chain that crosses to the other side without getting farther from the vehicle is most
+  // likely the same physical lane line the other side's seed already claimed; see
+  // is_spurious_cross_lane().
+  if (is_spurious_cross_lane(right_chain, origin)) right_chain.clear();
+  if (is_spurious_cross_lane(left_chain, origin)) left_chain.clear();
+
+  // Fall back to the previous frame's lane, per side, when nothing is found this frame.
+  std::vector<cv::Point> right_points = right_chain;
+  if (right_points.empty()) {
+    right_points = prev_right_points_;
   } else {
-    prev_points_ = points;
+    prev_right_points_ = right_points;
   }
 
-  for (const auto & p : points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
+  std::vector<cv::Point> left_points = left_chain;
+  if (left_points.empty()) {
+    left_points = prev_left_points_;
+  } else {
+    prev_left_points_ = left_points;
+  }
 
-  const LaneFitResult fit = fit_lane(points, origin, warped.cols);
+  for (const auto & p : right_points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
+  for (const auto & p : left_points) cv::circle(view, p, 3, cv::Scalar(255, 0, 0), -1);
+
+  const LaneFitResult right_fit = fit_lane(right_points, origin, warped.cols, LaneSide::kRight);
+  const LaneFitResult left_fit = fit_lane(left_points, origin, warped.cols, LaneSide::kLeft);
+
+  // Combine both sides into a single published estimate: when both are valid, average their
+  // offsets into a true lane-center estimate -- each fit's kLaneCenterOffsetBiasM is signed
+  // opposite to the other's, so the average needs no further correction; otherwise fall back to
+  // whichever single side is valid, unchanged from the single-lane behavior.
+  LaneFitResult fit;
+  if (right_fit.valid && left_fit.valid) {
+    fit.valid = true;
+    fit.offset_m = (right_fit.offset_m + left_fit.offset_m) / 2.0;
+    fit.steering_angle_deg = (right_fit.steering_angle_deg + left_fit.steering_angle_deg) / 2.0;
+    fit.curvature_radius_px = (right_fit.curvature_radius_px + left_fit.curvature_radius_px) / 2.0;
+  } else if (right_fit.valid) {
+    fit = right_fit;
+  } else if (left_fit.valid) {
+    fit = left_fit;
+  }
+
+  if (right_fit.valid) cv::polylines(view, right_fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
+  if (left_fit.valid) cv::polylines(view, left_fit.curve_points, false, cv::Scalar(0, 255, 255), 3);
 
   if (fit.valid) {
-    cv::polylines(view, fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
-
     const cv::Point arrow_start(static_cast<int>(origin.x), static_cast<int>(origin.y));
     const cv::Point arrow_end(
       static_cast<int>(
@@ -341,6 +408,12 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   cv::putText(view, angle_text, cv::Point(30, 70), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   if (!fit.valid) cv::putText(view, "Lane not detected", cv::Point(30, 110), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
+
+  char sides_text[64];
+  std::snprintf(
+    sides_text, sizeof(sides_text), "L: %s  R: %s", left_fit.valid ? "OK" : "--",
+    right_fit.valid ? "OK" : "--");
+  cv::putText(view, sides_text, cv::Point(30, 150), cv::FONT_HERSHEY_SIMPLEX, 1.0, text_color, 2);
 
   cv::imshow("Lane Detection", view);
   cv::waitKey(1);
