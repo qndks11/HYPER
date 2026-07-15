@@ -342,7 +342,6 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(warped.cols);
     const double lane_width_m =
       (right_points.front().x - left_points.front().x) * meters_per_pixel;
-    printf("Lane width: %.2f m\n", lane_width_m);
     if (lane_width_m > kMaxPlausibleLaneWidthMeters) {
       // The two lines are farther apart than a real lane, so at least one of them isn't this
       // lane's own line -- trust whichever side is physically closer to the vehicle rather than
@@ -405,8 +404,6 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   cv::Mat view = warped.clone();
   compose_overlay(view, overlay);
-  cv::imshow("Lane Detection", view);
-  cv::waitKey(1);
 }
 
 int main(int argc, char ** argv)

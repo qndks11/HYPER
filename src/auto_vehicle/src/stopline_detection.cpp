@@ -15,9 +15,6 @@ constexpr double kNumLaneInScreen = 3.2;  // how many lanes fit across the BEV i
 // A stop-line bar spans most of the lane, so its bounding box is much wider than it is tall; a
 // single zebra-crossing stripe is comparatively close to square. This floor separates the two.
 constexpr double kMinStoplineAspectRatio = 3.0;
-// The stop-line bar must span at least this fraction of the BEV image width to count -- rules
-// out narrower marks (e.g. a single crossing stripe) that happen to pass the aspect ratio test.
-constexpr double kMinStoplineWidthFraction = 0.5;
 // Floor on contour area [px^2] to reject small mask noise before the shape checks run.
 constexpr double kMinStoplineAreaPx = 200.0;
 
@@ -62,7 +59,6 @@ StoplineDetection::StoplineResult StoplineDetection::find_stopline(
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-  const double min_width_px = mask.cols * kMinStoplineWidthFraction;
 
   bool found = false;
   cv::Rect best_box;
@@ -72,7 +68,7 @@ StoplineDetection::StoplineResult StoplineDetection::find_stopline(
     }
     const cv::Rect box = cv::boundingRect(contour);
     const double aspect_ratio = static_cast<double>(box.width) / box.height;
-    if (aspect_ratio < kMinStoplineAspectRatio || box.width < min_width_px) {
+    if (aspect_ratio < kMinStoplineAspectRatio) {
       continue;
     }
     // Closest to the vehicle wins: the stop line that actually governs the next stop.
@@ -147,8 +143,6 @@ void StoplineDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr 
 
   cv::Mat view = warped.clone();
   compose_overlay(view, overlay);
-  cv::imshow("Stopline Detection", view);
-  cv::waitKey(1);
 }
 
 int main(int argc, char ** argv)
