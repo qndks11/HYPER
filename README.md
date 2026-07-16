@@ -4,6 +4,32 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 ---
 
+## Command to run 
+Terminal 1 — simulation (Gazebo + vehicle spawn + low-level vehicle controller):
+
+
+ros2 launch auto_vehicle_gazebo vehicle.launch.py
+Terminal 2 — localization (dual EKF + GPS transform):
+
+
+ros2 launch auto_vehicle odometry.launch.py
+Terminal 3 — perception (lane/stopline detection + your teammate's traffic-light detector, bundled together):
+
+
+ros2 launch auto_vehicle perception.launch.py
+This runs both perception (publishes /lane/center, /stopline/detection) and object_detection.py (your teammate's traffic light node, publishes /perception/sign) — no extra command needed for the traffic light.
+
+Terminal 4 — behavior/decision node (not a packaged ROS2 node yet — no setup.py/package.xml in src/waypoint/, so it's run directly):
+
+
+python3 src/waypoint/behavior.py
+Terminal 5 — controller (also unpackaged, same folder — this is the one that actually reads /driving_mode + /bridge_path from behavior.py and outputs /cmd; don't confuse it with the older controller ROS package in src/controller/, which is a simpler Stanley-only node that doesn't know about /driving_mode or /bridge_path and isn't part of this pipeline):
+
+
+python3 src/waypoint/controller.py
+
+---
+
 ## 패키지 구성
 
 | 패키지 | 설명 |

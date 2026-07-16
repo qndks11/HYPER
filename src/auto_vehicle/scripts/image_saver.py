@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# run auto_vehicle image_saver --ros-args -r /image_raw:=/camera/image_raw.
+# ros2 run auto_vehicle image_saver --ros-args -r /image_raw:=/camera/image_raw
 import os
 import time
 
