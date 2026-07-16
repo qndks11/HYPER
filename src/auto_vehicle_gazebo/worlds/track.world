@@ -243,6 +243,9 @@
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_4</name>
       <pose>7.37 3.58 0 0 0 4.71238</pose>
+      <plugin filename="libTrafficLightPlugin.so" name="auto_vehicle::TrafficLightPlugin">
+        <phase duration="1.0" color="yellow"/>
+      </plugin>
     </include>
 
     <spherical_coordinates>
