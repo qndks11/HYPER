@@ -2,7 +2,7 @@
 """
 event_path_recorder_gps.py
 
-전체 코스가 아니라 등록된 이벤트 구간만 저장한다.
+전체 코스가 아니라 등록된 이벤트 구간만 course.yaml에 저장한다.
 
 저장 구조:
 - 이벤트 기준 GPS: 어느 정지선/교차로인지 식별
@@ -63,16 +63,36 @@ def gps_valid(msg):
 
 
 def remove_duplicates(points, epsilon=1e-6):
-    if not points:
+    """
+    Python list와 NumPy 배열을 모두 안전하게 처리한다.
+
+    기존의 `if not points:`는 NumPy 배열에서 사용할 수 없으므로
+    배열로 변환한 뒤 size를 검사한다.
+    """
+    points_array = np.asarray(points, dtype=float)
+
+    if points_array.size == 0:
         return np.zeros((0, 3), dtype=float)
 
-    output = [np.asarray(points[0], dtype=float)]
+    if points_array.ndim == 1:
+        if points_array.shape[0] != 3:
+            raise ValueError(
+                '경로 점은 [x, y, yaw] 3개 값이어야 합니다.'
+            )
+        points_array = points_array.reshape(1, 3)
 
-    for point in points[1:]:
-        point = np.asarray(point, dtype=float)
+    if points_array.ndim != 2 or points_array.shape[1] < 3:
+        raise ValueError(
+            '경로 데이터는 N x 3 이상의 배열이어야 합니다.'
+        )
+
+    output = [points_array[0, :3].copy()]
+
+    for point in points_array[1:]:
+        point = point[:3]
 
         if np.linalg.norm(point[:2] - output[-1][:2]) > epsilon:
-            output.append(point)
+            output.append(point.copy())
 
     return np.asarray(output, dtype=float)
 
@@ -182,13 +202,23 @@ class EventPathRecorderGps(Node):
         output = str(
             self.declare_parameter(
                 'output',
-                'event_paths.yaml',
+                'course.yaml',
             ).value
         )
 
-        self.output_path = Path(
-            os.path.abspath(os.path.expanduser(output))
+        # 상대 경로이면 현재 터미널 위치가 아니라
+        # 이 recorder 파일이 있는 폴더를 기준으로 저장한다.
+        output_candidate = Path(
+            os.path.expanduser(output)
         )
+
+        if output_candidate.is_absolute():
+            self.output_path = output_candidate.resolve()
+        else:
+            script_directory = Path(__file__).resolve().parent
+            self.output_path = (
+                script_directory / output_candidate
+            ).resolve()
         self.default_radius = float(
             self.declare_parameter(
                 'default_approach_radius_m',
@@ -633,20 +663,35 @@ class EventPathRecorderGps(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = EventPathRecorderGps()
+    keyboard_shutdown = False
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        keyboard_shutdown = True
+    except Exception as exc:
+        # 콜백 오류가 발생했을 때 finally에서 end_recording()을
+        # 다시 호출해 같은 오류를 두 번 출력하지 않게 한다.
+        node.get_logger().error(
+            f'Recorder 실행 중 오류: {type(exc).__name__}: {exc}'
+        )
     finally:
-        if node.recording_path_key is not None:
-            node.end_recording()
+        try:
+            # Ctrl+C로 정상 종료한 경우에만 진행 중인 경로를 자동 종료한다.
+            if keyboard_shutdown and node.recording_path_key is not None:
+                node.end_recording()
 
-        node.save()
-        node.destroy_node()
+            node.save()
+        except Exception as exc:
+            node.get_logger().error(
+                f'종료 처리 또는 YAML 저장 실패: '
+                f'{type(exc).__name__}: {exc}'
+            )
+        finally:
+            node.destroy_node()
 
-        if rclpy.ok():
-            rclpy.shutdown()
+            if rclpy.ok():
+                rclpy.shutdown()
 
 
 if __name__ == '__main__':

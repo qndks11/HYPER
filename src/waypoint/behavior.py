@@ -23,8 +23,9 @@ behavior_supervisor_registered_event.py
 필수 토픽:
   /gps/fix                         sensor_msgs/NavSatFix
   /odometry/filtered_map           nav_msgs/Odometry
-  /perception/stop_line_detected   std_msgs/Bool
-  /perception/stop_line_distance   std_msgs/Float64 (m)
+  /stopline/detection             std_msgs/Float64MultiArray
+                                  data[0] = distance [m]
+                                  data[1] = detected (1.0/0.0)
   /perception/sign                 std_msgs/String
   /mission/turn                    std_msgs/String
 """
@@ -32,15 +33,15 @@ behavior_supervisor_registered_event.py
 import math
 import os
 import time
-from pathlib import Path
+from pathlib import Path as FilePath
 
 import rclpy
 import yaml
 from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import Odometry, Path
+from nav_msgs.msg import Odometry, Path as RosPath
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import Bool, Float64, String
+from std_msgs.msg import Float64MultiArray, String
 
 
 LANE_FOLLOW = 'LANE_FOLLOW'
@@ -98,12 +99,23 @@ class BehaviorSupervisorRegisteredEvent(Node):
         yaml_file = str(
             self.declare_parameter(
                 'event_path_yaml',
-                'event_paths.yaml',
+                'course.yaml',
             ).value
         )
-        self.yaml_path = Path(
-            os.path.abspath(os.path.expanduser(yaml_file))
+
+        # 상대 경로이면 현재 터미널 위치가 아니라
+        # behavior.py가 있는 폴더를 기준으로 course.yaml을 찾는다.
+        yaml_candidate = FilePath(
+            os.path.expanduser(yaml_file)
         )
+
+        if yaml_candidate.is_absolute():
+            self.yaml_path = yaml_candidate.resolve()
+        else:
+            script_directory = FilePath(__file__).resolve().parent
+            self.yaml_path = (
+                script_directory / yaml_candidate
+            ).resolve()
 
         self.tick_hz = float(
             self.declare_parameter('tick_hz', 10.0).value
@@ -126,13 +138,13 @@ class BehaviorSupervisorRegisteredEvent(Node):
         self.stop_distance_m = float(
             self.declare_parameter(
                 'stop_line_trigger_distance_m',
-                0.30,
+                0.50,
             ).value
         )
         self.bridge_exit_tolerance_m = float(
             self.declare_parameter(
                 'bridge_exit_tolerance_m',
-                0.60,
+                2.0,
             ).value
         )
         self.min_bridge_time_s = float(
@@ -195,8 +207,7 @@ class BehaviorSupervisorRegisteredEvent(Node):
 
         self.stop_line_detected = False
         self.stop_line_distance = math.inf
-        self.t_stop_detected = -1e9
-        self.t_stop_distance = -1e9
+        self.t_stopline = -1e9
 
         self.sign = 'none'
         self.t_sign = -1e9
@@ -215,15 +226,9 @@ class BehaviorSupervisorRegisteredEvent(Node):
             10,
         )
         self.create_subscription(
-            Bool,
-            '/perception/stop_line_detected',
-            self.on_stop_detected,
-            10,
-        )
-        self.create_subscription(
-            Float64,
-            '/perception/stop_line_distance',
-            self.on_stop_distance,
+            Float64MultiArray,
+            '/stopline/detection',
+            self.on_stopline,
             10,
         )
         self.create_subscription(
@@ -251,7 +256,7 @@ class BehaviorSupervisorRegisteredEvent(Node):
             10,
         )
         self.bridge_pub = self.create_publisher(
-            Path,
+            RosPath,
             '/bridge_path',
             10,
         )
@@ -317,16 +322,24 @@ class BehaviorSupervisorRegisteredEvent(Node):
         )
         self.t_odom = self.now_s()
 
-    def on_stop_detected(self, msg):
-        self.stop_line_detected = bool(msg.data)
-        self.t_stop_detected = self.now_s()
+    def on_stopline(self, msg):
+        # lane_detection.cpp publishes:
+        #   data[0] = stop-line distance [m]
+        #   data[1] = detection valid (1.0 / 0.0)
+        if len(msg.data) < 2:
+            return
 
-    def on_stop_distance(self, msg):
-        value = float(msg.data)
+        distance = float(msg.data[0])
+        detected = float(msg.data[1]) >= 0.5
 
-        if math.isfinite(value) and value >= 0.0:
-            self.stop_line_distance = value
-            self.t_stop_distance = self.now_s()
+        self.stop_line_detected = detected
+
+        if detected and math.isfinite(distance) and distance >= 0.0:
+            self.stop_line_distance = distance
+        else:
+            self.stop_line_distance = math.inf
+
+        self.t_stopline = self.now_s()
 
     def on_sign(self, msg):
         value = str(msg.data).strip().lower()
@@ -397,8 +410,7 @@ class BehaviorSupervisorRegisteredEvent(Node):
     def stop_line_fresh(self, now):
         return (
             self.stop_line_detected
-            and now - self.t_stop_detected <= self.perception_timeout
-            and now - self.t_stop_distance <= self.perception_timeout
+            and now - self.t_stopline <= self.perception_timeout
             and math.isfinite(self.stop_line_distance)
         )
 
@@ -553,7 +565,7 @@ class BehaviorSupervisorRegisteredEvent(Node):
         cos_yaw = math.cos(yaw0)
         sin_yaw = math.sin(yaw0)
 
-        path = Path()
+        path = RosPath()
         path.header.frame_id = 'map'
         path.header.stamp = self.get_clock().now().to_msg()
 
