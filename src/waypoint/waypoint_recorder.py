@@ -9,12 +9,20 @@ event_path_recorder_gps.py
 - 이벤트 상대 경로: 정지선 출발 위치를 (0, 0, 0)으로 저장
 
 명령:
+  # 교차로 상대 경로
   record_start:<event_id>:<direction>
   record_end
   mark_event:<event_id>
   set_radius:<event_id>:<meters>
   delete_path:<event_id>:<direction>
   delete_event:<event_id>
+
+  # 주차 시작 자세와 최종 자세
+  parking_start:<event_id>
+  parking_goal:<event_id>
+  set_parking_trigger:<event_id>:<meters>
+  parking_cancel
+
   list
   status
   save
@@ -23,6 +31,12 @@ event_path_recorder_gps.py
   record_start:intersection_A:straight
   record_start:intersection_A:left
   record_start:intersection_A:right
+
+  parking_start:parking_A
+  parking_goal:parking_A
+  set_radius:parking_A:2.0
+  set_parking_trigger:parking_A:0.8
+  save
 """
 
 import math
@@ -237,6 +251,12 @@ class EventPathRecorderGps(Node):
         self.sensor_timeout = float(
             self.declare_parameter('sensor_timeout', 1.0).value
         )
+        self.default_parking_trigger = float(
+            self.declare_parameter(
+                'default_parking_plan_trigger_m',
+                0.8,
+            ).value
+        )
 
         self.events = {}
         self.paths = {}
@@ -253,6 +273,11 @@ class EventPathRecorderGps(Node):
         self.origin_pose = None
         self.raw_points = []
         self.last_local_xy = None
+
+        # 주차는 경로 전체가 아니라 시작 자세와 최종 목표 자세를 기록한다.
+        self.parking_event = None
+        self.parking_origin_pose = None
+        self.parking_origin_gps = None
 
         self.create_subscription(
             Odometry,
@@ -355,8 +380,9 @@ class EventPathRecorderGps(Node):
             self.raw_points.append(local)
             self.last_local_xy = (local[0], local[1])
 
-    def map_to_local(self, x, y, yaw):
-        x0, y0, yaw0 = self.origin_pose
+    @staticmethod
+    def pose_to_local(origin_pose, x, y, yaw):
+        x0, y0, yaw0 = origin_pose
         dx = x - x0
         dy = y - y0
 
@@ -368,6 +394,9 @@ class EventPathRecorderGps(Node):
             -sin_yaw * dx + cos_yaw * dy,
             normalize_angle(yaw - yaw0),
         ]
+
+    def map_to_local(self, x, y, yaw):
+        return self.pose_to_local(self.origin_pose, x, y, yaw)
 
     def on_command(self, msg):
         command = str(msg.data).strip()
@@ -403,6 +432,14 @@ class EventPathRecorderGps(Node):
             self.delete_path(parts[1], parts[2])
         elif parts[0] == 'delete_event' and len(parts) == 2:
             self.delete_event(parts[1])
+        elif parts[0] == 'parking_start' and len(parts) == 2:
+            self.start_parking(parts[1])
+        elif parts[0] == 'parking_goal' and len(parts) == 2:
+            self.finish_parking(parts[1])
+        elif parts[0] == 'set_parking_trigger' and len(parts) == 3:
+            self.set_parking_trigger(parts[1], parts[2])
+        elif parts[0] == 'parking_cancel' and len(parts) == 1:
+            self.cancel_parking()
         else:
             self.get_logger().warn(
                 f"명령 형식 오류: '{command}'"
@@ -421,6 +458,7 @@ class EventPathRecorderGps(Node):
         latitude, longitude = self.current_gps
 
         self.events[event_id] = {
+            'event_type': 'intersection',
             'latitude': latitude,
             'longitude': longitude,
             'approach_radius_m': self.default_radius,
@@ -445,6 +483,7 @@ class EventPathRecorderGps(Node):
         event = self.events.setdefault(
             event_id,
             {
+                'event_type': 'intersection',
                 'approach_radius_m': self.default_radius,
                 'signal_required': True,
                 'paths': {},
@@ -452,6 +491,7 @@ class EventPathRecorderGps(Node):
         )
         event['latitude'] = latitude
         event['longitude'] = longitude
+        event.setdefault('event_type', 'intersection')
         event.setdefault('approach_radius_m', self.default_radius)
         event.setdefault('signal_required', True)
         event.setdefault('paths', {})
@@ -495,6 +535,12 @@ class EventPathRecorderGps(Node):
             )
             return
 
+        if self.parking_event is not None:
+            self.get_logger().warn(
+                f"주차 이벤트 '{self.parking_event}' 기록 중입니다."
+            )
+            return
+
         if not self.odom_fresh():
             self.get_logger().warn(
                 '신선한 /odometry/filtered_map이 없습니다.'
@@ -505,6 +551,9 @@ class EventPathRecorderGps(Node):
             return
 
         path_key = f'{event_id}_{direction}'
+
+        self.events[event_id]['event_type'] = 'intersection'
+        self.events[event_id]['signal_required'] = True
 
         self.recording_event = event_id
         self.recording_direction = direction
@@ -564,6 +613,164 @@ class EventPathRecorderGps(Node):
         self.raw_points = []
         self.last_local_xy = None
 
+
+    def start_parking(self, event_id):
+        if self.recording_path_key is not None:
+            self.get_logger().warn(
+                f"교차로 경로 '{self.recording_path_key}' 기록 중입니다."
+            )
+            return
+
+        if self.parking_event is not None:
+            self.get_logger().warn(
+                f"이미 주차 이벤트 '{self.parking_event}' 기록 중입니다."
+            )
+            return
+
+        if not self.odom_fresh():
+            self.get_logger().warn(
+                '신선한 /odometry/filtered_map이 없습니다.'
+            )
+            return
+
+        if not self.gps_fresh():
+            self.get_logger().warn(
+                '신선한 /gps/fix가 없습니다.'
+            )
+            return
+
+        self.parking_event = event_id
+        self.parking_origin_pose = tuple(self.current_odom)
+        self.parking_origin_gps = tuple(self.current_gps)
+
+        self.get_logger().info(
+            f"주차 시작 자세 기록: event='{event_id}'\n"
+            f'  odom={self.parking_origin_pose}\n'
+            f'  gps={self.parking_origin_gps}\n'
+            '차량을 최종 주차 위치와 방향으로 옮긴 뒤 '
+            f"'parking_goal:{event_id}'을 보내세요."
+        )
+
+    def finish_parking(self, event_id):
+        if self.parking_event is None:
+            self.get_logger().warn(
+                'parking_start로 시작한 주차 기록이 없습니다.'
+            )
+            return
+
+        if event_id != self.parking_event:
+            self.get_logger().warn(
+                f"기록 중인 주차 이벤트는 '{self.parking_event}'입니다. "
+                f"'{event_id}'와 일치하지 않습니다."
+            )
+            return
+
+        if not self.odom_fresh():
+            self.get_logger().warn(
+                '신선한 /odometry/filtered_map이 없습니다.'
+            )
+            return
+
+        x, y, yaw = self.current_odom
+        local_goal = self.pose_to_local(
+            self.parking_origin_pose,
+            x,
+            y,
+            yaw,
+        )
+        latitude, longitude = self.parking_origin_gps
+
+        previous = self.events.get(event_id) or {}
+        approach_radius = float(
+            previous.get(
+                'approach_radius_m',
+                self.default_radius,
+            )
+        )
+        parking_trigger = float(
+            previous.get(
+                'parking_plan_trigger_m',
+                self.default_parking_trigger,
+            )
+        )
+
+        self.events[event_id] = {
+            'event_type': 'parking',
+            'latitude': float(latitude),
+            'longitude': float(longitude),
+            'approach_radius_m': approach_radius,
+            'parking_plan_trigger_m': parking_trigger,
+            'signal_required': False,
+            'paths': {},
+            'parking_goal_local': {
+                'x': round(float(local_goal[0]), 4),
+                'y': round(float(local_goal[1]), 4),
+                'yaw': round(float(local_goal[2]), 5),
+            },
+        }
+
+        self.get_logger().info(
+            f"주차 목표 자세 기록 완료: event='{event_id}'\n"
+            f"  x={local_goal[0]:.4f}, "
+            f"y={local_goal[1]:.4f}, "
+            f"yaw={local_goal[2]:.5f} rad"
+        )
+
+        self.parking_event = None
+        self.parking_origin_pose = None
+        self.parking_origin_gps = None
+
+    def set_parking_trigger(self, event_id, distance_text):
+        try:
+            distance = float(distance_text)
+        except ValueError:
+            self.get_logger().warn(
+                '주차 계획 시작 거리는 숫자여야 합니다.'
+            )
+            return
+
+        if distance <= 0.0:
+            self.get_logger().warn(
+                '주차 계획 시작 거리는 0보다 커야 합니다.'
+            )
+            return
+
+        event = self.events.get(event_id)
+
+        if not event:
+            self.get_logger().warn(
+                f"없는 이벤트: '{event_id}'. "
+                'parking_start와 parking_goal을 먼저 기록하세요.'
+            )
+            return
+
+        if event.get('event_type') != 'parking':
+            self.get_logger().warn(
+                f"'{event_id}'는 주차 이벤트가 아닙니다."
+            )
+            return
+
+        event['parking_plan_trigger_m'] = distance
+        self.get_logger().info(
+            f"'{event_id}' 주차 계획 시작 거리={distance:.2f}m"
+        )
+
+    def cancel_parking(self):
+        if self.parking_event is None:
+            self.get_logger().warn(
+                '취소할 주차 기록이 없습니다.'
+            )
+            return
+
+        event_id = self.parking_event
+        self.parking_event = None
+        self.parking_origin_pose = None
+        self.parking_origin_gps = None
+
+        self.get_logger().info(
+            f"주차 기록 취소: '{event_id}'"
+        )
+
     def delete_path(self, event_id, direction):
         event = self.events.get(event_id)
 
@@ -584,6 +791,9 @@ class EventPathRecorderGps(Node):
             )
 
     def delete_event(self, event_id):
+        if self.parking_event == event_id:
+            self.cancel_parking()
+
         event = self.events.pop(event_id, None)
 
         if event is None:
@@ -605,11 +815,21 @@ class EventPathRecorderGps(Node):
         lines = ['저장 이벤트 목록']
 
         for event_id, event in self.events.items():
-            lines.append(
-                f"  {event_id}: "
-                f"radius={event.get('approach_radius_m', self.default_radius)}m, "
-                f"paths={event.get('paths', {})}"
-            )
+            event_type = event.get('event_type', 'intersection')
+
+            if event_type == 'parking':
+                lines.append(
+                    f"  {event_id}: type=parking, "
+                    f"radius={event.get('approach_radius_m', self.default_radius)}m, "
+                    f"trigger={event.get('parking_plan_trigger_m', self.default_parking_trigger)}m, "
+                    f"goal={event.get('parking_goal_local')}"
+                )
+            else:
+                lines.append(
+                    f"  {event_id}: type=intersection, "
+                    f"radius={event.get('approach_radius_m', self.default_radius)}m, "
+                    f"paths={event.get('paths', {})}"
+                )
 
         self.get_logger().info('\n'.join(lines))
 
@@ -620,6 +840,8 @@ class EventPathRecorderGps(Node):
             f'  odom={self.current_odom}\n'
             f'  recording={self.recording_path_key}\n'
             f'  raw_points={len(self.raw_points)}\n'
+            f'  parking_event={self.parking_event}\n'
+            f'  parking_origin_pose={self.parking_origin_pose}\n'
             f'  events={list(self.events.keys())}\n'
             f'  output={self.output_path}'
         )
@@ -628,6 +850,13 @@ class EventPathRecorderGps(Node):
         if self.recording_path_key is not None:
             self.get_logger().warn(
                 'record_end 후 저장하세요.'
+            )
+            return
+
+        if self.parking_event is not None:
+            self.get_logger().warn(
+                f"주차 이벤트 '{self.parking_event}' 기록 중입니다. "
+                'parking_goal 또는 parking_cancel 후 저장하세요.'
             )
             return
 
@@ -680,6 +909,9 @@ def main(args=None):
             # Ctrl+C로 정상 종료한 경우에만 진행 중인 경로를 자동 종료한다.
             if keyboard_shutdown and node.recording_path_key is not None:
                 node.end_recording()
+
+            if keyboard_shutdown and node.parking_event is not None:
+                node.cancel_parking()
 
             node.save()
         except Exception as exc:
