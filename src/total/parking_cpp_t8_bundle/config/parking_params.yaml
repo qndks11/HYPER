@@ -94,7 +94,7 @@ controller:
     max_steering_angular_velocity: 2.0
 
     # 16 km/h = 약 4.44 m/s
-    max_velocity: 4.44
+    max_velocity: 8.0
     control_hz: 40.0
 
     cruise_speed: 3.75
