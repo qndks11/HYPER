@@ -287,6 +287,60 @@
     </inertial>
   </link>
 
+  <!-- Rear Camera Stick Link -->
+  <link name="rear_camera_stick_link">
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_stick_size} ${camera_stick_size} ${camera_height}"/>
+      </geometry>
+    </collision>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_stick_size} ${camera_stick_size} ${camera_height}"/>
+      </geometry>
+
+      <material name="rear_camera_stick_material">
+        <color rgba="0.25 0.25 0.25 1.0"/>
+      </material>
+    </visual>
+
+    <inertial>
+      <mass value="1e-5" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
+    </inertial>
+  </link>
+
+  <!-- Rear Camera Link -->
+  <link name="rear_camera_link">
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
+      </geometry>
+    </collision>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
+      </geometry>
+
+      <material name="rear_camera_material">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+
+    <inertial>
+      <mass value="1e-5" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
+    </inertial>
+  </link>
+
   <link name="lidar_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -429,6 +483,22 @@
     <child link="camera_link"/>
   </joint>
 
+  <!-- Rear Camera Stick Joint -->
+  <joint name="rear_camera_stick_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="${-(body_length/2 - camera_stick_size/2 - camera_setback)} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 ${PI}"/>
+    <parent link="body_link"/>
+    <child link="rear_camera_stick_link"/>
+  </joint>
+
+  <!-- Rear Camera Joint -->
+  <joint name="rear_camera_joint" type="fixed">
+    <axis xyz="0 1 0" />
+    <origin xyz="0.0 ${-camera_box_size/2 - camera_stick_size/2} ${camera_height/2}" rpy="0 ${camera_pitch} 0"/>
+    <parent link="rear_camera_stick_link"/>
+    <child link="rear_camera_link"/>
+  </joint>
+
   <gazebo reference="body_link">
     <mu1>0.0001</mu1>
     <mu2>0.0001</mu2>
@@ -562,6 +632,45 @@
         <updateRate>0.0</updateRate>
         <cameraName>vehicle_front_camera</cameraName>
         <frameName>camera_link</frameName>
+        <hackBaseline>0.07</hackBaseline>
+        <distortionK1>0.0</distortionK1>
+        <distortionK2>0.0</distortionK2>
+        <distortionK3>0.0</distortionK3>
+        <distortionT1>0.0</distortionT1>
+        <distortionT2>0.0</distortionT2>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- Rear Camera -->
+  <gazebo reference="rear_camera_link">
+    <sensor type="camera" name="vehicle_rear_camera">
+      <update_rate>${camera_fps}</update_rate>
+      <visualize>true</visualize>
+      <topic>camera_rear</topic>
+
+      <camera name="rear">
+        <horizontal_fov>${camera_fov}</horizontal_fov>
+        <image>
+          <width>${image_width}</width>
+          <height>${image_height}</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.02</near>
+          <far>550</far>
+        </clip>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.007</stddev>
+        </noise>
+      </camera>
+      <plugin name="rear_camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>0.0</updateRate>
+        <cameraName>vehicle_rear_camera</cameraName>
+        <frameName>rear_camera_link</frameName>
         <hackBaseline>0.07</hackBaseline>
         <distortionK1>0.0</distortionK1>
         <distortionK2>0.0</distortionK2>

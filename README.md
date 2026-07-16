@@ -4,31 +4,21 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 ---
 
-## Command to run 
-Terminal 1 — simulation (Gazebo + vehicle spawn + low-level vehicle controller):
+## Command to run
 
+### 한 번에 실행 — `run_all.sh`
 
-ros2 launch auto_vehicle_gazebo vehicle.launch.py
-Terminal 2 — localization (dual EKF + GPS transform):
+```bash
+./run_all.sh
+```
 
+터미널 창 4개(gnome-terminal)를 자동으로 열어 스택 전체를 순서대로 띄웁니다: `1-sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → `2-odometry`(dual EKF + navsat_transform) → `3-perception`(차선/정지선 감지 + 신호등 감지) → `4-behavior`(`parking_cpp` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전. 아래 Terminal 4/5에서 설명하는 `src/waypoint/behavior.py`·`controller.py`(Python)와는 별개의, 더 최신 파이프라인입니다).
 
-ros2 launch auto_vehicle odometry.launch.py
-Terminal 3 — perception (lane/stopline detection + your teammate's traffic-light detector, bundled together):
+스택을 끄려면(터미널 창은 닫지 않고 프로세스만 종료):
 
-
-ros2 launch auto_vehicle perception.launch.py
-This runs both perception (publishes /lane/center, /stopline/detection) and object_detection.py (your teammate's traffic light node, publishes /perception/sign) — no extra command needed for the traffic light.
-
-Terminal 4 — behavior/decision node (not a packaged ROS2 node yet — no setup.py/package.xml in src/waypoint/, so it's run directly):
-
-
-python3 src/waypoint/behavior.py
-Terminal 5 — controller (also unpackaged, same folder — this is the one that actually reads /driving_mode + /bridge_path from behavior.py and outputs /cmd; don't confuse it with the older controller ROS package in src/controller/, which is a simpler Stanley-only node that doesn't know about /driving_mode or /bridge_path and isn't part of this pipeline):
-
-
-python3 src/waypoint/controller.py
-
----
+```bash
+./run_all.sh stop
+```
 
 ## 패키지 구성
 
@@ -67,8 +57,6 @@ HYPER/
 │       ├── worlds/                 # Gazebo 월드(SDF) 및 모델
 │       ├── CMakeLists.txt
 │       └── package.xml
-├── docs/
-│   └── pull_request_guide.md       # PR 작성 가이드
 └── README.md
 ```
 

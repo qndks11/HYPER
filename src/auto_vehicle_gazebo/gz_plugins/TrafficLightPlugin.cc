@@ -33,10 +33,6 @@ class TrafficLightPlugin
     std::string color;
   };
 
-  private:
-    std::chrono::steady_clock::time_point startWallTime;
-    bool wallTimeInitialized{false};
-
   public: void Configure(
       const ignition::gazebo::Entity &_entity,
       const std::shared_ptr<const sdf::Element> &_sdf,
@@ -71,9 +67,6 @@ class TrafficLightPlugin
       this->cycleDuration += phase.duration;
       this->phases.push_back(phase);
     }
-    
-    this->startWallTime = std::chrono::steady_clock::now();
-    this->wallTimeInitialized = true;
   }
 
   public: void PreUpdate(
@@ -83,18 +76,13 @@ class TrafficLightPlugin
     if (_info.paused || this->phases.empty() || this->cycleDuration <= 0.0)
       return;
 
-    // Initialize on first call if not done in Configure
-    if (!this->wallTimeInitialized)
-    {
-      this->startWallTime = std::chrono::steady_clock::now();
-      this->wallTimeInitialized = true;
-    }
+    // Use simulation time (not wall-clock time) so the schedule tracks
+    // Gazebo's clock: it holds still while paused and scales with
+    // real-time-factor instead of drifting against it.
+    const double simSeconds =
+        std::chrono::duration<double>(_info.simTime).count();
 
-    const double wallSeconds =
-        std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - this->startWallTime).count();
-
-    double t = std::fmod(wallSeconds, this->cycleDuration);
+    double t = std::fmod(simSeconds, this->cycleDuration);
 
     std::string activeColor = this->phases.front().color;
     for (const auto &phase : this->phases)
