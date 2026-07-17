@@ -121,19 +121,19 @@ def generate_launch_description():
 
     x_arg = DeclareLaunchArgument(
         'x',
-        default_value='43.32',
+        default_value='41.0866',
         description='Initial X position'
     )
 
     y_arg = DeclareLaunchArgument(
         'y',
-        default_value='-50.39',
+        default_value='-45.6842',
         description='Initial Y position'
     )
 
     z_arg = DeclareLaunchArgument(
         'z',
-        default_value='0.5',
+        default_value='0.36',
         description='Initial Z position'
     )
 

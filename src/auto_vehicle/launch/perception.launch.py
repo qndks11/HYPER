@@ -22,7 +22,7 @@ def generate_launch_description():
     object_detection_node = Node(
         package='auto_vehicle',
         executable='object_detection',
-        remappings=[('/image_raw', '/camera/image_raw')],
+        remappings=[('/image_raw', '/camera_object/image_raw')],
         parameters=[{'model_path': model_path}],
         output='screen'
     )

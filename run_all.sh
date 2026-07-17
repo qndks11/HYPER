@@ -7,18 +7,15 @@
 # Terminal 5: controller
 #
 # Run './run_all.sh stop' to kill every process the stack above starts (Gazebo,
-# all ros2 launch trees, and their child nodes) and close the terminal windows
-# themselves.
+# all ros2 launch trees, and their child nodes). It does not close the
+# terminal windows themselves -- close those manually.
 
 set -euo pipefail
 
-WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+sudo ip link set lo multicast on
 
-# Each terminal's own shell PID is recorded here so 'stop' can kill the shell
-# directly -- gnome-terminal closes a window when the command running in it
-# exits, but stop_all otherwise only ever touches the ros2/Gazebo processes
-# running underneath that shell, not the shell itself.
-PID_DIR="${TMPDIR:-/tmp}/run_all-pids-$(id -u)"
+
+WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Patterns matching each terminal's launch command plus the Gazebo server
 # process it starts underneath -- ros2 launch forwards SIGINT to its child
@@ -62,18 +59,7 @@ stop_all() {
         echo "All processes stopped cleanly."
     fi
 
-    if [[ -d "$PID_DIR" ]]; then
-        for pidfile in "$PID_DIR"/*.pid; do
-            [[ -e "$pidfile" ]] || continue
-            local pid
-            pid="$(cat "$pidfile" 2>/dev/null || true)"
-            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-                kill -TERM "$pid" 2>/dev/null || true
-            fi
-            rm -f "$pidfile"
-        done
-        echo "Closed run_all.sh terminal windows."
-    fi
+    echo "Terminal windows were left open -- close them manually."
 }
 
 if [[ "${1:-}" == "stop" ]]; then
@@ -90,14 +76,12 @@ fi
 run_in_terminal() {
     local title="$1"
     local command="$2"
-    local pidfile="$PID_DIR/$title.pid"
 
     env -u GTK_PATH -u GTK_EXE_PREFIX -u GTK_IM_MODULE_FILE \
         -u GDK_PIXBUF_MODULE_FILE -u GDK_PIXBUF_MODULEDIR \
         -u GIO_MODULE_DIR -u GSETTINGS_SCHEMA_DIR -u LOCPATH \
         -u SNAP_LIBRARY_PATH -u XDG_DATA_DIRS -u XDG_CONFIG_DIRS \
         gnome-terminal --title="$title" -- bash -c "
-        echo \$\$ > '$pidfile'
         cd '$WORKSPACE_DIR'
         source /opt/ros/humble/setup.bash
         source install/setup.bash
@@ -106,8 +90,6 @@ run_in_terminal() {
         exec bash
     "
 }
-
-mkdir -p "$PID_DIR"
 
 run_in_terminal "1-sim"        "ros2 launch auto_vehicle_gazebo vehicle.launch.py"
 sleep 5

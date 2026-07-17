@@ -97,7 +97,7 @@ public:
     odom_timeout_s_ = declare_parameter<double>("odom_timeout", 0.5);
     perception_timeout_s_ = declare_parameter<double>("perception_timeout", 0.5);
     sign_timeout_s_ = declare_parameter<double>("sign_timeout", 1.5);
-    stop_distance_m_ = declare_parameter<double>("stop_line_trigger_distance_m", 0.50);
+    stop_distance_m_ = declare_parameter<double>("stop_line_trigger_distance_m", 3.0);
     bridge_exit_tolerance_m_ = declare_parameter<double>("bridge_exit_tolerance_m", 0.50);
     minimum_bridge_time_s_ = declare_parameter<double>("min_bridge_time_s", 1.0);
     event_rearm_margin_m_ = declare_parameter<double>("event_rearm_margin_m", 3.0);
@@ -680,7 +680,7 @@ private:
   double odom_timeout_s_{0.5};
   double perception_timeout_s_{0.5};
   double sign_timeout_s_{1.5};
-  double stop_distance_m_{0.50};
+  double stop_distance_m_{3.0};
   double bridge_exit_tolerance_m_{0.50};
   double minimum_bridge_time_s_{1.0};
   double event_rearm_margin_m_{3.0};

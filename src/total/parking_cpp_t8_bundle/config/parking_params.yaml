@@ -191,7 +191,7 @@ behavior_supervisor:
     perception_timeout: 0.5
     sign_timeout: 1.5
 
-    stop_line_trigger_distance_m: 0.50
+    stop_line_trigger_distance_m: 3.0
     bridge_exit_tolerance_m: 0.50
     min_bridge_time_s: 1.0
 

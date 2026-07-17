@@ -16,7 +16,6 @@
   <xacro:arg name="max_velocity" default="1.0" />
   <xacro:arg name="max_effort" default="10.0" />
   <xacro:arg name="camera_box_size" default="0.1" />
-  <xacro:arg name="camera_stick_size" default="0.2" />
   <xacro:arg name="camera_height" default="1.5" />
   <xacro:arg name="camera_pitch" default="0.1" />
   <xacro:arg name="camera_setback" default="0.3" />
@@ -24,6 +23,10 @@
   <xacro:arg name="camera_fps" default="30" />
   <xacro:arg name="image_width" default="640" />
   <xacro:arg name="image_height" default="480" />
+  <xacro:arg name="object_camera_height" default="1.2" />
+  <xacro:arg name="object_camera_pitch" default="0.0" />
+  <xacro:arg name="object_camera_setback" default="0.5" />
+  <xacro:arg name="object_camera_fov" default="1.2217305" />
 
   <!-- Mathematical Constants -->
   <xacro:property name="PI" value="3.14159265"/>
@@ -42,7 +45,6 @@
   <xacro:property name="max_velocity" value="$(arg max_velocity)"/>
   <xacro:property name="max_effort" value="$(arg max_effort)"/>
   <xacro:property name="camera_box_size" value="$(arg camera_box_size)"/>
-  <xacro:property name="camera_stick_size" value="$(arg camera_stick_size)"/>
   <xacro:property name="camera_height" value="$(arg camera_height)"/>
   <xacro:property name="camera_pitch" value="$(arg camera_pitch)"/>
   <xacro:property name="camera_setback" value="$(arg camera_setback)"/>
@@ -50,7 +52,11 @@
   <xacro:property name="camera_fps" value="$(arg camera_fps)"/>
   <xacro:property name="image_width" value="$(arg image_width)"/>
   <xacro:property name="image_height" value="$(arg image_height)"/>
-  
+  <xacro:property name="object_camera_height" value="$(arg object_camera_height)"/>
+  <xacro:property name="object_camera_pitch" value="$(arg object_camera_pitch)"/>
+  <xacro:property name="object_camera_setback" value="$(arg object_camera_setback)"/>
+  <xacro:property name="object_camera_fov" value="$(arg object_camera_fov)"/>
+
   <xacro:property name="body_mass" value="${body_density * body_length * body_height * body_width}"/>
   <xacro:property name="body_inertia_x" value="${1.0/12.0 * body_mass * (body_height*body_height + body_width*body_width)}"/>
   <xacro:property name="body_inertia_y" value="${1.0/12.0 * body_mass * (body_length*body_length + body_height*body_height)}"/>
@@ -233,33 +239,6 @@
     </inertial>
   </link>
 
-  <!-- Camera Stick Link -->
-  <link name="camera_stick_link">
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="${camera_stick_size} ${camera_stick_size} ${camera_height}"/>
-      </geometry>
-    </collision>
-
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="${camera_stick_size} ${camera_stick_size} ${camera_height}"/>
-      </geometry>
-
-      <material name="camera_stick_material">
-        <color rgba="0.25 0.25 0.25 1.0"/>
-      </material>
-    </visual>
-
-    <inertial>
-      <mass value="1e-5" />
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
-    </inertial>
-  </link>
-
   <!-- Camera Link -->
   <link name="camera_link">
     <collision>
@@ -287,23 +266,23 @@
     </inertial>
   </link>
 
-  <!-- Rear Camera Stick Link -->
-  <link name="rear_camera_stick_link">
+  <!-- Object Detection Camera Link (normal 70 deg hfov, front-facing) -->
+  <link name="object_camera_link">
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="${camera_stick_size} ${camera_stick_size} ${camera_height}"/>
+        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
       </geometry>
     </collision>
 
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="${camera_stick_size} ${camera_stick_size} ${camera_height}"/>
+        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
       </geometry>
 
-      <material name="rear_camera_stick_material">
-        <color rgba="0.25 0.25 0.25 1.0"/>
+      <material name="object_camera_material">
+        <color rgba="0.0 0.0 0.0 1.0"/>
       </material>
     </visual>
 
@@ -467,35 +446,27 @@
     <dynamics damping="0.1" friction="0.1"/>
   </joint>
 
-  <!-- Camera Stick Joint -->
-  <joint name="camera_stick_joint" type="fixed">
-    <axis xyz="0 1 0" />
-    <origin xyz="${body_length/2 - camera_stick_size/2 - camera_setback} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 0.0"/>
-    <parent link="body_link"/>
-    <child link="camera_stick_link"/>
-  </joint>
-
   <!-- Camera Joint -->
   <joint name="camera_joint" type="fixed">
     <axis xyz="0 1 0" />
-    <origin xyz="0.0 ${-camera_box_size/2 - camera_stick_size/2} ${camera_height/2}" rpy="0 ${camera_pitch} 0"/>
-    <parent link="camera_stick_link"/>
+    <origin xyz="${body_length/2 - camera_box_size/2 - camera_setback} 0.0 ${camera_height}" rpy="0 ${camera_pitch} 0"/>
+    <parent link="body_link"/>
     <child link="camera_link"/>
   </joint>
 
-  <!-- Rear Camera Stick Joint -->
-  <joint name="rear_camera_stick_joint" type="fixed">
+  <!-- Object Detection Camera Joint -->
+  <joint name="object_camera_joint" type="fixed">
     <axis xyz="0 1 0" />
-    <origin xyz="${-(body_length/2 - camera_stick_size/2 - camera_setback)} ${camera_box_size/2 + camera_stick_size/2} ${camera_height/2}" rpy="0.0 0.0 ${PI}"/>
+    <origin xyz="${body_length/2 - camera_box_size/2 - object_camera_setback} 0.0 ${object_camera_height}" rpy="0 ${object_camera_pitch} 0"/>
     <parent link="body_link"/>
-    <child link="rear_camera_stick_link"/>
+    <child link="object_camera_link"/>
   </joint>
 
   <!-- Rear Camera Joint -->
   <joint name="rear_camera_joint" type="fixed">
     <axis xyz="0 1 0" />
-    <origin xyz="0.0 ${-camera_box_size/2 - camera_stick_size/2} ${camera_height/2}" rpy="0 ${camera_pitch} 0"/>
-    <parent link="rear_camera_stick_link"/>
+    <origin xyz="${-(body_length/2 - camera_box_size/2 - camera_setback)} 0.0 ${camera_height}" rpy="0 ${camera_pitch} ${PI}"/>
+    <parent link="body_link"/>
     <child link="rear_camera_link"/>
   </joint>
 
@@ -632,6 +603,45 @@
         <updateRate>0.0</updateRate>
         <cameraName>vehicle_front_camera</cameraName>
         <frameName>camera_link</frameName>
+        <hackBaseline>0.07</hackBaseline>
+        <distortionK1>0.0</distortionK1>
+        <distortionK2>0.0</distortionK2>
+        <distortionK3>0.0</distortionK3>
+        <distortionT1>0.0</distortionT1>
+        <distortionT2>0.0</distortionT2>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- Object Detection Camera -->
+  <gazebo reference="object_camera_link">
+    <sensor type="camera" name="vehicle_object_camera">
+      <update_rate>${camera_fps}</update_rate>
+      <visualize>true</visualize>
+      <topic>camera_object</topic>
+
+      <camera name="object">
+        <horizontal_fov>${object_camera_fov}</horizontal_fov>
+        <image>
+          <width>${image_width}</width>
+          <height>${image_height}</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.02</near>
+          <far>550</far>
+        </clip>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.007</stddev>
+        </noise>
+      </camera>
+      <plugin name="object_camera_controller" filename="libgazebo_ros_camera.so">
+        <alwaysOn>true</alwaysOn>
+        <updateRate>0.0</updateRate>
+        <cameraName>vehicle_object_camera</cameraName>
+        <frameName>object_camera_link</frameName>
         <hackBaseline>0.07</hackBaseline>
         <distortionK1>0.0</distortionK1>
         <distortionK2>0.0</distortionK2>
