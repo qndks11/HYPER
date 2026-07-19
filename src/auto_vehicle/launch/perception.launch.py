@@ -12,14 +12,17 @@ def generate_launch_description():
     lane_detection_node = Node(
         package='auto_vehicle',
         executable='lane_detection',
-        remappings=[('/image_raw', '/camera/image_raw')],
+        remappings=[
+            ('/image_raw', '/camera/image_raw'),
+            ('/rear_image_raw', '/camera_rear/image_raw'),
+        ],
         output='screen'
     )
 
     object_detection_node = Node(
         package='auto_vehicle',
         executable='object_detection',
-        remappings=[('/image_raw', '/camera/image_raw')],
+        remappings=[('/image_raw', '/camera_object/image_raw')],
         parameters=[{'model_path': model_path}],
         output='screen'
     )

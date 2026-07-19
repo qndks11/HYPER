@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
@@ -9,18 +8,9 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     default_params = PathJoinSubstitution([
-        FindPackageShare('parking_cpp'),
-        'config',
-        'parking_params.yaml',
-    ])
-
+        FindPackageShare('parking_cpp'), 'config', 'parking_params.yaml'])
     default_course = PathJoinSubstitution([
-        EnvironmentVariable('HOME'),
-        'HYPER',
-        'src',
-        'waypoint',
-        'course.yaml',
-    ])
+        EnvironmentVariable('HOME'), 'HYPER', 'src', 'waypoint', 'course.yaml'])
 
     params_file = LaunchConfiguration('params_file')
     course_yaml = LaunchConfiguration('course_yaml')
@@ -29,31 +19,12 @@ def generate_launch_description():
         DeclareLaunchArgument('params_file', default_value=default_params),
         DeclareLaunchArgument('course_yaml', default_value=default_course),
         Node(
-            package='parking_cpp',
-            executable='parking_scan_costmap',
-            name='parking_scan_costmap',
-            output='screen',
-            parameters=[params_file],
-        ),
-        Node(
-            package='parking_cpp',
-            executable='hybrid_astar_planner',
-            name='hybrid_astar_planner',
-            output='screen',
-            parameters=[params_file],
-        ),
-        Node(
-            package='parking_cpp',
-            executable='behavior_supervisor_with_parking',
-            name='behavior_supervisor',
-            output='screen',
+            package='parking_cpp', executable='behavior_supervisor_with_parking',
+            name='behavior_supervisor', output='screen',
             parameters=[params_file, {'event_path_yaml': course_yaml}],
         ),
         Node(
-            package='parking_cpp',
-            executable='controller_with_parking',
-            name='controller',
-            output='screen',
-            parameters=[params_file],
+            package='parking_cpp', executable='controller_with_parking',
+            name='controller', output='screen', parameters=[params_file],
         ),
     ])

@@ -1,208 +1,60 @@
-parking_scan_costmap:
-  ros__parameters:
-    scan_topic: /scan
-    odom_topic: /odometry/filtered_map
-    output_topic: /parking/local_costmap
-
-    frame_id: map
-    base_frame_id: body_link
-
-    resolution: 0.10
-    grid_width_m: 16.0
-    grid_height_m: 16.0
-
-    scan_min_range: 0.08
-    scan_max_range: 8.0
-
-    obstacle_inflation_m: 0.10
-    occupied_value: 100
-    odom_timeout_s: 0.50
-
-    # Henes Broon T8 Sport 차체 크기
-    body_length: 1.34
-    body_width: 0.81
-
-    # 파라미터 이름은 C++ 코드에 선언된 이름이므로 그대로 유지
-    body_center_x_from_base_link: 0.0
-    body_center_y_from_base_link: 0.0
-
-    self_filter_enabled: true
-    self_filter_margin_m: 0.03
-
-    # TF를 사용하여 lidar_link의 Scan 데이터를 body_link 기준으로 변환
-    use_laser_tf: true
-    require_laser_tf: true
-    tf_timeout_s: 0.05
-
-    # TF를 사용하지 않을 경우에만 적용되는 수동 센서 위치
-    laser_x: 0.0
-    laser_y: 0.0
-    laser_yaw: 0.0
-
-
-hybrid_astar_planner:
-  ros__parameters:
-    frame_id: map
-    map_topic: /parking/local_costmap
-
-    allow_empty_map: false
-    map_timeout_s: 0.75
-    empty_map_margin_m: 8.0
-
-    occupied_threshold: 50
-    unknown_is_occupied: false
-
-    # body_link가 차체 중심에 있다고 가정
-    vehicle_front_m: 0.67
-    vehicle_rear_m: 0.67
-    vehicle_width_m: 0.81
-
-    footprint_margin_m: 0.10
-    footprint_sample_m: 0.10
-
-    wheelbase: 1.005
-    max_steering_angle: 0.5235988
-
-    xy_resolution: 0.20
-    yaw_resolution_deg: 15.0
-
-    motion_length: 0.30
-    integration_step: 0.10
-
-    steering_samples: 5
-    allow_reverse: true
-
-    reverse_penalty: 1.20
-    gear_switch_penalty: 4.0
-    steering_penalty: 0.15
-    steering_change_penalty: 0.35
-
-    heading_heuristic_weight: 0.50
-
-    goal_xy_tolerance: 0.30
-    goal_yaw_tolerance_deg: 12.0
-
-    max_iterations: 120000
-
-
 controller:
   ros__parameters:
     base_frame_id: body_link
-
     wheelbase: 1.005
     max_steering_angle: 0.5235988
     max_steering_angular_velocity: 2.0
-
-    # 16 km/h = 약 4.44 m/s
     max_velocity: 8.0
     control_hz: 40.0
 
-    cruise_speed: 3.75
+    cruise_speed: 4.75
     approach_speed: 0.50
+    hill_approach_speed: 0.40
     bridge_speed: 2.50
     waypoint_speed: 2.50
     min_speed: 1.25
 
     accel_limit: 2.0
     decel_limit: 4.0
-
     curve_slow_k: 1.2
     lane_curve_speed_reduction: 0.40
 
     lane_lookahead_straight: 1.0
     lane_lookahead_curve: 0.60
-
     lane_straight_radius_px: 1400.0
     lane_sharp_curve_radius_px: 280.0
-
     lane_min_forward: 0.10
     lane_path_min_points: 3
-
     lane_target_filter_alpha: 0.35
 
     stanley_k: 0.8
     stanley_v_min: 0.5
-
     lane_offset_sign: -1.0
     lane_heading_sign: 1.0
     lane_filter_alpha: 0.3
-
     avoid_offset_bias: 0.45
     lookahead: 1.0
-
     input_timeout: 0.30
-
-    # 주차 경로 추종 속도
-    parking_forward_speed: 0.25
-    parking_reverse_speed: 0.20
-
-    parking_lookahead: 0.45
-    parking_search_window: 35
-
-    gear_change_pause_s: 0.60
-    gear_change_stop_speed: 0.03
-
-    parking_goal_tolerance_m: 0.20
-    parking_goal_yaw_tolerance_deg: 8.0
-
-    parking_index_end_margin: 2
-
-    # 주차 중 LaserScan 장애물 확인
-    scan_topic: /scan
-    require_scan_for_parking: true
-    scan_timeout_s: 0.50
-
-    require_forward_scan_coverage: true
-    require_reverse_scan_coverage: true
-
-    body_length: 1.34
-    body_width: 0.81
-
-    # 파라미터 이름은 C++ 코드에 선언된 이름이므로 그대로 유지
-    body_center_x_from_base_link: 0.0
-    body_center_y_from_base_link: 0.0
-
-    self_filter_enabled: true
-    self_filter_margin_m: 0.03
-
-    parking_obstacle_clearance_m: 0.25
-    parking_obstacle_corridor_margin_m: 0.10
-
-    # lidar_link의 Scan을 body_link 기준으로 변환
-    use_laser_tf: true
-    require_laser_tf: true
-    tf_timeout_s: 0.05
-
-    # TF를 사용하지 않을 경우에만 적용
-    laser_x: 0.0
-    laser_y: 0.0
-    laser_yaw: 0.0
-
 
 behavior_supervisor:
   ros__parameters:
-    # 교차로와 주차 정보가 포함된 waypoint YAML
-    event_path_yaml: /home/sky/HYPER/src/waypoint/course.yaml
-
+    event_path_yaml: /home/bean1120/HYPER/src/waypoint/course.yaml
     tick_hz: 10.0
-
     gps_timeout: 1.5
     odom_timeout: 0.5
     perception_timeout: 0.5
     sign_timeout: 1.5
 
-    stop_line_trigger_distance_m: 0.50
+    stop_line_trigger_distance_m: 2.0
     bridge_exit_tolerance_m: 0.50
     min_bridge_time_s: 1.0
-
     event_rearm_margin_m: 3.0
     approach_cancel_margin_m: 1.5
 
-    parking_plan_trigger_m: 2.0
+    # 경사로 정지선에서 정지할 기본 시간
+    hill_stop_duration_s: 5.0
 
     default_mission: straight
-
     left_on_green_allowed: false
     right_on_green_allowed: true
-
     arrow_signal_selects_path: true
