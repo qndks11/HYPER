@@ -18,6 +18,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <yaml-cpp/yaml.h>
@@ -30,6 +31,8 @@ constexpr const char * kStopAtLight = "STOP_AT_LIGHT";
 constexpr const char * kTurnBridge = "TURN_BRIDGE";
 constexpr const char * kHillApproach = "HILL_APPROACH";
 constexpr const char * kHillStop = "HILL_STOP";
+constexpr const char * kAccelObstacleZone = "ACCEL_OBSTACLE_ZONE";
+constexpr const char * kObstacleStop = "OBSTACLE_STOP";
 
 struct Pose2D {double x{0.0}; double y{0.0}; double yaw{0.0};};
 struct GpsPoint {double latitude{0.0}; double longitude{0.0};};
@@ -86,6 +89,15 @@ public:
     left_on_green_allowed_ = declare_parameter<bool>("left_on_green_allowed", false);
     right_on_green_allowed_ = declare_parameter<bool>("right_on_green_allowed", true);
     arrow_signal_selects_path_ = declare_parameter<bool>("arrow_signal_selects_path", true);
+    scan_timeout_s_ = declare_parameter<double>("scan_timeout", 2.0);
+    scan_startup_grace_s_ = declare_parameter<double>("scan_startup_grace_s", 3.0);
+    stop_on_lidar_timeout_ = declare_parameter<bool>("stop_on_lidar_timeout", false);
+    obstacle_min_distance_m_ = declare_parameter<double>("obstacle_min_distance_m", 0.40);
+    default_accel_zone_speed_mps_ = declare_parameter<double>("accel_zone_speed_mps", 4.0);
+    default_obstacle_stop_distance_m_ = declare_parameter<double>("obstacle_stop_distance_m", 2.0);
+    default_obstacle_clear_distance_m_ = declare_parameter<double>("obstacle_clear_distance_m", 2.5);
+    default_obstacle_half_width_m_ = declare_parameter<double>("obstacle_half_width_m", 0.55);
+    default_obstacle_clear_hold_s_ = declare_parameter<double>("obstacle_clear_hold_s", 1.0);
 
     load_yaml();
 
@@ -103,6 +115,9 @@ public:
     mission_sub_ = create_subscription<std_msgs::msg::String>(
       "/mission/turn", 10,
       std::bind(&BehaviorSupervisorWithParking::on_mission, this, std::placeholders::_1));
+    scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
+      "/scan", rclcpp::SensorDataQoS(),
+      std::bind(&BehaviorSupervisorWithParking::on_scan, this, std::placeholders::_1));
     event_command_sub_ = create_subscription<std_msgs::msg::String>(
       "/event/cmd", 10,
       std::bind(&BehaviorSupervisorWithParking::on_event_command, this, std::placeholders::_1));
@@ -187,6 +202,34 @@ private:
     if (!value.empty()) {mission_ = value;}
   }
 
+
+  void on_scan(const sensor_msgs::msg::LaserScan::SharedPtr msg)
+  {
+    scan_received_ = true;
+    scan_time_s_ = now_s();
+    double closest_x = std::numeric_limits<double>::infinity();
+    const double half_width = active_event_id_ ?
+      yaml_value<double>(events_[*active_event_id_], "obstacle_half_width_m",
+        default_obstacle_half_width_m_) : default_obstacle_half_width_m_;
+
+    for (std::size_t i = 0; i < msg->ranges.size(); ++i) {
+      const double range = msg->ranges[i];
+      if (!std::isfinite(range) || range < msg->range_min || range > msg->range_max) {continue;}
+      const double angle = msg->angle_min + static_cast<double>(i) * msg->angle_increment;
+      const double x = range * std::cos(angle);
+      const double y = range * std::sin(angle);
+      if (x >= obstacle_min_distance_m_ && std::abs(y) <= half_width) {
+        closest_x = std::min(closest_x, x);
+      }
+    }
+    front_obstacle_distance_m_ = closest_x;
+
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 3000,
+      "SCAN callback OK | nearest_front=%.3f m | samples=%zu",
+      front_obstacle_distance_m_, msg->ranges.size());
+  }
+
   void on_event_command(const std_msgs::msg::String::SharedPtr msg)
   {
     const std::string command = trim(msg->data);
@@ -217,7 +260,9 @@ private:
   std::string event_type(const std::string & event_id) const
   {
     const std::string type = lower(yaml_value<std::string>(events_[event_id], "event_type", "intersection"));
-    return (type == "hill_stop" || type == "stopline" || type == "slope_stop") ? "hill_stop" : "intersection";
+    if (type == "hill_stop" || type == "stopline" || type == "slope_stop") {return "hill_stop";}
+    if (type == "accel_obstacle" || type == "obstacle_zone") {return "accel_obstacle";}
+    return "intersection";
   }
 
   void set_state(const std::string & state, const std::string & reason = "")
@@ -234,8 +279,21 @@ private:
     if (!current_gps_) {return std::numeric_limits<double>::infinity();}
     try {
       const YAML::Node event = events_[event_id];
+      const YAML::Node point = event_type(event_id) == "accel_obstacle" && event["start"] ?
+        event["start"] : event;
       return parking_cpp::haversine_m(current_gps_->latitude, current_gps_->longitude,
-        event["latitude"].as<double>(), event["longitude"].as<double>());
+        point["latitude"].as<double>(), point["longitude"].as<double>());
+    } catch (const YAML::Exception &) {return std::numeric_limits<double>::infinity();}
+  }
+
+  double distance_to_accel_end(const std::string & event_id) const
+  {
+    if (!current_gps_) {return std::numeric_limits<double>::infinity();}
+    try {
+      const YAML::Node end = events_[event_id]["end"];
+      if (!end) {return std::numeric_limits<double>::infinity();}
+      return parking_cpp::haversine_m(current_gps_->latitude, current_gps_->longitude,
+        end["latitude"].as<double>(), end["longitude"].as<double>());
     } catch (const YAML::Exception &) {return std::numeric_limits<double>::infinity();}
   }
 
@@ -245,7 +303,11 @@ private:
     double best_distance = std::numeric_limits<double>::infinity();
     for (auto it = events_.begin(); it != events_.end(); ++it) {
       const std::string id = it->first.as<std::string>();
-      const double radius = yaml_value<double>(it->second, "approach_radius_m", 2.5);
+      const bool accel_event = event_type(id) == "accel_obstacle";
+      const double radius = accel_event ?
+        yaml_value<double>(it->second, "start_radius_m",
+          yaml_value<double>(it->second, "approach_radius_m", 2.5)) :
+        yaml_value<double>(it->second, "approach_radius_m", 2.5);
       const double distance = distance_to_event(id);
       if (completed_events_.count(id) > 0U) {
         if (distance > radius + event_rearm_margin_m_) {completed_events_.erase(id);} else {continue;}
@@ -258,7 +320,19 @@ private:
   void activate_event(const std::string & id, const std::string & reason)
   {
     active_event_id_ = id;
-    if (event_type(id) == "hill_stop") {set_state(kHillApproach, reason);} else {set_state(kApproach, reason);}
+    const std::string type = event_type(id);
+    if (type == "hill_stop") {set_state(kHillApproach, reason);}
+    else if (type == "accel_obstacle") {
+      const YAML::Node event = events_[id];
+      if (!event["start"] || !event["end"]) {
+        RCLCPP_WARN(get_logger(), "Accel event '%s' requires both start and end GPS points", id.c_str());
+        active_event_id_.reset();
+        return;
+      }
+      obstacle_clear_started_.reset();
+      accel_zone_enter_time_s_ = now_s();
+      set_state(kAccelObstacleZone, reason);
+    } else {set_state(kApproach, reason);}
   }
 
   std::string selected_direction(double t) const
@@ -355,6 +429,8 @@ private:
     active_event_id_.reset();
     transformed_path_.reset();
     bridge_end_.reset();
+    obstacle_clear_started_.reset();
+    accel_zone_enter_time_s_ = -1e9;
     set_state(kLaneFollow, reason);
   }
 
@@ -417,6 +493,60 @@ private:
       const double elapsed = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - hill_stop_started_).count();
       if (elapsed >= hill_stop_duration_current_s_) {complete_active_event("hill stop completed");}
+    } else if (state_ == kAccelObstacleZone) {
+      if (!active_event_id_) {
+        reset_to_lane_follow("invalid accel obstacle zone");
+      } else {
+        const YAML::Node event = events_[*active_event_id_];
+        const double stop_distance = yaml_value<double>(
+          event, "obstacle_stop_distance_m", default_obstacle_stop_distance_m_);
+        const double end_radius = yaml_value<double>(event, "end_radius_m", 2.5);
+        const double end_distance = distance_to_accel_end(*active_event_id_);
+        const bool scan_fresh =
+          scan_received_ && (t - scan_time_s_ <= scan_timeout_s_);
+        const double time_in_zone = t - accel_zone_enter_time_s_;
+
+        if (end_distance <= end_radius) {
+          complete_active_event("accel obstacle zone end reached");
+        } else if (!scan_fresh) {
+          if (time_in_zone >= scan_startup_grace_s_) {
+            if (stop_on_lidar_timeout_) {
+              set_state(kObstacleStop, "lidar timeout");
+            } else {
+              RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "Lidar data is stale, but stop_on_lidar_timeout=false. "
+                "scan_received=%d, scan_age=%.3f s, timeout=%.3f s",
+                scan_received_,
+                scan_received_ ? (t - scan_time_s_) : -1.0,
+                scan_timeout_s_);
+            }
+          }
+        } else if (front_obstacle_distance_m_ <= stop_distance) {
+          obstacle_clear_started_.reset();
+          set_state(kObstacleStop, "front obstacle detected");
+        }
+      }
+    } else if (state_ == kObstacleStop) {
+      if (!active_event_id_) {reset_to_lane_follow("no active obstacle event");}
+      else {
+        const YAML::Node event = events_[*active_event_id_];
+        const double clear_distance = yaml_value<double>(
+          event, "obstacle_clear_distance_m", default_obstacle_clear_distance_m_);
+        const double hold_s = yaml_value<double>(
+          event, "obstacle_clear_hold_s", default_obstacle_clear_hold_s_);
+        const bool scan_fresh =
+          scan_received_ && (t - scan_time_s_ <= scan_timeout_s_);
+        if (scan_fresh && front_obstacle_distance_m_ >= clear_distance) {
+          if (!obstacle_clear_started_) {obstacle_clear_started_ = std::chrono::steady_clock::now();}
+          const double clear_elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - *obstacle_clear_started_).count();
+          if (clear_elapsed >= hold_s) {
+            obstacle_clear_started_.reset();
+            set_state(kAccelObstacleZone, "obstacle cleared");
+          }
+        } else {obstacle_clear_started_.reset();}
+      }
     }
 
     publish_state();
@@ -435,6 +565,15 @@ private:
   double approach_cancel_margin_m_{1.5};
   double default_hill_stop_duration_s_{5.0};
   double hill_stop_duration_current_s_{5.0};
+  double scan_timeout_s_{2.0};
+  double scan_startup_grace_s_{3.0};
+  bool stop_on_lidar_timeout_{false};
+  double obstacle_min_distance_m_{0.40};
+  double default_accel_zone_speed_mps_{4.0};
+  double default_obstacle_stop_distance_m_{2.0};
+  double default_obstacle_clear_distance_m_{2.5};
+  double default_obstacle_half_width_m_{0.55};
+  double default_obstacle_clear_hold_s_{1.0};
   std::string default_mission_{"straight"};
   std::string mission_{"straight"};
   bool left_on_green_allowed_{false};
@@ -449,6 +588,7 @@ private:
   std::optional<std::pair<double, double>> bridge_end_;
   std::chrono::steady_clock::time_point bridge_started_{};
   std::chrono::steady_clock::time_point hill_stop_started_{};
+  std::optional<std::chrono::steady_clock::time_point> obstacle_clear_started_;
   std::set<std::string> completed_events_;
 
   std::optional<GpsPoint> current_gps_;
@@ -460,12 +600,17 @@ private:
   double stopline_time_s_{-1e9};
   std::string sign_{"none"};
   double sign_time_s_{-1e9};
+  bool scan_received_{false};
+  double scan_time_s_{-1e9};
+  double accel_zone_enter_time_s_{-1e9};
+  double front_obstacle_distance_m_{std::numeric_limits<double>::infinity()};
 
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gps_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sign_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mission_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr event_command_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr mode_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr bridge_pub_;

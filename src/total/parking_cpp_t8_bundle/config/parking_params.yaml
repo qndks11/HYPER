@@ -10,6 +10,8 @@ controller:
     cruise_speed: 4.75
     approach_speed: 0.50
     hill_approach_speed: 0.40
+    accel_zone_speed: 4.00
+    emergency_decel_limit: 8.0
     bridge_speed: 2.50
     waypoint_speed: 2.50
     min_speed: 1.25
@@ -58,3 +60,11 @@ behavior_supervisor:
     left_on_green_allowed: false
     right_on_green_allowed: true
     arrow_signal_selects_path: true
+
+    # 특정 GPS 가속 장애물 구간에서만 /scan 감시
+    scan_timeout: 1.0
+    accel_zone_speed_mps: 4.0
+    obstacle_stop_distance_m: 6.0
+    obstacle_clear_distance_m: 2.5
+    obstacle_half_width_m: 0.55
+    obstacle_clear_hold_s: 1.0

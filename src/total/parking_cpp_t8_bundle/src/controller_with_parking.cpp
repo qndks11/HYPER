@@ -37,6 +37,8 @@ public:
     cruise_speed_ = declare_parameter<double>("cruise_speed", 3.75);
     approach_speed_ = declare_parameter<double>("approach_speed", 0.50);
     hill_approach_speed_ = declare_parameter<double>("hill_approach_speed", 0.40);
+    accel_zone_speed_ = declare_parameter<double>("accel_zone_speed", 4.0);
+    emergency_deceleration_limit_ = declare_parameter<double>("emergency_decel_limit", 8.0);
     bridge_speed_ = declare_parameter<double>("bridge_speed", 2.50);
     waypoint_speed_ = declare_parameter<double>("waypoint_speed", 2.50);
     minimum_speed_ = declare_parameter<double>("min_speed", 1.25);
@@ -235,6 +237,11 @@ private:
       if (lane_ok) {target_steering = lane_follow_command(0.0); target_speed = std::min(approach_speed_, speed_for_curve(target_steering));}
     } else if (mode_ == "HILL_APPROACH") {
       if (lane_ok) {target_steering = lane_follow_command(0.0); target_speed = std::min(hill_approach_speed_, speed_for_curve(target_steering));}
+    } else if (mode_ == "ACCEL_OBSTACLE_ZONE") {
+      if (lane_ok) {target_steering = lane_follow_command(0.0); target_speed = std::min(accel_zone_speed_, speed_for_curve(target_steering));}
+    } else if (mode_ == "OBSTACLE_STOP") {
+      target_steering = lane_ok ? lane_follow_command(0.0) : 0.0;
+      target_speed = 0.0;
     } else if (mode_ == "STOP_AT_LIGHT" || mode_ == "HILL_STOP") {
       target_steering = lane_ok ? lane_follow_command(0.0) : 0.0;
       target_speed = 0.0;
@@ -250,8 +257,10 @@ private:
     target_steering = parking_cpp::clamp(target_steering, -max_steer_, max_steer_);
     target_speed = parking_cpp::clamp(target_speed, -max_velocity_, max_velocity_);
     commanded_steering_ = parking_cpp::rate_limit(commanded_steering_, target_steering, steering_rate_ * dt);
+    const double active_decel_limit = mode_ == "OBSTACLE_STOP" ?
+      emergency_deceleration_limit_ : deceleration_limit_;
     commanded_speed_ = parking_cpp::ramp(commanded_speed_, target_speed,
-      acceleration_limit_ * dt, deceleration_limit_ * dt);
+      acceleration_limit_ * dt, active_decel_limit * dt);
 
     ackermann_msgs::msg::AckermannDriveStamped cmd;
     cmd.header.stamp = now(); cmd.header.frame_id = base_frame_id_;
@@ -263,6 +272,7 @@ private:
 
   double wheelbase_{1.005}, control_hz_{40.0}, max_steer_{0.5235988}, steering_rate_{2.0};
   double max_velocity_{4.44}, cruise_speed_{3.75}, approach_speed_{0.5}, hill_approach_speed_{0.4};
+  double accel_zone_speed_{4.0}, emergency_deceleration_limit_{8.0};
   double bridge_speed_{2.5}, waypoint_speed_{2.5}, minimum_speed_{1.25};
   double acceleration_limit_{2.0}, deceleration_limit_{4.0}, curve_slow_k_{1.2};
   double lane_curve_speed_reduction_{0.4}, lane_lookahead_straight_{1.0}, lane_lookahead_curve_{0.6};

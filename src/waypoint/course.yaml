@@ -28,6 +28,23 @@ events:
     stop_duration_s: 5.0
     signal_required: false
     paths: {}
+  accel_A:
+    event_type: accel_obstacle
+    start:
+      latitude: 37.56688688039219
+      longitude: 126.9775923149925
+    start_radius_m: 1.5
+    end_radius_m: 1.5
+    target_speed_mps: 4.0
+    obstacle_stop_distance_m: 6.0
+    obstacle_clear_distance_m: 2.5
+    obstacle_half_width_m: 0.55
+    obstacle_clear_hold_s: 1.0
+    signal_required: false
+    paths: {}
+    end:
+      latitude: 37.56621402232966
+      longitude: 126.97755349962085
 paths:
   intersection_A_straight:
   - x: 0.0
