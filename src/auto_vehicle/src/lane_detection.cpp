@@ -72,14 +72,14 @@ constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 // more it leans. Only applied in image_callback's single-line fallback (see
 // kMaxPlausibleLaneWidthMeters too), since a true two-line fit already measures the real center
 // directly. Untuned placeholder -- adjust against real single-line footage.
-constexpr double kOutwardLeanGainMPerDeg = 0.02;
+constexpr double kOutwardLeanGainMPerDeg = 0.04;
 
 // Empirical gain [m per degree] pushing the L+R combined offset toward the curve's outside lane
 // -- e.g. on a rightward curve (negative combined steering_angle_deg) shifting toward the left
 // lane. A plain 50/50 blend of both sides' offsets has no notion of which lane the vehicle should
 // favor mid-turn; this adds that on top once the true two-line center estimate is already
 // averaged. Untuned placeholder -- adjust against real curve footage.
-constexpr double kCurveOutsideBiasGainMPerDeg = 0.02;
+constexpr double kCurveOutsideBiasGainMPerDeg = 0.04;
 
 // A stop-line bar spans most of the lane, so its bounding box is much wider than it is tall; a
 // single zebra-crossing stripe is comparatively close to square. This floor separates the two.
@@ -88,7 +88,7 @@ constexpr double kMinStoplineAspectRatio = 3.0;
 // out narrower marks (e.g. a single crossing stripe) that happen to pass the aspect ratio test.
 constexpr double kMinStoplineWidthFraction = 0.10;
 // Floor on contour area [px^2] to reject small mask noise before the shape checks run.
-constexpr double kMinStoplineAreaPx = 300.0;
+constexpr double kMinStoplineAreaPx = 400.0;
 
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
