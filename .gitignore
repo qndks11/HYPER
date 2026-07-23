@@ -54,3 +54,6 @@ qtcreator-*
 CATKIN_IGNORE
 
 src/.vscode/
+# VS Code generated databases
+**/.vscode/browse.vc.db
+**/.vscode/*.db

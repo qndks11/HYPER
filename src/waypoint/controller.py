@@ -2,299 +2,725 @@
 """
 controller.py — 제어 노드 (모드 mux)
 
-아키텍처 3.7 / 5장 시나리오 / 6장 상태머신의 "손발".
-판단(감독) 노드가 정해준 /driving_mode 에 따라 추종 기준(reference)만 바꿔서
-조향·속도 명령(/cmd, AckermannDriveStamped)을 생성한다.
+LANE_FOLLOW에서는 /lane/center 메시지 뒤에 포함된 분홍색 중앙 경로 점들을
+차량 좌표계(base_link 형태: x=전방, y=좌측)로 받아 Pure Pursuit로 직접 추종한다.
 
-  LANE_FOLLOW     : /lane/center(offset, heading_err) → Stanley 횡제어
-  TURN_BRIDGE     : /bridge_path → Pure Pursuit (문서 11.2 로직 내장)
-  STOP_AT_LIGHT   : 차선 유지한 채 속도 0 으로 감속·정지
-  AVOID           : 차선추종 + 횡방향 바이어스 (스텁 — /obstacles 기하로 보강할 자리)
-  WAYPOINT_FOLLOW : 차선 유실 시 감독 노드가 보내는 /waypoint_path(코스 좌표) 로
-                    Pure Pursuit 추종 (fail-safe: 정지 대신 완주 우선)
+/lane/center 규약
+  data[0] = center offset [m]
+  data[1] = center heading [deg]
+  data[2] = curvature radius [px]
+  data[3] = valid (1.0/0.0)
+  data[4:] = center path points [forward_m, left_m, forward_m, left_m, ...]
 
-설계 포인트
-  1) 입력 콜백은 "최신값 캐싱"만 하고, 실제 제어는 고정 주기 타이머에서 1번 계산.
-     → 센서(카메라/EKF) 주기가 흔들려도 /cmd 주기는 일정 (8장: 제어 20~50Hz).
-  2) 조향 rate-limit + 속도 accel/decel-limit → 서보/구동에 부드러운 명령.
-  3) 입력 워치독: odom/차선이 끊기면 보수적으로 감속·정지(fail-safe).
-
-메시지 규약(문서 11.x 의 std_msgs 버전에 맞춤)
-  /driving_mode  : std_msgs/String   ("LANE_FOLLOW" | "TURN_BRIDGE" | "STOP_AT_LIGHT" | "AVOID" | "WAYPOINT_FOLLOW")
-  /lane/center   : std_msgs/Float64MultiArray  data=[offset_m, steering_angle_deg, curvature_px, valid]
-                   (lane_detection.cpp 발행 규약. degree→radian 변환은 on_lane 에서 처리)
-  /bridge_path   : nav_msgs/Path     (map 프레임, 교차로 회전용. behavior_supervisor 가 발행)
-  /waypoint_path : nav_msgs/Path     (map 프레임, 차선 유실 fail-safe 용. behavior_supervisor 가 발행)
-  /odometry/filtered_map : nav_msgs/Odometry (EKF+GPS 융합, 절대 map 프레임, pose=map / twist=base_link)
-                          (odom 전용 필터는 세션마다 원점/방향이 달라져 course.yaml과
-                           어긋나므로, waypoint 기반 기능(TURN_BRIDGE/WAYPOINT_FOLLOW)엔
-                           반드시 이 절대 프레임을 써야 한다)
-  /velocity        : std_msgs/Float64  (실제 차량 구동용 속도 명령, m/s)
-  /steering_angle  : std_msgs/Float64  (실제 차량 구동용 조향각 명령, rad)
+이전 4개 값만 들어오는 lane_detection과도 호환된다. 경로 점이 없으면
+기존 Stanley 제어로 자동 폴백한다.
 """
 
 import math
+
 import rclpy
-from rclpy.node import Node
-from std_msgs.msg import String, Float64MultiArray, Float64
-from nav_msgs.msg import Odometry, Path
 from ackermann_msgs.msg import AckermannDriveStamped
+from nav_msgs.msg import Odometry, Path
+from rclpy.node import Node
+from std_msgs.msg import Float64, Float64MultiArray, String
 
 
-# ----------------------------- 작은 유틸 -----------------------------
-def clamp(v, lo, hi):
-    return lo if v < lo else hi if v > hi else v
-
-def rate_limit(cur, target, max_step):
-    """한 주기에 max_step 이상 못 바뀌게 (조향 급변 방지)."""
-    return clamp(target, cur - max_step, cur + max_step)
-
-def ramp(cur, target, up_step, down_step):
-    """가속/감속 제한 (속도 명령용)."""
-    if target > cur:
-        return min(target, cur + up_step)
-    return max(target, cur - down_step)
-
-def yaw_from_quat(q):
-    return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
-                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+def clamp(value, low, high):
+    return low if value < low else high if value > high else value
 
 
-# ----------------------------- 제어 노드 -----------------------------
+def rate_limit(current, target, max_step):
+    """한 제어 주기 동안 조향 명령이 max_step 이상 변하지 않게 한다."""
+    return clamp(target, current - max_step, current + max_step)
+
+
+def ramp(current, target, up_step, down_step):
+    """속도 명령에 가속·감속 한계를 적용한다."""
+    if target > current:
+        return min(target, current + up_step)
+    return max(target, current - down_step)
+
+
+def yaw_from_quat(quaternion):
+    return math.atan2(
+        2.0 * (
+            quaternion.w * quaternion.z +
+            quaternion.x * quaternion.y
+        ),
+        1.0 - 2.0 * (
+            quaternion.y * quaternion.y +
+            quaternion.z * quaternion.z
+        )
+    )
+
+
 class Controller(Node):
     def __init__(self):
         super().__init__('controller')
 
-        # --- 차량/주기 파라미터 ---
-        self.L          = self.declare_parameter('wheelbase', 0.33).value      # 축거(m)
-        self.hz         = self.declare_parameter('control_hz', 40.0).value     # 제어 주기
-        self.max_steer  = self.declare_parameter('max_steer', 0.5).value       # 조향 한계(rad, ≈28°)
-        self.steer_rate = self.declare_parameter('steer_rate', 4.0).value      # 조향 변화율 한계(rad/s)
+        # ---------------- 차량 및 제어 주기 ----------------
+        self.L = float(
+            self.declare_parameter('wheelbase', 1.34 * 0.75).value
+        )
+        self.hz = float(
+            self.declare_parameter('control_hz', 40.0).value
+        )
+        self.max_steer = float(
+            self.declare_parameter(
+                'max_steering_angle', 0.5235988
+            ).value
+        )
+        self.steer_rate = float(
+            self.declare_parameter(
+                'max_steering_angular_velocity', 2.0
+            ).value
+        )
+        self.max_velocity = float(
+            self.declare_parameter('max_velocity', 5.0).value
+        )
 
-        # --- 속도 파라미터 ---
-        self.cruise     = self.declare_parameter('cruise_speed', 1.5).value    # 평상시 목표(m/s)
-        self.bridge_spd = self.declare_parameter('bridge_speed', 1.0).value    # 교차로 통과 속도
-        self.wp_speed   = self.declare_parameter('waypoint_speed', 1.0).value   # 차선 유실 fail-safe 속도
-        self.min_speed  = self.declare_parameter('min_speed', 0.5).value       # 코너 최저 속도
-        self.accel      = self.declare_parameter('accel_limit', 2.0).value     # 가속 한계(m/s^2)
-        self.decel      = self.declare_parameter('decel_limit', 4.0).value     # 감속 한계(m/s^2)
-        self.curve_slow = self.declare_parameter('curve_slow_k', 1.2).value    # |조향|↑ → 감속 정도
+        # ---------------- 속도 ----------------
+        self.cruise = float(
+            self.declare_parameter('cruise_speed', 3.75).value
+        )
+        self.approach_speed = float(
+            self.declare_parameter('approach_speed', 0.5).value
+        )
+        self.bridge_spd = float(
+            self.declare_parameter('bridge_speed', 2.5).value
+        )
+        self.wp_speed = float(
+            self.declare_parameter('waypoint_speed', 2.5).value
+        )
+        self.min_speed = float(
+            self.declare_parameter('min_speed', 1.25).value
+        )
+        self.accel = float(
+            self.declare_parameter('accel_limit', 2.0).value
+        )
+        self.decel = float(
+            self.declare_parameter('decel_limit', 4.0).value
+        )
+        self.curve_slow = float(
+            self.declare_parameter('curve_slow_k', 1.2).value
+        )
 
-        # --- Stanley(차선추종) 게인 ---
-        self.k_stanley  = self.declare_parameter('stanley_k', 0.4).value       # 횡오차 게인
-        self.v_soft     = self.declare_parameter('stanley_v_min', 0.5).value   # 저속 발산 방지(분모)
-        # 부호는 차마다 다름. 벤치에서 바퀴 들고 offset/heading 한쪽씩 줘보며 맞춘다.
-        self.sign_off   = self.declare_parameter('lane_offset_sign', 0.4).value   # +면 차가 우측 → 좌조향(+)
-        self.sign_head  = self.declare_parameter('lane_heading_sign', 0.4).value  # +면 차가 좌향 → 우조향(-)
-        self.avoid_bias = self.declare_parameter('avoid_offset_bias', 0.4).value  # 회피 시 횡 목표 이동(m)
-        # 카메라/차선검출 프레임 노이즈로 조향이 흔들리는 것(꿀렁거림) 방지용 저역통과 필터.
-        # 0에 가까울수록 필터 세짐(반응 느려짐), 1이면 필터 없음(원본 그대로).
-        self.lane_alpha = self.declare_parameter('lane_filter_alpha', 0.3).value
+        # 급곡선일수록 cruise 속도 자체도 낮춘다.
+        # 0.40이면 가장 급한 곡선에서 직선 목표속도의 60%를 사용한다.
+        self.lane_curve_speed_reduction = float(
+            self.declare_parameter(
+                'lane_curve_speed_reduction', 0.40
+            ).value
+        )
 
-        # --- Pure Pursuit(브리지) ---
-        self.Ld = self.declare_parameter('lookahead', 1.0).value               # lookahead 거리(m)
+        # ---------------- 차선 중앙 경로 추종 ----------------
+        # 분홍색 중앙 경로를 직접 따라가기 위한 로컬 Pure Pursuit lookahead.
+        # 직선에서는 먼 점을 봐서 조향을 안정시키고,
+        # 곡선에서는 가까운 점을 봐서 늦게 꺾이는 현상을 줄인다.
+        self.lane_lookahead_straight = float(
+            self.declare_parameter(
+                'lane_lookahead_straight', 1.0
+            ).value
+        )
+        self.lane_lookahead_curve = float(
+            self.declare_parameter(
+                'lane_lookahead_curve', 0.60
+            ).value
+        )
 
-        # --- 워치독 ---
-        self.timeout = self.declare_parameter('input_timeout', 0.3).value      # 입력 정지 판정(s)
+        # lane_detection.cpp와 같은 곡률 반경 기준을 사용한다.
+        self.lane_straight_radius_px = float(
+            self.declare_parameter(
+                'lane_straight_radius_px', 1400.0
+            ).value
+        )
+        self.lane_sharp_curve_radius_px = float(
+            self.declare_parameter(
+                'lane_sharp_curve_radius_px', 280.0
+            ).value
+        )
+        self.lane_min_forward = float(
+            self.declare_parameter('lane_min_forward', 0.10).value
+        )
+        self.lane_path_min_points = int(
+            self.declare_parameter('lane_path_min_points', 3).value
+        )
 
-        # --- 캐시 상태 ---
+        # lane_detection이 보내는 로컬 경로의 프레임간 흔들림 완화.
+        # 1.0이면 필터 없음, 작을수록 부드러워진다.
+        self.lane_target_alpha = float(
+            self.declare_parameter('lane_target_filter_alpha', 0.35).value
+        )
+
+        # ---------------- Stanley 폴백 ----------------
+        # 새 lane_detection이 아닌 예전 4개 데이터만 들어올 때 사용한다.
+        self.k_stanley = float(
+            self.declare_parameter('stanley_k', 0.8).value
+        )
+        self.v_soft = float(
+            self.declare_parameter('stanley_v_min', 0.5).value
+        )
+
+        # 현재 lane_detection의 offset은
+        #   + : 목표 중앙 경로가 차량보다 오른쪽
+        # 이므로 오른쪽 조향(-)이 필요하다. 기본 부호를 -1로 둔다.
+        self.sign_off = float(
+            self.declare_parameter('lane_offset_sign', -1.0).value
+        )
+        self.sign_head = float(
+            self.declare_parameter('lane_heading_sign', 1.0).value
+        )
+        self.lane_alpha = float(
+            self.declare_parameter('lane_filter_alpha', 0.3).value
+        )
+
+        # ---------------- 장애물 회피 ----------------
+        self.avoid_bias = float(
+            self.declare_parameter('avoid_offset_bias', 0.45).value
+        )
+
+        # ---------------- 지도 경로 Pure Pursuit ----------------
+        self.Ld = float(
+            self.declare_parameter('lookahead', 1.0).value
+        )
+
+        # ---------------- 워치독 ----------------
+        self.timeout = float(
+            self.declare_parameter('input_timeout', 0.3).value
+        )
+
+        # ---------------- 캐시 상태 ----------------
         self.mode = 'LANE_FOLLOW'
+
+        # lane summary 값: 경로 점이 없는 경우의 Stanley 폴백용.
         self.lane_off = 0.0
         self.lane_head = 0.0
+        self.lane_radius_px = 1e6
         self.lane_valid = False
-        self.lane_init = False   # 첫 유효 프레임 전엔 필터 초기화 필요
-        self.x = self.y = self.yaw = 0.0
-        self.v = 0.0
-        self.bridge = None                      # [[x,y], ...] (map) — TURN_BRIDGE(교차로)용
-        self.wp_path = None                     # [[x,y], ...] (map) — WAYPOINT_FOLLOW(차선유실)용
+        self.lane_init = False
 
-        self.cmd_delta = 0.0                    # 직전 출력(rate-limit 기준)
+        # 분홍색 중앙 경로의 로컬 좌표 점들.
+        # 각 점은 [forward_m, left_m].
+        self.lane_path_local = None
+
+        # 선택된 Pure Pursuit 목표점을 EMA로 부드럽게 만든다.
+        self.filtered_lane_target = None
+
+        self.x = 0.0
+        self.y = 0.0
+        self.yaw = 0.0
+        self.v = 0.0
+
+        self.bridge = None
+        self.wp_path = None
+
+        self.cmd_delta = 0.0
         self.cmd_speed = 0.0
         self.last_t = self.now_s()
-        self.t_odom = self.t_lane = -1e9        # 마지막 수신 시각
+        self.t_odom = -1e9
+        self.t_lane = -1e9
 
-        # --- I/O ---  (QoS: 예제 스택과 맞추려 depth 10 기본.
-        #     카메라발 고주기 토픽을 best-effort 로 쓰면 SensorDataQoS 로 바꿀 것)
-        self.create_subscription(String,            '/driving_mode',      self.on_mode,  10)
-        self.create_subscription(Float64MultiArray, '/lane/center',       self.on_lane,  10)
-        self.create_subscription(Path,              '/bridge_path',       self.on_bridge, 10)
-        self.create_subscription(Path,              '/waypoint_path',     self.on_waypoint_path, 10)
-        self.create_subscription(Odometry,          '/odometry/filtered_map', self.on_odom,  10)
-        self.cmd_pub = self.create_publisher(AckermannDriveStamped, '/cmd', 10)
-        # 실제 차량 구동 토픽(하드웨어가 실제로 구독하는 건 이쪽)
-        self.vel_pub = self.create_publisher(Float64, '/velocity', 10)
-        self.steer_pub = self.create_publisher(Float64, '/steering_angle', 10)
+        # ---------------- ROS I/O ----------------
+        self.create_subscription(
+            String, '/driving_mode', self.on_mode, 10
+        )
+        self.create_subscription(
+            Float64MultiArray, '/lane/center', self.on_lane, 10
+        )
+        self.create_subscription(
+            Path, '/bridge_path', self.on_bridge, 10
+        )
+        self.create_subscription(
+            Path, '/waypoint_path', self.on_waypoint_path, 10
+        )
+        self.create_subscription(
+            Odometry,
+            '/odometry/filtered_map',
+            self.on_odom,
+            10
+        )
+
+        self.cmd_pub = self.create_publisher(
+            AckermannDriveStamped, '/cmd', 10
+        )
+        self.vel_pub = self.create_publisher(
+            Float64, '/velocity', 10
+        )
+        self.steer_pub = self.create_publisher(
+            Float64, '/steering_angle', 10
+        )
 
         self.create_timer(1.0 / self.hz, self.control_step)
-        self.get_logger().info('controller(mode mux) 시작')
+
+        self.get_logger().info(
+            'controller 시작: 분홍색 중앙 경로 직접 추종, '
+            f'lookahead straight={self.lane_lookahead_straight:.2f}m, '
+            f'curve={self.lane_lookahead_curve:.2f}m, '
+            f'approach_speed={self.approach_speed:.2f}m/s'
+        )
 
     def now_s(self):
         return self.get_clock().now().nanoseconds * 1e-9
 
-    # ----------------------- 콜백: 캐싱만 -----------------------
-    def on_mode(self, m):
-        self.mode = m.data
+    # ---------------- 콜백 ----------------
+    def on_mode(self, message):
+        new_mode = message.data
 
-    def on_lane(self, m):
-        # data = [offset_m, steering_angle_deg, curvature_px, valid]  (lane_detection.cpp 규약)
-        d = list(m.data) + [0.0, 0.0, 0.0, 0.0]
-        raw_off = d[0]
-        raw_head = math.radians(d[1])   # heading은 degree로 오므로 radian 변환
-        valid = d[3]                    # d[2]는 curvature_px, valid는 d[3]
+        if new_mode != self.mode:
+            # TURN_BRIDGE 등을 지나고 LANE_FOLLOW로 돌아왔을 때
+            # 이전 카메라 목표점이 한 프레임 남아 조향하는 것을 방지한다.
+            self.filtered_lane_target = None
 
-        if valid > 0.5:
+        self.mode = new_mode
+
+    def on_lane(self, message):
+        data = list(message.data)
+
+        if len(data) < 4:
+            self.lane_valid = False
+            self.lane_path_local = None
+            self.filtered_lane_target = None
+            self.t_lane = self.now_s()
+            return
+
+        raw_off = float(data[0])
+        raw_head = math.radians(float(data[1]))
+        self.lane_radius_px = float(data[2])
+        valid = float(data[3]) > 0.5
+
+        if valid:
             if not self.lane_init:
-                # 첫 유효 프레임은 그대로 채택(필터 워밍업 중 0으로 끌려가는 것 방지)
                 self.lane_off = raw_off
                 self.lane_head = raw_head
                 self.lane_init = True
             else:
-                # 지수이동평균(EMA)으로 프레임간 노이즈를 죽여 조향이 튀는 것(꿀렁거림) 완화.
-                # alpha=1이면 원본 그대로, 작을수록 부드러워지되 반응은 느려짐.
-                a = self.lane_alpha
-                self.lane_off = a * raw_off + (1.0 - a) * self.lane_off
-                self.lane_head = a * raw_head + (1.0 - a) * self.lane_head
+                alpha = clamp(self.lane_alpha, 0.0, 1.0)
+                self.lane_off = (
+                    alpha * raw_off +
+                    (1.0 - alpha) * self.lane_off
+                )
+                self.lane_head = (
+                    alpha * raw_head +
+                    (1.0 - alpha) * self.lane_head
+                )
 
-        self.lane_valid = valid > 0.5
+            # data[4:]는 [forward_m, left_m] 쌍이다.
+            path_values = data[4:]
+            local_path = []
+
+            for index in range(0, len(path_values) - 1, 2):
+                forward_m = float(path_values[index])
+                left_m = float(path_values[index + 1])
+
+                if not (
+                    math.isfinite(forward_m) and
+                    math.isfinite(left_m)
+                ):
+                    continue
+
+                if forward_m < self.lane_min_forward:
+                    continue
+
+                local_path.append([forward_m, left_m])
+
+            if len(local_path) >= self.lane_path_min_points:
+                # lane_detection이 가까운 점부터 먼 점 순서로 발행하지만,
+                # 안전하게 전방 거리 기준으로 한 번 정렬한다.
+                local_path.sort(key=lambda point: point[0])
+                self.lane_path_local = local_path
+            else:
+                self.lane_path_local = None
+                self.filtered_lane_target = None
+
+        else:
+            self.lane_path_local = None
+            self.filtered_lane_target = None
+            self.lane_init = False
+
+        self.lane_valid = valid
         self.t_lane = self.now_s()
 
-    def on_bridge(self, m):
-        self.bridge = [[p.pose.position.x, p.pose.position.y] for p in m.poses]
+    def on_bridge(self, message):
+        self.bridge = [
+            [pose.pose.position.x, pose.pose.position.y]
+            for pose in message.poses
+        ]
 
-    def on_waypoint_path(self, m):
-        self.wp_path = [[p.pose.position.x, p.pose.position.y] for p in m.poses]
+    def on_waypoint_path(self, message):
+        self.wp_path = [
+            [pose.pose.position.x, pose.pose.position.y]
+            for pose in message.poses
+        ]
 
-    def on_odom(self, m):
-        self.x = m.pose.pose.position.x
-        self.y = m.pose.pose.position.y
-        self.yaw = yaw_from_quat(m.pose.pose.orientation)
-        self.v = m.twist.twist.linear.x        # base_link 전진 속도
+    def on_odom(self, message):
+        self.x = message.pose.pose.position.x
+        self.y = message.pose.pose.position.y
+        self.yaw = yaw_from_quat(message.pose.pose.orientation)
+        self.v = message.twist.twist.linear.x
         self.t_odom = self.now_s()
 
-    # ----------------------- 모드별 조향 -----------------------
-    def lane_follow_steer(self, bias=0.0):
-        """Stanley: δ = (heading 항) + atan2(k·e, v).
-        e=횡오차(offset), bias 만큼 목표 차선을 옆으로 민다(AVOID 용)."""
-        e = (self.lane_off - bias) * self.sign_off
-        psi = self.lane_head * self.sign_head
-        v = max(abs(self.v), self.v_soft)
-        return psi + math.atan2(self.k_stanley * e, v)
+    # ---------------- 차선 제어 ----------------
+    def lane_follow_stanley(self, bias=0.0):
+        """경로 점을 받지 못했을 때 사용하는 Stanley 폴백."""
+        error = (self.lane_off - bias) * self.sign_off
+        heading = self.lane_head * self.sign_head
+        speed = max(abs(self.v), self.v_soft)
 
-    def pure_pursuit_on(self, path):
-        """문서 11.2: 주어진 path 위에서 Ld 앞 목표점 → δ=atan2(2L·sinα, Ld).
-        TURN_BRIDGE(self.bridge)와 WAYPOINT_FOLLOW(self.wp_path) 양쪽에서 공용으로 쓴다."""
+        return heading + math.atan2(
+            self.k_stanley * error,
+            speed
+        )
+
+    def lane_curve_strength(self):
+        """곡률 반경을 0(직선)~1(급곡선)로 변환한다."""
+        radius = self.lane_radius_px
+
+        if not math.isfinite(radius) or radius >= self.lane_straight_radius_px:
+            return 0.0
+
+        if radius <= self.lane_sharp_curve_radius_px:
+            return 1.0
+
+        denominator = (
+            self.lane_straight_radius_px -
+            self.lane_sharp_curve_radius_px
+        )
+
+        if denominator <= 1e-6:
+            return 0.0
+
+        return clamp(
+            (
+                self.lane_straight_radius_px -
+                radius
+            ) / denominator,
+            0.0,
+            1.0
+        )
+
+    def current_lane_lookahead(self):
+        """직선과 곡선 사이에서 lookahead를 부드럽게 보간한다."""
+        curve_strength = self.lane_curve_strength()
+
+        return (
+            (1.0 - curve_strength) *
+            self.lane_lookahead_straight +
+            curve_strength *
+            self.lane_lookahead_curve
+        )
+
+    def select_local_lane_target(self):
+        """
+        분홍색 중앙 경로에서 현재 곡률에 맞는 lookahead 이상의
+        첫 번째 점을 선택한다.
+
+        좌표 규약:
+            x = 전방(+)
+            y = 좌측(+)
+        """
+        path = self.lane_path_local
+
+        if not path:
+            return None
+
+        lookahead = self.current_lane_lookahead()
+        target = None
+
+        for forward_m, left_m in path:
+            distance = math.hypot(forward_m, left_m)
+
+            if distance >= lookahead:
+                target = [forward_m, left_m]
+                break
+
+        if target is None:
+            target = list(path[-1])
+
+        if target[0] <= self.lane_min_forward:
+            return None
+
+        # 선택 목표점만 EMA 처리한다. 전체 경로를 점별로 필터링하면
+        # 점 개수가 달라질 때 인덱스가 엇갈릴 수 있기 때문이다.
+        if self.filtered_lane_target is None:
+            self.filtered_lane_target = target
+        else:
+            alpha = clamp(self.lane_target_alpha, 0.0, 1.0)
+            self.filtered_lane_target = [
+                alpha * target[0] +
+                (1.0 - alpha) * self.filtered_lane_target[0],
+                alpha * target[1] +
+                (1.0 - alpha) * self.filtered_lane_target[1]
+            ]
+
+        return self.filtered_lane_target
+
+    def lane_path_pure_pursuit(self, lateral_bias=0.0):
+        """
+        분홍색 중앙 경로의 로컬 목표점을 직접 추종한다.
+
+        local_x = 전방 거리
+        local_y = 좌측 거리
+
+        Pure Pursuit:
+            delta = atan2(2 * L * local_y, Ld^2)
+        실제 목표점 거리 제곱을 사용하므로 경로 점 간격 변화에도 대응한다.
+        """
+        target = self.select_local_lane_target()
+
+        if target is None:
+            return 0.0, False
+
+        local_x = target[0]
+        local_y = target[1] + lateral_bias
+        distance_squared = local_x * local_x + local_y * local_y
+
+        if distance_squared < 1e-6:
+            return 0.0, False
+
+        delta = math.atan2(
+            2.0 * self.L * local_y,
+            distance_squared
+        )
+
+        return delta, True
+
+    # ---------------- 지도 경로 제어 ----------------
+    def pure_pursuit_on_map_path(self, path):
+        """
+        map 좌표의 bridge/waypoint 경로를 Pure Pursuit로 추종한다.
+
+        기존처럼 경로의 첫 점부터 매번 검색하면 차량이 시작점을 지나간 뒤
+        뒤쪽 시작점을 다시 목표로 고를 수 있다. 먼저 현재 위치에 가장 가까운
+        경로 인덱스를 찾고, 그 인덱스 이후의 전방 점만 목표로 선택한다.
+        """
         if not path:
             return 0.0, False
-        x, y, yaw = self.x, self.y, self.yaw
-        # Ld 이상 떨어진 첫 점(없으면 마지막 점)
-        ti = -1
-        for k, (px, py) in enumerate(path):
-            if math.hypot(px - x, py - y) >= self.Ld:
-                ti = k
+
+        # 현재 차량에 가장 가까운 경로 점
+        nearest_index = min(
+            range(len(path)),
+            key=lambda index: (
+                (path[index][0] - self.x) ** 2 +
+                (path[index][1] - self.y) ** 2
+            )
+        )
+
+        selected_target = None
+        last_forward_target = None
+
+        for index in range(nearest_index, len(path)):
+            path_x, path_y = path[index]
+            dx = path_x - self.x
+            dy = path_y - self.y
+
+            local_x = (
+                math.cos(self.yaw) * dx +
+                math.sin(self.yaw) * dy
+            )
+            local_y = (
+                -math.sin(self.yaw) * dx +
+                math.cos(self.yaw) * dy
+            )
+
+            if local_x <= 0.0:
+                continue
+
+            distance = math.hypot(local_x, local_y)
+            last_forward_target = (local_x, local_y)
+
+            if distance >= self.Ld:
+                selected_target = (local_x, local_y)
                 break
-        tx, ty = path[ti]
-        dx, dy = tx - x, ty - y
-        local_x = math.cos(yaw) * dx + math.sin(yaw) * dy
-        local_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
-        alpha = math.atan2(local_y, local_x)
-        delta = math.atan2(2.0 * self.L * math.sin(alpha), self.Ld)
+
+        # lookahead보다 먼 점이 없으면 마지막 전방 점 사용
+        if selected_target is None:
+            selected_target = last_forward_target
+
+        if selected_target is None:
+            return 0.0, False
+
+        local_x, local_y = selected_target
+        distance_squared = (
+            local_x * local_x +
+            local_y * local_y
+        )
+
+        if distance_squared < 1e-6:
+            return 0.0, False
+
+        delta = math.atan2(
+            2.0 * self.L * local_y,
+            distance_squared
+        )
+
         return delta, True
 
     def pure_pursuit_steer(self):
-        """TURN_BRIDGE(교차로 회전) 전용 래퍼: bridge_path 사용."""
-        return self.pure_pursuit_on(self.bridge)
+        return self.pure_pursuit_on_map_path(self.bridge)
 
-    def speed_for_curve(self, delta):
-        """조향이 클수록 감속해 코너 안정화."""
-        v = self.cruise * max(0.0, 1.0 - self.curve_slow * abs(delta))
-        return max(self.min_speed, v)
+    def speed_for_curve(self, steering):
+        """조향각과 검출된 곡률을 함께 사용해 곡선에서 감속한다."""
+        steering_ratio = max(
+            0.0,
+            1.0 - self.curve_slow * abs(steering)
+        )
 
-    # ----------------------- 메인 제어 루프 -----------------------
+        curve_strength = self.lane_curve_strength()
+        curvature_ratio = max(
+            0.0,
+            1.0 -
+            self.lane_curve_speed_reduction *
+            curve_strength
+        )
+
+        speed = self.cruise * min(
+            steering_ratio,
+            curvature_ratio
+        )
+
+        return max(self.min_speed, speed)
+
+    def lane_follow_command(self, lateral_bias=0.0):
+        """
+        우선 분홍색 중앙 경로를 Pure Pursuit로 추종하고,
+        경로 점이 없는 구버전 메시지에서는 Stanley로 폴백한다.
+        """
+        steering, ok = self.lane_path_pure_pursuit(lateral_bias)
+
+        if ok:
+            return steering
+
+        return self.lane_follow_stanley(lateral_bias)
+
+    # ---------------- 메인 제어 루프 ----------------
     def control_step(self):
         now = self.now_s()
         dt = now - self.last_t
+
         if dt <= 0.0:
             dt = 1.0 / self.hz
+
         self.last_t = now
 
         odom_ok = (now - self.t_odom) < self.timeout
-        lane_ok = (now - self.t_lane) < self.timeout and self.lane_valid
+        lane_ok = (
+            (now - self.t_lane) < self.timeout and
+            self.lane_valid
+        )
 
-        tgt_delta = self.cmd_delta             # 기본은 직전 조향 유지
-        tgt_speed = 0.0
+        target_steering = self.cmd_delta
+        target_speed = 0.0
 
         if not odom_ok:
-            # 위치를 모르면(EKF 끊김) 무조건 정지
-            tgt_delta, tgt_speed = 0.0, 0.0
+            target_steering = 0.0
+            target_speed = 0.0
 
         elif self.mode == 'TURN_BRIDGE':
-            d, ok = self.pure_pursuit_steer()
+            steering, ok = self.pure_pursuit_steer()
+
             if ok:
-                tgt_delta, tgt_speed = d, self.bridge_spd
+                target_steering = steering
+                target_speed = self.bridge_spd
             else:
-                tgt_speed = 0.0                # 경로 아직 못 받음 → 대기
+                target_speed = 0.0
+
+        elif self.mode == 'APPROACH':
+            # 등록된 GPS 이벤트 반경 안에서만 판단부가 이 모드를 보낸다.
+            # 조향은 분홍색 차선 중앙 경로를 그대로 사용하고 속도만 낮춘다.
+            if lane_ok:
+                target_steering = self.lane_follow_command()
+                target_speed = min(
+                    self.approach_speed,
+                    self.speed_for_curve(target_steering)
+                )
+            else:
+                target_speed = 0.0
 
         elif self.mode == 'STOP_AT_LIGHT':
-            if lane_ok:                        # 정지하면서도 차선 중앙은 유지
-                tgt_delta = self.lane_follow_steer()
-            tgt_speed = 0.0
+            if lane_ok:
+                target_steering = self.lane_follow_command()
+            target_speed = 0.0
 
         elif self.mode == 'AVOID':
             if lane_ok:
-                tgt_delta = self.lane_follow_steer(bias=self.avoid_bias)
-            tgt_speed = self.speed_for_curve(tgt_delta) * 0.6   # 회피 중 감속
+                # positive bias는 목표 경로를 좌측으로 이동시킨다.
+                target_steering = self.lane_follow_command(
+                    lateral_bias=self.avoid_bias
+                )
+                target_speed = (
+                    self.speed_for_curve(target_steering) * 0.6
+                )
+            else:
+                target_speed = 0.0
 
         elif self.mode == 'WAYPOINT_FOLLOW':
-            # 차선 유실 fail-safe: 감독 노드가 보내주는 코스 좌표(/waypoint_path)를
-            # Pure Pursuit로 따라간다. 정지 대신 완주를 우선.
-            d, ok = self.pure_pursuit_on(self.wp_path)
+            steering, ok = self.pure_pursuit_on_map_path(self.wp_path)
+
             if ok:
-                tgt_delta, tgt_speed = d, self.wp_speed
+                target_steering = steering
+                target_speed = self.wp_speed
             else:
-                tgt_speed = 0.0             # 경로 아직 못 받음 → 대기(정지)
+                target_speed = 0.0
 
-        else:  # LANE_FOLLOW (그리고 알 수 없는 모드는 보수적으로)
+        else:  # LANE_FOLLOW
             if lane_ok:
-                tgt_delta = self.lane_follow_steer()
-                tgt_speed = self.speed_for_curve(tgt_delta)
+                target_steering = self.lane_follow_command()
+                target_speed = self.speed_for_curve(target_steering)
             else:
-                # 차선 소실인데 아직 LANE_FOLLOW → 감속 대기.
-                # (감독 노드가 곧 WAYPOINT_FOLLOW/TURN_BRIDGE 로 바꿔주거나 차선이 다시 잡힌다)
-                tgt_speed = 0.0
+                target_speed = 0.0
 
-        # 한계/평활화 후 출력
-        tgt_delta = clamp(tgt_delta, -self.max_steer, self.max_steer)
-        self.cmd_delta = rate_limit(self.cmd_delta, tgt_delta, self.steer_rate * dt)
-        self.cmd_speed = ramp(self.cmd_speed, tgt_speed,
-                              self.accel * dt, self.decel * dt)
+        target_steering = clamp(
+            target_steering,
+            -self.max_steer,
+            self.max_steer
+        )
+        target_speed = clamp(
+            target_speed,
+            -self.max_velocity,
+            self.max_velocity
+        )
 
-        cmd = AckermannDriveStamped()
-        cmd.header.stamp = self.get_clock().now().to_msg()
-        cmd.header.frame_id = 'base_link'
-        cmd.drive.steering_angle = float(self.cmd_delta)
-        cmd.drive.speed = float(self.cmd_speed)
-        self.cmd_pub.publish(cmd)
+        self.cmd_delta = rate_limit(
+            self.cmd_delta,
+            target_steering,
+            self.steer_rate * dt
+        )
+        self.cmd_speed = ramp(
+            self.cmd_speed,
+            target_speed,
+            self.accel * dt,
+            self.decel * dt
+        )
 
-        # 실제 차량 구동용 출력 (하드웨어가 구독하는 형식)
-        vel_msg = Float64()
-        vel_msg.data = float(self.cmd_speed)
-        self.vel_pub.publish(vel_msg)
+        command = AckermannDriveStamped()
+        command.header.stamp = self.get_clock().now().to_msg()
+        command.header.frame_id = 'base_link'
+        command.drive.steering_angle = float(self.cmd_delta)
+        command.drive.speed = float(self.cmd_speed)
+        self.cmd_pub.publish(command)
 
-        steer_msg = Float64()
-        steer_msg.data = float(self.cmd_delta)
-        self.steer_pub.publish(steer_msg)
+        velocity_message = Float64()
+        velocity_message.data = float(self.cmd_speed)
+        self.vel_pub.publish(velocity_message)
+
+        steering_message = Float64()
+        steering_message.data = float(self.cmd_delta)
+        self.steer_pub.publish(steering_message)
 
 
-def main():
-    rclpy.init()
+def main(args=None):
+    rclpy.init(args=args)
     node = Controller()
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -24,12 +24,13 @@ class KeyboardController(Node):
 
         # Declare the used parameters
         self.declare_parameter('max_steering_angle', 2.0)
-        self.declare_parameter('max_velocity', 10.0)
+        self.declare_parameter('max_velocity', 30.0)          # 15.0 -> 30.0, double top speed
         self.declare_parameter('steering_step', 0.02)
-        self.declare_parameter('velocity_step', 2.0)
+        self.declare_parameter('velocity_step', 6.0)           # 3.0 -> 6.0, double accel too
         self.declare_parameter('steering_center_rate', 0.05)
         self.declare_parameter('velocity_center_rate', 0.1)
         self.declare_parameter('key_hold_timeout', 0.5)
+        self.declare_parameter('steering_smoothing_alpha', 0.006)  # 0.2 -> 0.08, noticeably softer
 
         # Get parameters on startup
         self.max_steering_angle = self.get_parameter('max_steering_angle').value
@@ -39,7 +40,11 @@ class KeyboardController(Node):
         self.steering_center_rate = self.get_parameter('steering_center_rate').value
         self.velocity_center_rate = self.get_parameter('velocity_center_rate').value
         self.key_hold_timeout = self.get_parameter('key_hold_timeout').value
+        self.steering_smoothing_alpha = self.get_parameter('steering_smoothing_alpha').value
 
+        # steering_target: what the key presses are asking for (steps immediately, like before)
+        # steering_angle: what actually gets published, eased toward the target each tick
+        self.steering_target = 0.0
         self.steering_angle = 0.0
         self.velocity = 0.0
         self.should_quit = False
@@ -127,7 +132,7 @@ class KeyboardController(Node):
 
         if stop:
             self.velocity = 0.0
-            self.steering_angle = 0.0
+            self.steering_target = 0.0
         else:
             if forward and not backward:
                 self.velocity = min(self.velocity + self.velocity_step, self.max_velocity)
@@ -137,14 +142,18 @@ class KeyboardController(Node):
                 self.velocity = decay_towards_zero(self.velocity, self.velocity_center_rate)
 
             if left and not right:
-                self.steering_angle = min(
-                    self.steering_angle + self.steering_step, self.max_steering_angle)
+                self.steering_target = min(
+                    self.steering_target + self.steering_step, self.max_steering_angle)
             elif right and not left:
-                self.steering_angle = max(
-                    self.steering_angle - self.steering_step, -self.max_steering_angle)
+                self.steering_target = max(
+                    self.steering_target - self.steering_step, -self.max_steering_angle)
             else:
-                self.steering_angle = decay_towards_zero(
-                    self.steering_angle, self.steering_center_rate)
+                self.steering_target = decay_towards_zero(
+                    self.steering_target, self.steering_center_rate)
+
+        # Ease the published steering angle toward the target instead of jumping to it.
+        # Smaller steering_smoothing_alpha = smoother but slower to respond.
+        self.steering_angle += (self.steering_target - self.steering_angle) * self.steering_smoothing_alpha
 
         # Publish the desired angle
         angle_msg = Float64()

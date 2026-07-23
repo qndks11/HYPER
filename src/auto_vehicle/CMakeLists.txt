@@ -24,8 +24,8 @@ ament_target_dependencies(vehicle_controller rclcpp std_msgs)
 add_executable(joystick_controller src/joystick_controller.cpp)
 ament_target_dependencies(joystick_controller rclcpp std_msgs sensor_msgs)
 
-add_executable(perception src/perception.cpp)
-ament_target_dependencies(perception rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
+add_executable(lane_detection src/lane_detection.cpp)
+ament_target_dependencies(lane_detection rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
 
 install(
   DIRECTORY launch urdf config models
@@ -35,7 +35,7 @@ install(
 install(TARGETS
   vehicle_controller
   joystick_controller
-  perception
+  lane_detection
   DESTINATION lib/${PROJECT_NAME}
 )
 

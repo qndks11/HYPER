@@ -8,6 +8,7 @@
 
     # Wheel params (T8 Sport 대형 우레탄/고무 타이어 기준)
     wheel_radius: 0.2 # 실제 바퀴 지름 약 26cm -> 반지름 13cm [m]
+    wheel_radius: 0.2 # 실제 바퀴 지름 약 26cm -> 반지름 13cm [m]
     wheel_width: 0.09 # 바퀴 단면 폭 약 9cm [m]
     wheel_density: 950.0 # 발포 우레탄 및 고무 내외륜 밀도 [kg/m^3]
 
@@ -15,16 +16,21 @@
     max_steering_angle: 0.5235988 # 최대 조향각 약 30도 (실차 주행 및 서보 보호용) [rad]
     max_steering_angular_velocity: 2.0 # 고성능 조향 모터/서보 반영으로 상향 [rad/s]
     max_steering_effort: 15.0 # 대형 차체를 돌리기 위한 조향 토크 상향 [Nm]
-    max_velocity: 5.0 # T8 Sport 순정 최고 속도 약 16km/h 반영 [m/s]
+    max_velocity: 10.0 # T8 Sport 순정 최고 속도 약 16km/h 반영 [m/s]
     max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
 
-    # Camera and image params (일반적인 AI 자율주행 카메라 세팅 - 예: RealSense / 웹캠)
+    # Camera and image params (ELP 2MP Global Shutter Fisheye AR0234, 153-degree hfov)
     camera_box_size: 0.05 # 카메라 하우징 크기 [m]
-    camera_stick_size: 0.02 # 카메라 지지대 두께 [m]
     camera_height: 1.2 # 차량 보닛이나 롤바 위에 장착 시 시야 확보를 위해 상향 [m]
     camera_pitch: 0.2617994 # 바닥의 차선이나 장애물을 잘 보도록 아래로 약 15도 숙임 [rad]
-    camera_setback: 1.2 # 앞바퀴 조향각이 화면에 보이도록 카메라를 차량 앞쪽 끝에서 뒤로 이동 [m]
-    camera_fov: 1.5184364 # Intel RealSense D435 등에서 자주 쓰이는 가로 FOV 약 87도 반영 [rad]
+    camera_setback: 0.5 # 앞바퀴 조향각이 화면에 보이도록 카메라를 차량 앞쪽 끝에서 뒤로 이동 [m]
+    camera_fov: 2.67 # 153 deg hfov.
     camera_fps: 30 # [Hz]
-    image_width: 640 # [pixels]
-    image_height: 480 # [pixels]
+    image_width: 640 # 실제 센서 1920x1200에서 1/3로 축소, 16:10 비율 유지 [pixels]
+    image_height: 400 # 실제 센서 1920x1200에서 1/3로 축소, 16:10 비율 유지 [pixels]
+
+    # Object detection camera params (normal 70 deg hfov, front-facing, for traffic light/sign detection)
+    object_camera_height: 1.2 # 신호등/표지판이 화면에 들어오도록 차선 카메라와 동일한 높이에 장착 [m]
+    object_camera_pitch: 0.0 # 원근 왜곡 없이 정면을 보도록 수평 장착 (차선 카메라처럼 아래로 숙이지 않음) [rad]
+    object_camera_setback: 0.5 # 차량 앞쪽 끝에서 뒤로 이동한 거리 [m]
+    object_camera_fov: 1.2217305 # 70 deg hfov (일반 렌즈, 어안 왜곡 없음)

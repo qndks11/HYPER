@@ -1,0 +1,70 @@
+controller:
+  ros__parameters:
+    base_frame_id: body_link
+    wheelbase: 1.005
+    max_steering_angle: 0.5235988
+    max_steering_angular_velocity: 2.0
+    max_velocity: 8.0
+    control_hz: 40.0
+
+    cruise_speed: 4.75
+    approach_speed: 0.50
+    hill_approach_speed: 0.40
+    accel_zone_speed: 4.00
+    emergency_decel_limit: 8.0
+    bridge_speed: 2.50
+    waypoint_speed: 2.50
+    min_speed: 1.25
+
+    accel_limit: 2.0
+    decel_limit: 4.0
+    curve_slow_k: 1.2
+    lane_curve_speed_reduction: 0.40
+
+    lane_lookahead_straight: 1.0
+    lane_lookahead_curve: 0.60
+    lane_straight_radius_px: 1400.0
+    lane_sharp_curve_radius_px: 280.0
+    lane_min_forward: 0.10
+    lane_path_min_points: 3
+    lane_target_filter_alpha: 0.35
+
+    stanley_k: 0.8
+    stanley_v_min: 0.5
+    lane_offset_sign: -1.0
+    lane_heading_sign: 1.0
+    lane_filter_alpha: 0.3
+    avoid_offset_bias: 0.45
+    lookahead: 1.0
+    input_timeout: 0.30
+
+behavior_supervisor:
+  ros__parameters:
+    event_path_yaml: ~/HYPER/src/waypoint/course.yaml
+    tick_hz: 10.0
+    gps_timeout: 1.5
+    odom_timeout: 0.5
+    perception_timeout: 0.5
+    sign_timeout: 1.5
+
+    stop_line_trigger_distance_m: 2.0
+    bridge_exit_tolerance_m: 0.50
+    min_bridge_time_s: 1.0
+    event_rearm_margin_m: 3.0
+    approach_cancel_margin_m: 1.5
+
+    # 경사로 정지선에서 정지할 기본 시간
+    hill_stop_duration_s: 5.0
+
+    default_mission: straight
+    left_on_green_allowed: false
+    right_on_green_allowed: true
+    arrow_signal_selects_path: true
+
+    # 특정 GPS 가속 장애물 구간에서만 /scan 감시
+    scan_timeout: 1.0
+    accel_zone_speed_mps: 4.0
+    obstacle_stop_distance_m: 6.0
+    obstacle_clear_distance_m: 2.5
+    obstacle_half_width_m: 0.55
+    obstacle_clear_hold_s: 1.0

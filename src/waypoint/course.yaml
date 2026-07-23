@@ -1,312 +1,950 @@
-frame_id: map
-resolution_m: 0.20
-waypoints:
-  - {id: 0, x: 0.02, y: 0.01, yaw: -0.120, segment: straight_1, event: none}
-  - {id: 1, x: 0.22, y: -0.02, yaw: -0.118, segment: straight_1, event: none}
-  - {id: 2, x: 0.42, y: -0.04, yaw: -0.116, segment: straight_1, event: none}
-  - {id: 3, x: 0.62, y: -0.06, yaw: -0.108, segment: straight_1, event: none}
-  - {id: 4, x: 0.82, y: -0.08, yaw: -0.098, segment: straight_1, event: none}
-  - {id: 5, x: 1.02, y: -0.10, yaw: -0.086, segment: straight_1, event: none}
-  - {id: 6, x: 1.22, y: -0.12, yaw: -0.069, segment: straight_1, event: none}
-  - {id: 7, x: 1.42, y: -0.13, yaw: -0.051, segment: straight_1, event: none}
-  - {id: 8, x: 1.62, y: -0.14, yaw: -0.032, segment: straight_1, event: none}
-  - {id: 9, x: 1.82, y: -0.14, yaw: -0.017, segment: straight_1, event: none}
-  - {id: 10, x: 2.02, y: -0.14, yaw: -0.004, segment: straight_1, event: none}
-  - {id: 11, x: 2.22, y: -0.14, yaw: 0.005, segment: straight_1, event: none}
-  - {id: 12, x: 2.42, y: -0.14, yaw: 0.011, segment: straight_1, event: none}
-  - {id: 13, x: 2.62, y: -0.14, yaw: 0.014, segment: straight_1, event: none}
-  - {id: 14, x: 2.82, y: -0.13, yaw: 0.014, segment: straight_1, event: none}
-  - {id: 15, x: 3.02, y: -0.13, yaw: 0.012, segment: straight_1, event: none}
-  - {id: 16, x: 3.22, y: -0.13, yaw: 0.007, segment: straight_1, event: none}
-  - {id: 17, x: 3.42, y: -0.13, yaw: -0.001, segment: straight_1, event: none}
-  - {id: 18, x: 3.62, y: -0.13, yaw: -0.011, segment: straight_1, event: none}
-  - {id: 19, x: 3.82, y: -0.13, yaw: -0.021, segment: straight_1, event: none}
-  - {id: 20, x: 4.02, y: -0.14, yaw: -0.030, segment: straight_1, event: none}
-  - {id: 21, x: 4.21, y: -0.14, yaw: -0.038, segment: straight_1, event: none}
-  - {id: 22, x: 4.41, y: -0.15, yaw: -0.042, segment: straight_1, event: none}
-  - {id: 23, x: 4.61, y: -0.16, yaw: -0.042, segment: straight_1, event: none}
-  - {id: 24, x: 4.81, y: -0.17, yaw: -0.040, segment: straight_1, event: none}
-  - {id: 25, x: 5.01, y: -0.18, yaw: -0.036, segment: straight_1, event: none}
-  - {id: 26, x: 5.21, y: -0.19, yaw: -0.030, segment: straight_1, event: none}
-  - {id: 27, x: 5.41, y: -0.19, yaw: -0.023, segment: straight_1, event: none}
-  - {id: 28, x: 5.61, y: -0.19, yaw: -0.016, segment: straight_1, event: none}
-  - {id: 29, x: 5.81, y: -0.20, yaw: -0.010, segment: straight_1, event: none}
-  - {id: 30, x: 6.01, y: -0.20, yaw: -0.004, segment: straight_1, event: none}
-  - {id: 31, x: 6.21, y: -0.20, yaw: 0.001, segment: straight_1, event: none}
-  - {id: 32, x: 6.41, y: -0.20, yaw: 0.005, segment: straight_1, event: none}
-  - {id: 33, x: 6.61, y: -0.20, yaw: 0.008, segment: straight_1, event: none}
-  - {id: 34, x: 6.81, y: -0.19, yaw: 0.010, segment: straight_1, event: none}
-  - {id: 35, x: 7.01, y: -0.19, yaw: 0.008, segment: straight_1, event: none}
-  - {id: 36, x: 7.21, y: -0.19, yaw: 0.001, segment: straight_1, event: none}
-  - {id: 37, x: 7.41, y: -0.19, yaw: -0.010, segment: straight_1, event: none}
-  - {id: 38, x: 7.61, y: -0.19, yaw: -0.026, segment: straight_1, event: none}
-  - {id: 39, x: 7.81, y: -0.20, yaw: -0.046, segment: straight_1, event: none}
-  - {id: 40, x: 8.01, y: -0.21, yaw: -0.068, segment: straight_1, event: none}
-  - {id: 41, x: 8.21, y: -0.22, yaw: -0.089, segment: straight_1, event: none}
-  - {id: 42, x: 8.41, y: -0.24, yaw: -0.109, segment: straight_1, event: none}
-  - {id: 43, x: 8.61, y: -0.27, yaw: -0.124, segment: straight_1, event: none}
-  - {id: 44, x: 8.81, y: -0.30, yaw: -0.135, segment: straight_1, event: none}
-  - {id: 45, x: 9.01, y: -0.32, yaw: -0.142, segment: straight_1, event: none}
-  - {id: 46, x: 9.20, y: -0.35, yaw: -0.145, segment: straight_1, event: none}
-  - {id: 47, x: 9.40, y: -0.38, yaw: -0.146, segment: straight_1, event: none}
-  - {id: 48, x: 9.60, y: -0.41, yaw: -0.146, segment: straight_1, event: none}
-  - {id: 49, x: 9.80, y: -0.44, yaw: -0.145, segment: straight_1, event: none}
-  - {id: 50, x: 10.00, y: -0.47, yaw: -0.143, segment: straight_1, event: none}
-  - {id: 51, x: 10.19, y: -0.50, yaw: -0.140, segment: straight_1, event: none}
-  - {id: 52, x: 10.39, y: -0.53, yaw: -0.135, segment: straight_1, event: none}
-  - {id: 53, x: 10.59, y: -0.55, yaw: -0.128, segment: straight_1, event: none}
-  - {id: 54, x: 10.79, y: -0.58, yaw: -0.122, segment: straight_1, event: none}
-  - {id: 55, x: 10.99, y: -0.60, yaw: -0.115, segment: straight_1, event: none}
-  - {id: 56, x: 11.19, y: -0.62, yaw: -0.109, segment: straight_1, event: none}
-  - {id: 57, x: 11.38, y: -0.64, yaw: -0.104, segment: straight_1, event: none}
-  - {id: 58, x: 11.58, y: -0.67, yaw: -0.101, segment: straight_1, event: none}
-  - {id: 59, x: 11.78, y: -0.69, yaw: -0.100, segment: straight_1, event: none}
-  - {id: 60, x: 11.98, y: -0.70, yaw: -0.103, segment: straight_1, event: none}
-  - {id: 61, x: 12.18, y: -0.72, yaw: -0.111, segment: straight_1, event: none}
-  - {id: 62, x: 12.38, y: -0.74, yaw: -0.123, segment: straight_1, event: none}
-  - {id: 63, x: 12.58, y: -0.77, yaw: -0.140, segment: straight_1, event: none}
-  - {id: 64, x: 12.78, y: -0.80, yaw: -0.159, segment: straight_1, event: none}
-  - {id: 65, x: 12.97, y: -0.83, yaw: -0.182, segment: straight_1, event: none}
-  - {id: 66, x: 13.17, y: -0.87, yaw: -0.216, segment: straight_1, event: none}
-  - {id: 67, x: 13.36, y: -0.91, yaw: -0.266, segment: straight_1, event: none}
-  - {id: 68, x: 13.56, y: -0.97, yaw: -0.337, segment: straight_1, event: none}
-  - {id: 69, x: 13.75, y: -1.03, yaw: -0.430, segment: straight_1, event: none}
-  - {id: 70, x: 13.92, y: -1.12, yaw: -0.540, segment: straight_1, event: none}
-  - {id: 71, x: 14.09, y: -1.24, yaw: -0.654, segment: straight_1, event: none}
-  - {id: 72, x: 14.24, y: -1.37, yaw: -0.752, segment: straight_1, event: none}
-  - {id: 73, x: 14.37, y: -1.52, yaw: -0.812, segment: straight_1, event: none}
-  - {id: 74, x: 14.49, y: -1.68, yaw: -0.817, segment: straight_1, event: none}
-  - {id: 75, x: 14.62, y: -1.83, yaw: -0.759, segment: straight_1, event: none}
-  - {id: 76, x: 14.76, y: -1.97, yaw: -0.646, segment: straight_1, event: none}
-  - {id: 77, x: 14.93, y: -2.08, yaw: -0.497, segment: straight_1, event: none}
-  - {id: 78, x: 15.11, y: -2.16, yaw: -0.340, segment: straight_1, event: none}
-  - {id: 79, x: 15.31, y: -2.20, yaw: -0.195, segment: straight_1, event: none}
-  - {id: 80, x: 15.50, y: -2.22, yaw: -0.069, segment: straight_1, event: none}
-  - {id: 81, x: 15.70, y: -2.23, yaw: 0.035, segment: straight_1, event: none}
-  - {id: 82, x: 15.90, y: -2.21, yaw: 0.113, segment: straight_1, event: none}
-  - {id: 83, x: 16.10, y: -2.17, yaw: 0.158, segment: straight_1, event: none}
-  - {id: 84, x: 16.29, y: -2.12, yaw: 0.155, segment: straight_1, event: none}
-  - {id: 85, x: 16.49, y: -2.08, yaw: 0.098, segment: straight_1, event: none}
-  - {id: 86, x: 16.69, y: -2.06, yaw: -0.004, segment: straight_1, event: none}
-  - {id: 87, x: 16.89, y: -2.07, yaw: -0.133, segment: straight_1, event: none}
-  - {id: 88, x: 17.08, y: -2.12, yaw: -0.263, segment: straight_1, event: none}
-  - {id: 89, x: 17.27, y: -2.19, yaw: -0.371, segment: straight_1, event: none}
-  - {id: 90, x: 17.45, y: -2.28, yaw: -0.454, segment: straight_1, event: none}
-  - {id: 91, x: 17.62, y: -2.37, yaw: -0.522, segment: straight_1, event: none}
-  - {id: 92, x: 17.79, y: -2.47, yaw: -0.586, segment: straight_1, event: none}
-  - {id: 93, x: 17.96, y: -2.58, yaw: -0.650, segment: straight_1, event: none}
-  - {id: 94, x: 18.11, y: -2.71, yaw: -0.711, segment: straight_1, event: none}
-  - {id: 95, x: 18.26, y: -2.85, yaw: -0.762, segment: straight_1, event: none}
-  - {id: 96, x: 18.39, y: -3.00, yaw: -0.798, segment: straight_1, event: none}
-  - {id: 97, x: 18.53, y: -3.14, yaw: -0.814, segment: straight_1, event: none}
-  - {id: 98, x: 18.67, y: -3.29, yaw: -0.822, segment: straight_1, event: none}
-  - {id: 99, x: 18.80, y: -3.44, yaw: -0.835, segment: straight_1, event: none}
-  - {id: 100, x: 18.94, y: -3.58, yaw: -0.858, segment: straight_1, event: none}
-  - {id: 101, x: 19.07, y: -3.73, yaw: -0.886, segment: straight_1, event: none}
-  - {id: 102, x: 19.19, y: -3.89, yaw: -0.912, segment: straight_1, event: none}
-  - {id: 103, x: 19.31, y: -4.05, yaw: -0.928, segment: straight_1, event: none}
-  - {id: 104, x: 19.42, y: -4.22, yaw: -0.931, segment: straight_1, event: none}
-  - {id: 105, x: 19.54, y: -4.38, yaw: -0.933, segment: straight_1, event: none}
-  - {id: 106, x: 19.67, y: -4.54, yaw: -0.943, segment: straight_1, event: none}
-  - {id: 107, x: 19.79, y: -4.69, yaw: -0.976, segment: straight_1, event: none}
-  - {id: 108, x: 19.90, y: -4.86, yaw: -1.044, segment: straight_1, event: none}
-  - {id: 109, x: 20.00, y: -5.03, yaw: -1.144, segment: straight_1, event: none}
-  - {id: 110, x: 20.08, y: -5.22, yaw: -1.260, segment: straight_1, event: none}
-  - {id: 111, x: 20.13, y: -5.41, yaw: -1.382, segment: straight_1, event: none}
-  - {id: 112, x: 20.15, y: -5.61, yaw: -1.498, segment: straight_1, event: none}
-  - {id: 113, x: 20.15, y: -5.81, yaw: -1.598, segment: straight_1, event: none}
-  - {id: 114, x: 20.13, y: -6.01, yaw: -1.680, segment: straight_1, event: none}
-  - {id: 115, x: 20.10, y: -6.20, yaw: -1.749, segment: straight_1, event: none}
-  - {id: 116, x: 20.05, y: -6.40, yaw: -1.813, segment: straight_1, event: none}
-  - {id: 117, x: 20.00, y: -6.59, yaw: -1.873, segment: straight_1, event: none}
-  - {id: 118, x: 19.94, y: -6.78, yaw: -1.924, segment: straight_1, event: none}
-  - {id: 119, x: 19.86, y: -6.97, yaw: -1.968, segment: straight_1, event: none}
-  - {id: 120, x: 19.77, y: -7.15, yaw: -1.997, segment: straight_1, event: none}
-  - {id: 121, x: 19.69, y: -7.33, yaw: -1.999, segment: straight_1, event: none}
-  - {id: 122, x: 19.60, y: -7.51, yaw: -1.975, segment: straight_1, event: none}
-  - {id: 123, x: 19.52, y: -7.69, yaw: -1.937, segment: straight_1, event: none}
-  - {id: 124, x: 19.45, y: -7.88, yaw: -1.891, segment: straight_1, event: none}
-  - {id: 125, x: 19.40, y: -8.07, yaw: -1.843, segment: straight_1, event: none}
-  - {id: 126, x: 19.35, y: -8.26, yaw: -1.804, segment: straight_1, event: none}
-  - {id: 127, x: 19.31, y: -8.46, yaw: -1.779, segment: straight_1, event: none}
-  - {id: 128, x: 19.27, y: -8.66, yaw: -1.763, segment: straight_1, event: none}
-  - {id: 129, x: 19.23, y: -8.85, yaw: -1.746, segment: straight_1, event: none}
-  - {id: 130, x: 19.20, y: -9.05, yaw: -1.725, segment: straight_1, event: none}
-  - {id: 131, x: 19.17, y: -9.25, yaw: -1.699, segment: straight_1, event: none}
-  - {id: 132, x: 19.14, y: -9.45, yaw: -1.670, segment: straight_1, event: none}
-  - {id: 133, x: 19.13, y: -9.65, yaw: -1.643, segment: straight_1, event: none}
-  - {id: 134, x: 19.12, y: -9.85, yaw: -1.629, segment: straight_1, event: none}
-  - {id: 135, x: 19.11, y: -10.04, yaw: -1.636, segment: straight_1, event: none}
-  - {id: 136, x: 19.10, y: -10.24, yaw: -1.661, segment: straight_1, event: none}
-  - {id: 137, x: 19.09, y: -10.44, yaw: -1.702, segment: straight_1, event: none}
-  - {id: 138, x: 19.06, y: -10.64, yaw: -1.752, segment: straight_1, event: none}
-  - {id: 139, x: 19.01, y: -10.84, yaw: -1.807, segment: straight_1, event: none}
-  - {id: 140, x: 18.96, y: -11.03, yaw: -1.863, segment: straight_1, event: none}
-  - {id: 141, x: 18.90, y: -11.22, yaw: -1.918, segment: straight_1, event: none}
-  - {id: 142, x: 18.83, y: -11.41, yaw: -1.967, segment: straight_1, event: none}
-  - {id: 143, x: 18.74, y: -11.59, yaw: -2.004, segment: straight_1, event: none}
-  - {id: 144, x: 18.65, y: -11.76, yaw: -2.023, segment: straight_1, event: none}
-  - {id: 145, x: 18.56, y: -11.94, yaw: -2.017, segment: straight_1, event: none}
-  - {id: 146, x: 18.47, y: -12.12, yaw: -1.984, segment: straight_1, event: none}
-  - {id: 147, x: 18.38, y: -12.30, yaw: -1.929, segment: straight_1, event: none}
-  - {id: 148, x: 18.32, y: -12.49, yaw: -1.862, segment: straight_1, event: none}
-  - {id: 149, x: 18.27, y: -12.69, yaw: -1.794, segment: straight_1, event: none}
-  - {id: 150, x: 18.24, y: -12.88, yaw: -1.735, segment: straight_1, event: none}
-  - {id: 151, x: 18.21, y: -13.08, yaw: -1.694, segment: straight_1, event: none}
-  - {id: 152, x: 18.20, y: -13.28, yaw: -1.672, segment: straight_1, event: none}
-  - {id: 153, x: 18.18, y: -13.48, yaw: -1.669, segment: straight_1, event: none}
-  - {id: 154, x: 18.16, y: -13.68, yaw: -1.678, segment: straight_1, event: none}
-  - {id: 155, x: 18.14, y: -13.88, yaw: -1.694, segment: straight_1, event: none}
-  - {id: 156, x: 18.11, y: -14.08, yaw: -1.710, segment: straight_1, event: none}
-  - {id: 157, x: 18.08, y: -14.27, yaw: -1.720, segment: straight_1, event: none}
-  - {id: 158, x: 18.05, y: -14.47, yaw: -1.717, segment: straight_1, event: none}
-  - {id: 159, x: 18.02, y: -14.67, yaw: -1.694, segment: straight_1, event: none}
-  - {id: 160, x: 17.99, y: -14.87, yaw: -1.646, segment: straight_1, event: none}
-  - {id: 161, x: 17.97, y: -15.07, yaw: -1.572, segment: straight_1, event: none}
-  - {id: 162, x: 17.98, y: -15.26, yaw: -1.481, segment: straight_1, event: none}
-  - {id: 163, x: 18.01, y: -15.46, yaw: -1.384, segment: straight_1, event: none}
-  - {id: 164, x: 18.06, y: -15.66, yaw: -1.299, segment: straight_1, event: none}
-  - {id: 165, x: 18.13, y: -15.84, yaw: -1.243, segment: straight_1, event: none}
-  - {id: 166, x: 18.20, y: -16.03, yaw: -1.227, segment: straight_1, event: none}
-  - {id: 167, x: 18.28, y: -16.21, yaw: -1.250, segment: straight_1, event: none}
-  - {id: 168, x: 18.34, y: -16.40, yaw: -1.305, segment: straight_1, event: none}
-  - {id: 169, x: 18.39, y: -16.60, yaw: -1.380, segment: straight_1, event: none}
-  - {id: 170, x: 18.42, y: -16.79, yaw: -1.463, segment: straight_1, event: none}
-  - {id: 171, x: 18.43, y: -16.99, yaw: -1.538, segment: straight_1, event: none}
-  - {id: 172, x: 18.43, y: -17.19, yaw: -1.601, segment: straight_1, event: none}
-  - {id: 173, x: 18.41, y: -17.39, yaw: -1.649, segment: straight_1, event: none}
-  - {id: 174, x: 18.39, y: -17.59, yaw: -1.686, segment: straight_1, event: none}
-  - {id: 175, x: 18.36, y: -17.79, yaw: -1.715, segment: straight_1, event: none}
-  - {id: 176, x: 18.33, y: -17.99, yaw: -1.740, segment: straight_1, event: none}
-  - {id: 177, x: 18.30, y: -18.18, yaw: -1.763, segment: straight_1, event: none}
-  - {id: 178, x: 18.26, y: -18.38, yaw: -1.787, segment: straight_1, event: none}
-  - {id: 179, x: 18.21, y: -18.57, yaw: -1.813, segment: straight_1, event: none}
-  - {id: 180, x: 18.16, y: -18.77, yaw: -1.843, segment: straight_1, event: none}
-  - {id: 181, x: 18.11, y: -18.96, yaw: -1.878, segment: straight_1, event: none}
-  - {id: 182, x: 18.04, y: -19.15, yaw: -1.919, segment: straight_1, event: none}
-  - {id: 183, x: 17.97, y: -19.34, yaw: -1.963, segment: straight_1, event: none}
-  - {id: 184, x: 17.89, y: -19.52, yaw: -2.008, segment: straight_1, event: none}
-  - {id: 185, x: 17.80, y: -19.70, yaw: -2.048, segment: straight_1, event: none}
-  - {id: 186, x: 17.70, y: -19.87, yaw: -2.073, segment: straight_1, event: none}
-  - {id: 187, x: 17.60, y: -20.04, yaw: -2.073, segment: straight_1, event: none}
-  - {id: 188, x: 17.50, y: -20.22, yaw: -2.047, segment: straight_1, event: none}
-  - {id: 189, x: 17.40, y: -20.39, yaw: -1.996, segment: straight_1, event: none}
-  - {id: 190, x: 17.33, y: -20.58, yaw: -1.927, segment: straight_1, event: none}
-  - {id: 191, x: 17.26, y: -20.77, yaw: -1.855, segment: straight_1, event: none}
-  - {id: 192, x: 17.22, y: -20.96, yaw: -1.793, segment: straight_1, event: none}
-  - {id: 193, x: 17.19, y: -21.16, yaw: -1.747, segment: straight_1, event: none}
-  - {id: 194, x: 17.16, y: -21.36, yaw: -1.721, segment: straight_1, event: none}
-  - {id: 195, x: 17.13, y: -21.56, yaw: -1.710, segment: straight_1, event: none}
-  - {id: 196, x: 17.11, y: -21.75, yaw: -1.709, segment: straight_1, event: none}
-  - {id: 197, x: 17.08, y: -21.95, yaw: -1.712, segment: straight_1, event: none}
-  - {id: 198, x: 17.05, y: -22.15, yaw: -1.717, segment: straight_1, event: none}
-  - {id: 199, x: 17.02, y: -22.35, yaw: -1.721, segment: straight_1, event: none}
-  - {id: 200, x: 16.99, y: -22.54, yaw: -1.726, segment: straight_1, event: none}
-  - {id: 201, x: 16.96, y: -22.74, yaw: -1.737, segment: straight_1, event: none}
-  - {id: 202, x: 16.93, y: -22.94, yaw: -1.754, segment: straight_1, event: none}
-  - {id: 203, x: 16.89, y: -23.14, yaw: -1.783, segment: straight_1, event: none}
-  - {id: 204, x: 16.85, y: -23.33, yaw: -1.827, segment: straight_1, event: none}
-  - {id: 205, x: 16.80, y: -23.53, yaw: -1.891, segment: straight_1, event: none}
-  - {id: 206, x: 16.73, y: -23.71, yaw: -1.975, segment: straight_1, event: none}
-  - {id: 207, x: 16.65, y: -23.90, yaw: -2.073, segment: straight_1, event: none}
-  - {id: 208, x: 16.54, y: -24.07, yaw: -2.176, segment: straight_1, event: none}
-  - {id: 209, x: 16.42, y: -24.22, yaw: -2.279, segment: straight_1, event: none}
-  - {id: 210, x: 16.28, y: -24.36, yaw: -2.373, segment: straight_1, event: none}
-  - {id: 211, x: 16.13, y: -24.50, yaw: -2.452, segment: straight_1, event: none}
-  - {id: 212, x: 15.97, y: -24.62, yaw: -2.522, segment: straight_1, event: none}
-  - {id: 213, x: 15.80, y: -24.73, yaw: -2.587, segment: straight_1, event: none}
-  - {id: 214, x: 15.63, y: -24.83, yaw: -2.648, segment: straight_1, event: none}
-  - {id: 215, x: 15.45, y: -24.92, yaw: -2.703, segment: straight_1, event: none}
-  - {id: 216, x: 15.26, y: -24.99, yaw: -2.755, segment: straight_1, event: none}
-  - {id: 217, x: 15.08, y: -25.06, yaw: -2.801, segment: straight_1, event: none}
-  - {id: 218, x: 14.89, y: -25.12, yaw: -2.837, segment: straight_1, event: none}
-  - {id: 219, x: 14.69, y: -25.18, yaw: -2.856, segment: straight_1, event: none}
-  - {id: 220, x: 14.50, y: -25.23, yaw: -2.858, segment: straight_1, event: none}
-  - {id: 221, x: 14.31, y: -25.28, yaw: -2.844, segment: straight_1, event: none}
-  - {id: 222, x: 14.12, y: -25.34, yaw: -2.817, segment: straight_1, event: none}
-  - {id: 223, x: 13.93, y: -25.41, yaw: -2.781, segment: straight_1, event: none}
-  - {id: 224, x: 13.74, y: -25.48, yaw: -2.745, segment: straight_1, event: none}
-  - {id: 225, x: 13.56, y: -25.56, yaw: -2.716, segment: straight_1, event: none}
-  - {id: 226, x: 13.38, y: -25.65, yaw: -2.697, segment: straight_1, event: none}
-  - {id: 227, x: 13.20, y: -25.74, yaw: -2.689, segment: straight_1, event: none}
-  - {id: 228, x: 13.02, y: -25.83, yaw: -2.693, segment: straight_1, event: none}
-  - {id: 229, x: 12.84, y: -25.92, yaw: -2.712, segment: straight_1, event: none}
-  - {id: 230, x: 12.66, y: -26.00, yaw: -2.745, segment: straight_1, event: none}
-  - {id: 231, x: 12.48, y: -26.08, yaw: -2.792, segment: straight_1, event: none}
-  - {id: 232, x: 12.29, y: -26.14, yaw: -2.853, segment: straight_1, event: none}
-  - {id: 233, x: 12.10, y: -26.20, yaw: -2.920, segment: straight_1, event: none}
-  - {id: 234, x: 11.90, y: -26.23, yaw: -2.987, segment: straight_1, event: none}
-  - {id: 235, x: 11.70, y: -26.25, yaw: -3.048, segment: straight_1, event: none}
-  - {id: 236, x: 11.50, y: -26.26, yaw: -3.099, segment: straight_1, event: none}
-  - {id: 237, x: 11.30, y: -26.27, yaw: -3.141, segment: straight_1, event: none}
-  - {id: 238, x: 11.10, y: -26.26, yaw: 3.107, segment: straight_1, event: none}
-  - {id: 239, x: 10.90, y: -26.25, yaw: 3.076, segment: straight_1, event: none}
-  - {id: 240, x: 10.70, y: -26.23, yaw: 3.050, segment: straight_1, event: none}
-  - {id: 241, x: 10.50, y: -26.21, yaw: 3.029, segment: straight_1, event: none}
-  - {id: 242, x: 10.30, y: -26.19, yaw: 3.014, segment: straight_1, event: none}
-  - {id: 243, x: 10.11, y: -26.16, yaw: 3.004, segment: straight_1, event: none}
-  - {id: 244, x: 9.91, y: -26.13, yaw: 2.998, segment: straight_1, event: none}
-  - {id: 245, x: 9.71, y: -26.10, yaw: 2.994, segment: straight_1, event: none}
-  - {id: 246, x: 9.51, y: -26.07, yaw: 2.992, segment: straight_1, event: none}
-  - {id: 247, x: 9.32, y: -26.04, yaw: 2.994, segment: straight_1, event: none}
-  - {id: 248, x: 9.12, y: -26.01, yaw: 2.999, segment: straight_1, event: none}
-  - {id: 249, x: 8.92, y: -25.98, yaw: 3.009, segment: straight_1, event: none}
-  - {id: 250, x: 8.72, y: -25.96, yaw: 3.022, segment: straight_1, event: none}
-  - {id: 251, x: 8.52, y: -25.93, yaw: 2.989, segment: straight_1, event: none}
-  - {id: 252, x: 8.32, y: -25.91, yaw: 2.833, segment: straight_1, event: none}
-  - {id: 253, x: 8.12, y: -25.90, yaw: 2.607, segment: straight_1, event: none}
-  - {id: 254, x: 7.99, y: -25.80, yaw: 2.361, segment: straight_1, event: none}
-  - {id: 255, x: 7.92, y: -25.61, yaw: 2.125, segment: straight_1, event: none}
-  - {id: 256, x: 7.86, y: -25.42, yaw: 1.946, segment: straight_1, event: none}
-  - {id: 257, x: 7.80, y: -25.23, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 258, x: 7.74, y: -25.04, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 259, x: 7.68, y: -24.85, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 260, x: 7.61, y: -24.66, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 261, x: 7.55, y: -24.47, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 262, x: 7.49, y: -24.28, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 263, x: 7.43, y: -24.09, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 264, x: 7.36, y: -23.90, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 265, x: 7.30, y: -23.71, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 266, x: 7.24, y: -23.52, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 267, x: 7.18, y: -23.33, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 268, x: 7.12, y: -23.14, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 269, x: 7.05, y: -22.95, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 270, x: 6.99, y: -22.76, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 271, x: 6.93, y: -22.57, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 272, x: 6.87, y: -22.38, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 273, x: 6.80, y: -22.19, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 274, x: 6.74, y: -22.00, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 275, x: 6.68, y: -21.81, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 276, x: 6.62, y: -21.62, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 277, x: 6.55, y: -21.43, yaw: 1.887, segment: straight_1, event: none}
-  - {id: 278, x: 6.49, y: -21.24, yaw: 1.889, segment: straight_1, event: none}
-  - {id: 279, x: 6.43, y: -21.05, yaw: 1.977, segment: straight_1, event: none}
-  - {id: 280, x: 6.37, y: -20.86, yaw: 2.216, segment: straight_1, event: none}
-  - {id: 281, x: 6.33, y: -20.74, yaw: -1.681, segment: straight_1, event: none}
-  - {id: 282, x: 6.37, y: -20.94, yaw: -1.428, segment: straight_1, event: none}
-  - {id: 283, x: 6.42, y: -21.13, yaw: -1.373, segment: straight_1, event: none}
-  - {id: 284, x: 6.46, y: -21.32, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 285, x: 6.51, y: -21.52, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 286, x: 6.56, y: -21.71, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 287, x: 6.60, y: -21.91, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 288, x: 6.65, y: -22.10, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 289, x: 6.70, y: -22.30, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 290, x: 6.74, y: -22.49, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 291, x: 6.79, y: -22.69, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 292, x: 6.84, y: -22.88, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 293, x: 6.88, y: -23.07, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 294, x: 6.93, y: -23.27, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 295, x: 6.98, y: -23.46, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 296, x: 7.02, y: -23.66, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 297, x: 7.07, y: -23.85, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 298, x: 7.12, y: -24.05, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 299, x: 7.16, y: -24.24, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 300, x: 7.21, y: -24.44, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 301, x: 7.26, y: -24.63, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 302, x: 7.30, y: -24.83, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 303, x: 7.35, y: -25.02, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 304, x: 7.40, y: -25.21, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 305, x: 7.44, y: -25.41, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 306, x: 7.49, y: -25.60, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 307, x: 7.54, y: -25.80, yaw: -1.336, segment: straight_1, event: none}
-  - {id: 308, x: 7.55, y: -25.85, yaw: -1.336, segment: straight_1, event: none}
+frame_id: event_local
+coordinate_convention:
+  x: forward
+  y: left
+  yaw: relative_radians
+events:
+  intersection_A:
+    event_type: intersection
+    approach_radius_m: 3.0
+    signal_required: true
+    paths:
+      straight: intersection_A_straight
+    latitude: 37.566417978255174
+    longitude: 126.97812399130001
+  intersection_B:
+    event_type: intersection
+    approach_radius_m: 3.5
+    signal_required: true
+    paths:
+      straight: intersection_B_straight
+    latitude: 37.56648958403766
+    longitude: 126.97799461313855
+  slope_A:
+    event_type: hill_stop
+    latitude: 37.56648791752855
+    longitude: 126.97845149641721
+    approach_radius_m: 3.8
+    stop_duration_s: 5.0
+    signal_required: false
+    paths: {}
+  accel_A:
+    event_type: accel_obstacle
+    start:
+      latitude: 37.56688688039219
+      longitude: 126.9775923149925
+    start_radius_m: 1.5
+    end_radius_m: 1.5
+    target_speed_mps: 4.0
+    obstacle_stop_distance_m: 6.0
+    obstacle_clear_distance_m: 2.5
+    obstacle_half_width_m: 0.55
+    obstacle_clear_hold_s: 1.0
+    signal_required: false
+    paths: {}
+    end:
+      latitude: 37.56621402232966
+      longitude: 126.97755349962085
+paths:
+  intersection_A_straight:
+  - x: 0.0
+    y: 0.0
+    yaw: 0.0
+  - x: 0.15
+    y: -0.0
+    yaw: -0.0
+  - x: 0.3
+    y: -0.0
+    yaw: -0.0
+  - x: 0.45
+    y: -0.0
+    yaw: 0.0
+  - x: 0.6
+    y: -0.0
+    yaw: 0.0
+  - x: 0.75
+    y: -0.0
+    yaw: 1.0e-05
+  - x: 0.9
+    y: 0.0
+    yaw: 1.0e-05
+  - x: 1.05
+    y: 0.0
+    yaw: 1.0e-05
+  - x: 1.2
+    y: 0.0
+    yaw: 0.0
+  - x: 1.35
+    y: 0.0
+    yaw: 1.0e-05
+  - x: 1.5
+    y: 0.0
+    yaw: 1.0e-05
+  - x: 1.65
+    y: 0.0
+    yaw: 1.0e-05
+  - x: 1.8
+    y: 0.0
+    yaw: 2.0e-05
+  - x: 1.95
+    y: 0.0
+    yaw: 2.0e-05
+  - x: 2.1
+    y: 0.0
+    yaw: 3.0e-05
+  - x: 2.25
+    y: 0.0
+    yaw: 4.0e-05
+  - x: 2.4
+    y: 0.0
+    yaw: 4.0e-05
+  - x: 2.55
+    y: 0.0
+    yaw: 4.0e-05
+  - x: 2.7
+    y: 0.0
+    yaw: -3.0e-05
+  - x: 2.85
+    y: 0.0
+    yaw: -0.00019
+  - x: 3.0
+    y: -0.0
+    yaw: -0.00035
+  - x: 3.15
+    y: -0.0001
+    yaw: -0.00041
+  - x: 3.3
+    y: -0.0001
+    yaw: -0.00035
+  - x: 3.45
+    y: -0.0002
+    yaw: -0.00032
+  - x: 3.6
+    y: -0.0002
+    yaw: -0.00025
+  - x: 3.75
+    y: -0.0003
+    yaw: -5.0e-05
+  - x: 3.9
+    y: -0.0003
+    yaw: 0.00022
+  - x: 4.05
+    y: -0.0002
+    yaw: 0.00093
+  - x: 4.2
+    y: 0.0
+    yaw: 0.00162
+  - x: 4.35
+    y: 0.0003
+    yaw: 0.00195
+  - x: 4.5
+    y: 0.0006
+    yaw: 0.00235
+  - x: 4.65
+    y: 0.001
+    yaw: 0.00279
+  - x: 4.8
+    y: 0.0014
+    yaw: 0.00374
+  - x: 4.95
+    y: 0.0021
+    yaw: 0.00499
+  - x: 5.1
+    y: 0.0029
+    yaw: 0.00599
+  - x: 5.25
+    y: 0.0039
+    yaw: 0.00577
+  - x: 5.4
+    y: 0.0047
+    yaw: 0.0047
+  - x: 5.55
+    y: 0.0053
+    yaw: 0.00382
+  - x: 5.7
+    y: 0.0058
+    yaw: 0.00239
+  - x: 5.85
+    y: 0.006
+    yaw: 0.00048
+  - x: 6.0
+    y: 0.006
+    yaw: -0.00147
+  - x: 6.15
+    y: 0.0056
+    yaw: -0.00426
+  - x: 6.3
+    y: 0.0047
+    yaw: -0.00652
+  - x: 6.45
+    y: 0.0036
+    yaw: -0.00742
+  - x: 6.6
+    y: 0.0025
+    yaw: -0.00806
+  - x: 6.75
+    y: 0.0012
+    yaw: -0.00813
+  - x: 6.9
+    y: 0.0
+    yaw: -0.00791
+  - x: 7.05
+    y: -0.0011
+    yaw: -0.00768
+  - x: 7.2
+    y: -0.0023
+    yaw: -0.00725
+  - x: 7.35
+    y: -0.0033
+    yaw: -0.00653
+  - x: 7.4999
+    y: -0.0042
+    yaw: -0.00578
+  - x: 7.6499
+    y: -0.0051
+    yaw: -0.00514
+  - x: 7.7999
+    y: -0.0058
+    yaw: -0.00451
+  - x: 7.9499
+    y: -0.0064
+    yaw: -0.00402
+  - x: 8.0999
+    y: -0.007
+    yaw: -0.00377
+  - x: 8.2499
+    y: -0.0075
+    yaw: -0.00366
+  - x: 8.3999
+    y: -0.0081
+    yaw: -0.00363
+  - x: 8.5499
+    y: -0.0086
+    yaw: -0.00345
+  - x: 8.6999
+    y: -0.0091
+    yaw: -0.00311
+  - x: 8.8499
+    y: -0.0096
+    yaw: -0.00265
+  - x: 8.9999
+    y: -0.0099
+    yaw: -0.00259
+  - x: 9.1499
+    y: -0.0103
+    yaw: -0.00301
+  - x: 9.2999
+    y: -0.0108
+    yaw: -0.00351
+  - x: 9.4499
+    y: -0.0114
+    yaw: -0.0039
+  - x: 9.5999
+    y: -0.012
+    yaw: -0.00431
+  - x: 9.7499
+    y: -0.0127
+    yaw: -0.00523
+  - x: 9.8999
+    y: -0.0136
+    yaw: -0.00703
+  - x: 10.0499
+    y: -0.0148
+    yaw: -0.00788
+  - x: 10.1999
+    y: -0.0159
+    yaw: -0.00744
+  - x: 10.3499
+    y: -0.017
+    yaw: -0.0078
+  - x: 10.4999
+    y: -0.0183
+    yaw: -0.00919
+  - x: 10.6499
+    y: -0.0198
+    yaw: -0.01031
+  - x: 10.7999
+    y: -0.0214
+    yaw: -0.01092
+  - x: 10.9499
+    y: -0.0231
+    yaw: -0.01217
+  - x: 11.0999
+    y: -0.025
+    yaw: -0.01403
+  - x: 11.2499
+    y: -0.0273
+    yaw: -0.01609
+  - x: 11.3998
+    y: -0.0298
+    yaw: -0.01727
+  - x: 11.5498
+    y: -0.0324
+    yaw: -0.01794
+  - x: 11.6998
+    y: -0.0352
+    yaw: -0.01964
+  - x: 11.8498
+    y: -0.0383
+    yaw: -0.0214
+  - x: 11.9997
+    y: -0.0416
+    yaw: -0.02189
+  - x: 12.1497
+    y: -0.0449
+    yaw: -0.0213
+  - x: 12.2996
+    y: -0.048
+    yaw: -0.02083
+  - x: 12.4496
+    y: -0.0511
+    yaw: -0.01922
+  - x: 12.5996
+    y: -0.0538
+    yaw: -0.01569
+  - x: 12.7496
+    y: -0.0559
+    yaw: -0.01186
+  - x: 12.8996
+    y: -0.0573
+    yaw: -0.00815
+  - x: 13.0496
+    y: -0.0583
+    yaw: -0.00511
+  - x: 13.1996
+    y: -0.0589
+    yaw: -0.00278
+  - x: 13.3496
+    y: -0.0591
+    yaw: -0.00102
+  - x: 13.4996
+    y: -0.0592
+    yaw: 0.00016
+  - x: 13.6496
+    y: -0.0591
+    yaw: 0.00085
+  - x: 13.7996
+    y: -0.0589
+    yaw: 0.00157
+  - x: 13.9496
+    y: -0.0586
+    yaw: 0.00251
+  - x: 14.0996
+    y: -0.0582
+    yaw: 0.00292
+  - x: 14.2496
+    y: -0.0577
+    yaw: 0.00312
+  - x: 14.3996
+    y: -0.0572
+    yaw: 0.00287
+  - x: 14.5496
+    y: -0.0569
+    yaw: 0.00189
+  - x: 14.6996
+    y: -0.0567
+    yaw: 0.00187
+  - x: 14.7746
+    y: -0.0565
+    yaw: 3.13091
+  - x: 14.6246
+    y: -0.0559
+    yaw: 3.13768
+  - x: 14.4746
+    y: -0.0553
+    yaw: 3.13768
+  - x: 14.3246
+    y: -0.0547
+    yaw: 3.13768
+  - x: 14.1746
+    y: -0.0541
+    yaw: 3.13768
+  - x: 14.0246
+    y: -0.0535
+    yaw: 3.13768
+  - x: 13.8746
+    y: -0.0529
+    yaw: 3.13768
+  - x: 13.7246
+    y: -0.0523
+    yaw: 3.13768
+  - x: 13.5746
+    y: -0.0518
+    yaw: 3.13768
+  - x: 13.4246
+    y: -0.0512
+    yaw: 3.13768
+  - x: 13.2746
+    y: -0.0506
+    yaw: 3.13768
+  - x: 13.1246
+    y: -0.05
+    yaw: 3.13768
+  - x: 12.9746
+    y: -0.0494
+    yaw: 3.13768
+  - x: 12.8246
+    y: -0.0488
+    yaw: 3.13768
+  - x: 12.6746
+    y: -0.0482
+    yaw: 3.13768
+  - x: 12.5246
+    y: -0.0476
+    yaw: 3.13768
+  - x: 12.3746
+    y: -0.0471
+    yaw: 3.13768
+  - x: 12.2246
+    y: -0.0465
+    yaw: 3.13768
+  - x: 12.0746
+    y: -0.0459
+    yaw: 3.13768
+  - x: 11.9246
+    y: -0.0453
+    yaw: 3.131
+  - x: 12.0708
+    y: -0.0458
+    yaw: -0.00374
+  - x: 12.2208
+    y: -0.0464
+    yaw: -0.00374
+  - x: 12.3708
+    y: -0.047
+    yaw: -0.00374
+  - x: 12.5208
+    y: -0.0475
+    yaw: -0.00374
+  - x: 12.6708
+    y: -0.0481
+    yaw: -0.00374
+  - x: 12.8208
+    y: -0.0487
+    yaw: -0.00374
+  - x: 12.9708
+    y: -0.0492
+    yaw: -0.00374
+  - x: 13.1208
+    y: -0.0498
+    yaw: -0.00374
+  - x: 13.2708
+    y: -0.0503
+    yaw: -0.00374
+  - x: 13.4208
+    y: -0.0509
+    yaw: -0.00374
+  - x: 13.5708
+    y: -0.0515
+    yaw: -0.00374
+  - x: 13.7208
+    y: -0.052
+    yaw: -0.00374
+  - x: 13.8708
+    y: -0.0526
+    yaw: -0.00374
+  - x: 14.0208
+    y: -0.0531
+    yaw: -0.00374
+  - x: 14.1708
+    y: -0.0537
+    yaw: -0.00374
+  - x: 14.3208
+    y: -0.0543
+    yaw: -0.00374
+  - x: 14.4708
+    y: -0.0548
+    yaw: -0.00374
+  - x: 14.6208
+    y: -0.0554
+    yaw: -0.00374
+  - x: 14.7708
+    y: -0.056
+    yaw: -0.00374
+  - x: 14.9208
+    y: -0.0565
+    yaw: -0.00374
+  - x: 15.0708
+    y: -0.0571
+    yaw: -0.00374
+  - x: 15.2135
+    y: -0.0576
+    yaw: -0.00374
+  intersection_B_straight:
+  - x: 0.0
+    y: 0.0
+    yaw: 0.0
+  - x: 0.15
+    y: 0.0
+    yaw: 0.0
+  - x: 0.3
+    y: 0.0
+    yaw: 0.0
+  - x: 0.45
+    y: 0.0
+    yaw: 0.0
+  - x: 0.6
+    y: 0.0
+    yaw: 0.0
+  - x: 0.75
+    y: 0.0
+    yaw: 1.0e-05
+  - x: 0.9
+    y: 0.0
+    yaw: 0.00013
+  - x: 1.05
+    y: 0.0
+    yaw: 0.0002
+  - x: 1.2
+    y: 0.0001
+    yaw: 1.0e-05
+  - x: 1.35
+    y: 0.0
+    yaw: -0.00023
+  - x: 1.5
+    y: -0.0
+    yaw: -0.00041
+  - x: 1.65
+    y: -0.0001
+    yaw: -0.00062
+  - x: 1.8
+    y: -0.0002
+    yaw: -0.00078
+  - x: 1.95
+    y: -0.0003
+    yaw: -0.00069
+  - x: 2.1
+    y: -0.0004
+    yaw: -0.00035
+  - x: 2.25
+    y: -0.0004
+    yaw: 8.0e-05
+  - x: 2.4
+    y: -0.0004
+    yaw: 0.00047
+  - x: 2.55
+    y: -0.0003
+    yaw: 0.00094
+  - x: 2.7
+    y: -0.0001
+    yaw: 0.00143
+  - x: 2.85
+    y: 0.0001
+    yaw: 0.00174
+  - x: 3.0
+    y: 0.0004
+    yaw: 0.00193
+  - x: 3.15
+    y: 0.0007
+    yaw: 0.00209
+  - x: 3.3
+    y: 0.0011
+    yaw: 0.00229
+  - x: 3.45
+    y: 0.0014
+    yaw: 0.00248
+  - x: 3.6
+    y: 0.0018
+    yaw: 0.00265
+  - x: 3.75
+    y: 0.0022
+    yaw: 0.0028
+  - x: 3.9
+    y: 0.0026
+    yaw: 0.0029
+  - x: 4.05
+    y: 0.0031
+    yaw: 0.00303
+  - x: 4.2
+    y: 0.0035
+    yaw: 0.00314
+  - x: 4.35
+    y: 0.004
+    yaw: 0.00321
+  - x: 4.5
+    y: 0.0045
+    yaw: 0.00333
+  - x: 4.65
+    y: 0.005
+    yaw: 0.00347
+  - x: 4.8
+    y: 0.0055
+    yaw: 0.00359
+  - x: 4.95
+    y: 0.0061
+    yaw: 0.00369
+  - x: 5.1
+    y: 0.0067
+    yaw: 0.00378
+  - x: 5.25
+    y: 0.0072
+    yaw: 0.00377
+  - x: 5.4
+    y: 0.0078
+    yaw: 0.00368
+  - x: 5.55
+    y: 0.0083
+    yaw: 0.00365
+  - x: 5.7
+    y: 0.0089
+    yaw: 0.00372
+  - x: 5.85
+    y: 0.0094
+    yaw: 0.00382
+  - x: 6.0
+    y: 0.01
+    yaw: 0.00387
+  - x: 6.15
+    y: 0.0106
+    yaw: 0.00401
+  - x: 6.3
+    y: 0.0112
+    yaw: 0.00418
+  - x: 6.45
+    y: 0.0119
+    yaw: 0.00454
+  - x: 6.6
+    y: 0.0126
+    yaw: 0.00489
+  - x: 6.75
+    y: 0.0133
+    yaw: 0.00504
+  - x: 6.9
+    y: 0.0141
+    yaw: 0.00518
+  - x: 7.05
+    y: 0.0149
+    yaw: 0.00527
+  - x: 7.2
+    y: 0.0157
+    yaw: 0.00545
+  - x: 7.35
+    y: 0.0165
+    yaw: 0.00561
+  - x: 7.5
+    y: 0.0174
+    yaw: 0.00568
+  - x: 7.65
+    y: 0.0182
+    yaw: 0.00575
+  - x: 7.8
+    y: 0.0191
+    yaw: 0.00579
+  - x: 7.95
+    y: 0.02
+    yaw: 0.00585
+  - x: 8.1
+    y: 0.0208
+    yaw: 0.00593
+  - x: 8.25
+    y: 0.0217
+    yaw: 0.006
+  - x: 8.3999
+    y: 0.0226
+    yaw: 0.00606
+  - x: 8.5499
+    y: 0.0236
+    yaw: 0.00607
+  - x: 8.6999
+    y: 0.0245
+    yaw: 0.00608
+  - x: 8.8499
+    y: 0.0254
+    yaw: 0.0061
+  - x: 8.9999
+    y: 0.0263
+    yaw: 0.00614
+  - x: 9.1499
+    y: 0.0272
+    yaw: 0.00617
+  - x: 9.2999
+    y: 0.0282
+    yaw: 0.0062
+  - x: 9.4499
+    y: 0.0291
+    yaw: 0.00624
+  - x: 9.5999
+    y: 0.03
+    yaw: 0.00629
+  - x: 9.7499
+    y: 0.031
+    yaw: 0.00633
+  - x: 9.8999
+    y: 0.0319
+    yaw: 0.00636
+  - x: 10.0499
+    y: 0.0329
+    yaw: 0.00641
+  - x: 10.1999
+    y: 0.0338
+    yaw: 0.00647
+  - x: 10.3499
+    y: 0.0348
+    yaw: 0.0065
+  - x: 10.4999
+    y: 0.0358
+    yaw: 0.00652
+  - x: 10.6499
+    y: 0.0368
+    yaw: 0.00656
+  - x: 10.7999
+    y: 0.0378
+    yaw: 0.0066
+  - x: 10.9499
+    y: 0.0388
+    yaw: 0.00666
+  - x: 11.0999
+    y: 0.0398
+    yaw: 0.00676
+  - x: 11.2499
+    y: 0.0408
+    yaw: 0.00683
+  - x: 11.3999
+    y: 0.0418
+    yaw: 0.00685
+  - x: 11.5499
+    y: 0.0428
+    yaw: 0.00688
+  - x: 11.6999
+    y: 0.0439
+    yaw: 0.00693
+  - x: 11.8499
+    y: 0.0449
+    yaw: 0.00688
+  - x: 11.9999
+    y: 0.0459
+    yaw: 0.00676
+  - x: 12.1499
+    y: 0.0469
+    yaw: 0.00657
+  - x: 12.2999
+    y: 0.0479
+    yaw: 0.00634
+  - x: 12.4499
+    y: 0.0488
+    yaw: 0.00597
+  - x: 12.5999
+    y: 0.0497
+    yaw: 0.00563
+  - x: 12.7499
+    y: 0.0505
+    yaw: 0.00529
+  - x: 12.8999
+    y: 0.0513
+    yaw: 0.00475
+  - x: 13.0499
+    y: 0.052
+    yaw: 0.00408
+  - x: 13.1999
+    y: 0.0525
+    yaw: 0.00325
+  - x: 13.3499
+    y: 0.0529
+    yaw: 0.00258
+  - x: 13.4999
+    y: 0.0533
+    yaw: 0.00204
+  - x: 13.6499
+    y: 0.0535
+    yaw: 0.00145
+  - x: 13.7999
+    y: 0.0537
+    yaw: 0.00075
+  - x: 13.9499
+    y: 0.0538
+    yaw: -0.00023
+  - x: 14.0999
+    y: 0.0536
+    yaw: -0.00087
+  - x: 14.2499
+    y: 0.0535
+    yaw: -0.00097
+  - x: 14.3999
+    y: 0.0534
+    yaw: -0.0013
+  - x: 14.5499
+    y: 0.0531
+    yaw: -0.00186
+  - x: 14.6999
+    y: 0.0528
+    yaw: -0.00235
+  - x: 14.8499
+    y: 0.0524
+    yaw: -0.00249
+  - x: 14.9999
+    y: 0.052
+    yaw: -0.00265
+  - x: 15.1499
+    y: 0.0516
+    yaw: -0.0031
+  - x: 15.2999
+    y: 0.0511
+    yaw: -0.00354
+  - x: 15.4498
+    y: 0.0506
+    yaw: -0.00366
+  - x: 15.5998
+    y: 0.05
+    yaw: -0.00368
+  - x: 15.7498
+    y: 0.0495
+    yaw: -0.00391
+  - x: 15.8998
+    y: 0.0488
+    yaw: -0.0044
+  - x: 16.0498
+    y: 0.0481
+    yaw: -0.00472
+  - x: 16.1998
+    y: 0.0474
+    yaw: -0.0046
+  - x: 16.3498
+    y: 0.0468
+    yaw: -0.00486
+  - x: 16.4998
+    y: 0.046
+    yaw: -0.00551
+  - x: 16.6498
+    y: 0.0451
+    yaw: -0.00819
+  - x: 16.6996
+    y: 0.0443
+    yaw: -3.12968
+  - x: 16.5496
+    y: 0.0439
+    yaw: -3.13873
+  - x: 16.3996
+    y: 0.0435
+    yaw: -3.13873
+  - x: 16.2496
+    y: 0.0431
+    yaw: -3.13873
+  - x: 16.0996
+    y: 0.0426
+    yaw: -3.13873
+  - x: 15.9496
+    y: 0.0422
+    yaw: -3.13873
+  - x: 15.7996
+    y: 0.0418
+    yaw: -3.13873
+  - x: 15.6496
+    y: 0.0413
+    yaw: -3.13873
+  - x: 15.4996
+    y: 0.0409
+    yaw: -3.13873
+  - x: 15.3496
+    y: 0.0405
+    yaw: -3.13873
+  - x: 15.1997
+    y: 0.04
+    yaw: -3.13873
+  - x: 15.0497
+    y: 0.0396
+    yaw: -3.13873
+  - x: 14.8997
+    y: 0.0392
+    yaw: -3.13873
+  - x: 14.7497
+    y: 0.0388
+    yaw: -3.13873
+  - x: 14.5997
+    y: 0.0383
+    yaw: -3.13873
+  - x: 14.4497
+    y: 0.0379
+    yaw: -3.13873
+  - x: 14.2997
+    y: 0.0375
+    yaw: -3.13873
+  - x: 14.1497
+    y: 0.037
+    yaw: -3.13873
+  - x: 13.9997
+    y: 0.0366
+    yaw: -3.13873
+  - x: 13.8497
+    y: 0.0362
+    yaw: -3.13873
+  - x: 13.6997
+    y: 0.0358
+    yaw: -3.13873
+  - x: 13.5497
+    y: 0.0353
+    yaw: -3.13824
+  - x: 13.5612
+    y: 0.0353
+    yaw: 0.00164
+  - x: 13.7112
+    y: 0.0356
+    yaw: 0.00201
+  - x: 13.8612
+    y: 0.0359
+    yaw: 0.00201
+  - x: 14.0112
+    y: 0.0362
+    yaw: 0.00201
+  - x: 14.1612
+    y: 0.0365
+    yaw: 0.00201
+  - x: 14.3112
+    y: 0.0368
+    yaw: 0.00201
+  - x: 14.4612
+    y: 0.0371
+    yaw: 0.00201
+  - x: 14.6112
+    y: 0.0374
+    yaw: 0.00201
+  - x: 14.7612
+    y: 0.0377
+    yaw: 0.00201
+  - x: 14.9112
+    y: 0.038
+    yaw: 0.00201
+  - x: 15.0612
+    y: 0.0383
+    yaw: 0.00201
+  - x: 15.2112
+    y: 0.0386
+    yaw: 0.00201
+  - x: 15.3612
+    y: 0.0389
+    yaw: 0.00201
+  - x: 15.5112
+    y: 0.0392
+    yaw: 0.00201
+  - x: 15.6612
+    y: 0.0395
+    yaw: 0.00201
+  - x: 15.8112
+    y: 0.0398
+    yaw: 0.00201
+  - x: 15.9612
+    y: 0.0401
+    yaw: 0.00201
+  - x: 16.1112
+    y: 0.0404
+    yaw: 0.00201
+  - x: 16.2612
+    y: 0.0407
+    yaw: 0.00201
+  - x: 16.4112
+    y: 0.041
+    yaw: 0.00201
+  - x: 16.5612
+    y: 0.0413
+    yaw: 0.00201
+  - x: 16.7112
+    y: 0.0416
+    yaw: 0.00201
+  - x: 16.8612
+    y: 0.0419
+    yaw: 0.00201
+  - x: 17.0112
+    y: 0.0422
+    yaw: 0.00201
+  - x: 17.0649
+    y: 0.0423
+    yaw: 0.00201
