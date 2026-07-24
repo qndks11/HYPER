@@ -32,5 +32,4 @@ main          <- stable, PR-only, no direct pushes
 ## Working agreements
 
 - Never push directly to `main` — all changes land via PR.
-- Stay within the current branch's domain (e.g., on `perception`, don't edit `control`/`planning` code unless explicitly asked).
 - ROS 2/C++ changes aren't verified by reading code alone — rebuild, re-source `install/setup.bash`, and relaunch the relevant node before calling something fixed.

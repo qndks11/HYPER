@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """
-course_viz — course.yaml 을 RViz2 에 표시하는 노드
+waypoint_view — course.yaml 을 RViz2 에 표시하는 노드
 
-waypoint_recorder 가 만든 course.yaml 을 읽어서:
-  · 경로 선         : 흰색 LINE_STRIP  + nav_msgs/Path
-  · 웨이포인트 점   : 작은 회색 구(SPHERE)
-  · 진행방향(yaw)   : 점마다 화살표(arrow_stride 마다)
-  · 이벤트 강조     : stop_line=빨강, fork=노랑, parking=파랑 큰 구 + 텍스트
-  · 분기(branch)    : 분기별 색 다른 LINE_STRIP
-를 MarkerArray 로 발행합니다. (전부 map 프레임)
+waypoint_recorder 가 만든 course.yaml (events + paths 스키마) 을 읽어서:
+  · 경로 선       : paths 항목별로 색이 다른 LINE_STRIP
+  · 웨이포인트 점 : 작은 회색 구(SPHERE_LIST)
+  · 진행방향(yaw) : 점마다 화살표(arrow_stride 마다)
+  · 경로 이름     : 각 경로 시작점 위에 TEXT_VIEW_FACING
+  · 이벤트 목록   : events 는 GPS(lat/lon) 기준이라 로컬 좌표가 없어
+                    로그로만 요약 출력합니다.
+를 MarkerArray 로 발행합니다.
+
+주의: course.yaml 의 각 path 는 녹화 시작 시점 차량 pose 를 원점으로 하는
+event_local 좌표계이며, path 끼리 공통 좌표계를 공유하지 않습니다.
+여러 경로를 한 번에 표시하면 원점 부근에서 서로 겹쳐 보이는 게 정상입니다.
+경로 하나만 보고 싶으면 path_name 파라미터를 지정하세요(이 경우에만
+/course_path 로 nav_msgs/Path 도 함께 발행됩니다).
 
 RViz2 에서 보는 법
   1) rviz2 실행
-  2) Fixed Frame = map
+  2) Fixed Frame = event_local (course.yaml 의 frame_id, 기본값)
   3) Add → By topic → /course_markers (MarkerArray)
-     (원하면 /course_path 도 Path 로 추가)
+     (path_name 지정 시 /course_path 도 Path 로 추가 가능)
 
 실행
-  python3 course_viz.py --ros-args -p course_yaml:=course.yaml
+  python3 waypoint_view.py --ros-args -p course_yaml:=course.yaml
+  # 특정 경로만: -p path_name:=intersection_A_straight
 
 의존성: rclpy, visualization_msgs, nav_msgs, geometry_msgs, std_msgs, pyyaml
 """
@@ -27,27 +35,24 @@ import math
 import yaml
 
 import rclpy
+import rclpy.executors
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy
 
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
+from geometry_msgs.msg import Point, PoseStamped, Quaternion
 from nav_msgs.msg import Path
 from std_msgs.msg import ColorRGBA
 
 
-# 이벤트별 색상(r, g, b, a)
-EVENT_COLORS = {
-    'stop_line': (1.0, 0.1, 0.1, 1.0),   # 빨강
-    'fork':      (1.0, 0.9, 0.1, 1.0),   # 노랑
-    'parking':   (0.2, 0.4, 1.0, 1.0),   # 파랑
-}
-# 분기 궤적용 색 팔레트(순환)
-BRANCH_PALETTE = [
+# 경로별 색 팔레트(순환)
+PATH_PALETTE = [
+    (1.0, 1.0, 1.0, 0.9),  # 흰색
     (0.2, 0.8, 0.4, 1.0),  # 초록
     (0.9, 0.5, 0.1, 1.0),  # 주황
     (0.7, 0.3, 0.9, 1.0),  # 보라
     (0.1, 0.8, 0.9, 1.0),  # 청록
+    (1.0, 0.9, 0.1, 1.0),  # 노랑
 ]
 
 
@@ -66,36 +71,52 @@ def yaw_to_quat(yaw):
 
 class CourseViz(Node):
     def __init__(self):
-        super().__init__('course_viz')
+        super().__init__('waypoint_view')
 
-        path = self.declare_parameter('course_yaml', 'course.yaml').value
-        path = os.path.abspath(os.path.expanduser(path))
-        self.arrow_stride = self.declare_parameter('arrow_stride', 3).value  # yaw 화살표 간격
-        self.show_segment = self.declare_parameter('show_segment_labels', False).value
+        course_yaml = self.declare_parameter('course_yaml', 'course.yaml').value
+        course_yaml = os.path.abspath(os.path.expanduser(course_yaml))
+        self.arrow_stride = int(self.declare_parameter('arrow_stride', 3).value)
+        self.path_name = self.declare_parameter('path_name', '').value
 
-        if not os.path.exists(path):
-            self.get_logger().error(f"course.yaml 을 찾을 수 없습니다: '{path}'")
-            raise FileNotFoundError(path)
+        if not os.path.exists(course_yaml):
+            self.get_logger().error(f"course.yaml 을 찾을 수 없습니다: '{course_yaml}'")
+            raise FileNotFoundError(course_yaml)
 
-        with open(path) as f:
-            self.data = yaml.safe_load(f)
+        with open(course_yaml) as f:
+            self.data = yaml.safe_load(f) or {}
 
         self.frame = self.data.get('frame_id', 'map')
-        self.wps = self.data.get('waypoints', [])
-        self.branches = self.data.get('branches', {}) or {}
+        self.events = self.data.get('events', {}) or {}
+        all_paths = self.data.get('paths', {}) or {}
+
+        if self.path_name:
+            if self.path_name not in all_paths:
+                self.get_logger().error(
+                    f"path_name='{self.path_name}' 이 course.yaml 에 없습니다. "
+                    f"사용 가능: {sorted(all_paths.keys())}")
+                raise FileNotFoundError(self.path_name)
+            self.paths = {self.path_name: all_paths[self.path_name]}
+        else:
+            self.paths = all_paths
+
         self.get_logger().info(
-            f"로드: '{path}'  (frame={self.frame}, waypoints={len(self.wps)}, "
-            f"branches={len(self.branches)})")
+            f"로드: '{course_yaml}'  (frame={self.frame}, "
+            f"events={len(self.events)}, paths={len(self.paths)}/{len(all_paths)})")
+        for event_id, ev in self.events.items():
+            self.get_logger().info(
+                f"  event '{event_id}': type={ev.get('event_type')}, "
+                f"paths={ev.get('paths', {})}")
 
         # RViz가 늦게 붙어도 받도록 latched(transient_local) QoS
         qos = QoSProfile(depth=1)
         qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
         self.marker_pub = self.create_publisher(MarkerArray, '/course_markers', qos)
-        self.path_pub = self.create_publisher(Path, '/course_path', qos)
+        # 경로가 하나로 좁혀졌을 때만 nav_msgs/Path 발행(여러 경로는 좌표계가 달라 이어붙일 수 없음)
+        self.path_pub = self.create_publisher(Path, '/course_path', qos) if len(self.paths) == 1 else None
 
         self.markers = self.build_markers()
-        self.path_msg = self.build_path()
+        self.path_msg = self.build_path() if self.path_pub else None
 
         self.publish_all()
         # latched지만, 토픽 재연결 대비해 2초마다 한 번 더 쏨
@@ -106,9 +127,10 @@ class CourseViz(Node):
         stamp = self.get_clock().now().to_msg()
         for m in self.markers.markers:
             m.header.stamp = stamp
-        self.path_msg.header.stamp = stamp
         self.marker_pub.publish(self.markers)
-        self.path_pub.publish(self.path_msg)
+        if self.path_pub is not None:
+            self.path_msg.header.stamp = stamp
+            self.path_pub.publish(self.path_msg)
 
     # ------------------------------------------------------------------
     def _new_marker(self, mid, mtype, scale, color, ns='course'):
@@ -129,102 +151,73 @@ class CourseViz(Node):
 
         # 0) 이전 마커 싹 지우기(파일 바뀌었을 때 잔상 방지)
         clear = Marker()
+        clear.header.frame_id = self.frame
         clear.action = Marker.DELETEALL
         arr.markers.append(clear)
 
-        if not self.wps:
-            return arr
-
-        # 1) 경로 선 (흰색 LINE_STRIP)
-        line = self._new_marker(mid, Marker.LINE_STRIP, (0.05, 0, 0), (1, 1, 1, 0.9))
-        for w in self.wps:
-            line.points.append(Point(x=float(w['x']), y=float(w['y']), z=0.0))
-        arr.markers.append(line); mid += 1
-
-        # 2) 웨이포인트 점 (회색 구) — SPHERE_LIST 한 개로
-        pts = self._new_marker(mid, Marker.SPHERE_LIST, (0.10, 0.10, 0.10), (0.6, 0.6, 0.6, 0.9))
-        for w in self.wps:
-            pts.points.append(Point(x=float(w['x']), y=float(w['y']), z=0.0))
-        arr.markers.append(pts); mid += 1
-
-        # 3) yaw 화살표 (arrow_stride 마다)
-        for k, w in enumerate(self.wps):
-            if k % max(1, self.arrow_stride) != 0:
+        for pi, (key, points) in enumerate(self.paths.items()):
+            if not points:
                 continue
-            a = self._new_marker(mid, Marker.ARROW, (0.30, 0.05, 0.05), (0.3, 0.7, 1.0, 0.8), ns='yaw')
-            a.pose.position.x = float(w['x'])
-            a.pose.position.y = float(w['y'])
-            a.pose.orientation = yaw_to_quat(float(w.get('yaw', 0.0)))
-            arr.markers.append(a); mid += 1
+            color = PATH_PALETTE[pi % len(PATH_PALETTE)]
 
-        # 4) 이벤트 강조 + 텍스트
-        for w in self.wps:
-            ev = w.get('event', 'none')
-            if ev in EVENT_COLORS:
-                c = EVENT_COLORS[ev]
-                big = self._new_marker(mid, Marker.SPHERE, (0.30, 0.30, 0.30), c, ns='event')
-                big.pose.position.x = float(w['x'])
-                big.pose.position.y = float(w['y'])
-                arr.markers.append(big); mid += 1
+            # 1) 경로 선
+            line = self._new_marker(mid, Marker.LINE_STRIP, (0.05, 0, 0), color, ns=f'path/{key}')
+            for p in points:
+                line.points.append(Point(x=float(p['x']), y=float(p['y']), z=0.0))
+            arr.markers.append(line); mid += 1
 
-                txt = self._new_marker(mid, Marker.TEXT_VIEW_FACING, (0, 0, 0.25), (1, 1, 1, 1), ns='event_text')
-                txt.pose.position.x = float(w['x'])
-                txt.pose.position.y = float(w['y'])
-                txt.pose.position.z = 0.35
-                txt.text = ev
-                arr.markers.append(txt); mid += 1
+            # 2) 웨이포인트 점 (회색 구) — SPHERE_LIST 한 개로
+            pts = self._new_marker(mid, Marker.SPHERE_LIST, (0.08, 0.08, 0.08), (0.6, 0.6, 0.6, 0.9), ns=f'points/{key}')
+            for p in points:
+                pts.points.append(Point(x=float(p['x']), y=float(p['y']), z=0.0))
+            arr.markers.append(pts); mid += 1
 
-            # (옵션) 구간 라벨
-            if self.show_segment and w.get('id', 0) % 20 == 0:
-                seg = self._new_marker(mid, Marker.TEXT_VIEW_FACING, (0, 0, 0.20), (0.8, 0.8, 0.8, 0.8), ns='segment')
-                seg.pose.position.x = float(w['x'])
-                seg.pose.position.y = float(w['y'])
-                seg.pose.position.z = 0.6
-                seg.text = str(w.get('segment', ''))
-                arr.markers.append(seg); mid += 1
+            # 3) yaw 화살표 (arrow_stride 마다)
+            for k, p in enumerate(points):
+                if k % max(1, self.arrow_stride) != 0:
+                    continue
+                a = self._new_marker(mid, Marker.ARROW, (0.25, 0.04, 0.04), (0.3, 0.7, 1.0, 0.8), ns=f'yaw/{key}')
+                a.pose.position.x = float(p['x'])
+                a.pose.position.y = float(p['y'])
+                a.pose.orientation = yaw_to_quat(float(p.get('yaw', 0.0)))
+                arr.markers.append(a); mid += 1
 
-        # 5) 분기 궤적 (분기별 색 다른 선)
-        for bi, (key, bpts) in enumerate(self.branches.items()):
-            if not bpts:
-                continue
-            color = BRANCH_PALETTE[bi % len(BRANCH_PALETTE)]
-            bl = self._new_marker(mid, Marker.LINE_STRIP, (0.07, 0, 0), color, ns='branch')
-            for p in bpts:
-                bl.points.append(Point(x=float(p['x']), y=float(p['y']), z=0.05))
-            arr.markers.append(bl); mid += 1
-
-            # 분기 이름 텍스트(시작점 위)
-            p0 = bpts[0]
-            bt = self._new_marker(mid, Marker.TEXT_VIEW_FACING, (0, 0, 0.22), color, ns='branch_text')
-            bt.pose.position.x = float(p0['x'])
-            bt.pose.position.y = float(p0['y'])
-            bt.pose.position.z = 0.5
-            bt.text = key
-            arr.markers.append(bt); mid += 1
+            # 4) 경로 이름 텍스트(시작점 위)
+            p0 = points[0]
+            txt = self._new_marker(mid, Marker.TEXT_VIEW_FACING, (0, 0, 0.25), color, ns='path_text')
+            txt.pose.position.x = float(p0['x'])
+            txt.pose.position.y = float(p0['y'])
+            txt.pose.position.z = 0.4
+            txt.text = key
+            arr.markers.append(txt); mid += 1
 
         return arr
 
     def build_path(self):
+        _, points = next(iter(self.paths.items()))
         msg = Path()
         msg.header.frame_id = self.frame
-        for w in self.wps:
+        for p in points:
             ps = PoseStamped()
             ps.header.frame_id = self.frame
-            ps.pose.position.x = float(w['x'])
-            ps.pose.position.y = float(w['y'])
-            ps.pose.orientation = yaw_to_quat(float(w.get('yaw', 0.0)))
+            ps.pose.position.x = float(p['x'])
+            ps.pose.position.y = float(p['y'])
+            ps.pose.orientation = yaw_to_quat(float(p.get('yaw', 0.0)))
             msg.poses.append(ps)
         return msg
 
 
 def main():
     rclpy.init()
+    node = None
     try:
         node = CourseViz()
         rclpy.spin(node)
-    except (KeyboardInterrupt, FileNotFoundError):
+    except (KeyboardInterrupt, FileNotFoundError, rclpy.executors.ExternalShutdownException):
         pass
     finally:
+        if node is not None:
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 

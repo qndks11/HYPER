@@ -24,13 +24,14 @@ class KeyboardController(Node):
 
         # Declare the used parameters
         self.declare_parameter('max_steering_angle', 2.0)
-        self.declare_parameter('max_velocity', 30.0)          # 15.0 -> 30.0, double top speed
-        self.declare_parameter('steering_step', 0.02)
-        self.declare_parameter('velocity_step', 6.0)           # 3.0 -> 6.0, double accel too
+        self.declare_parameter('max_velocity', 15.0)
+        self.declare_parameter('steering_step', 0.01)
+        self.declare_parameter('velocity_step', 3.0)
         self.declare_parameter('steering_center_rate', 0.05)
         self.declare_parameter('velocity_center_rate', 0.1)
         self.declare_parameter('key_hold_timeout', 0.5)
         self.declare_parameter('steering_smoothing_alpha', 0.006)  # 0.2 -> 0.08, noticeably softer
+        self.declare_parameter('velocity_smoothing_alpha', 0.03)
 
         # Get parameters on startup
         self.max_steering_angle = self.get_parameter('max_steering_angle').value
@@ -41,11 +42,13 @@ class KeyboardController(Node):
         self.velocity_center_rate = self.get_parameter('velocity_center_rate').value
         self.key_hold_timeout = self.get_parameter('key_hold_timeout').value
         self.steering_smoothing_alpha = self.get_parameter('steering_smoothing_alpha').value
+        self.velocity_smoothing_alpha = self.get_parameter('velocity_smoothing_alpha').value
 
         # steering_target: what the key presses are asking for (steps immediately, like before)
         # steering_angle: what actually gets published, eased toward the target each tick
         self.steering_target = 0.0
         self.steering_angle = 0.0
+        self.velocity_target = 0.0
         self.velocity = 0.0
         self.should_quit = False
         # Terminal auto-repeat only re-sends a held key every ~25-50ms, far slower
@@ -131,15 +134,15 @@ class KeyboardController(Node):
             return
 
         if stop:
-            self.velocity = 0.0
+            self.velocity_target = 0.0
             self.steering_target = 0.0
         else:
             if forward and not backward:
-                self.velocity = min(self.velocity + self.velocity_step, self.max_velocity)
+                self.velocity_target = min(self.velocity_target + self.velocity_step, self.max_velocity)
             elif backward and not forward:
-                self.velocity = max(self.velocity - self.velocity_step, -self.max_velocity)
+                self.velocity_target = max(self.velocity_target - self.velocity_step, -self.max_velocity)
             else:
-                self.velocity = decay_towards_zero(self.velocity, self.velocity_center_rate)
+                self.velocity_target = decay_towards_zero(self.velocity_target, self.velocity_center_rate)
 
             if left and not right:
                 self.steering_target = min(
@@ -154,6 +157,9 @@ class KeyboardController(Node):
         # Ease the published steering angle toward the target instead of jumping to it.
         # Smaller steering_smoothing_alpha = smoother but slower to respond.
         self.steering_angle += (self.steering_target - self.steering_angle) * self.steering_smoothing_alpha
+
+        # Ease the published velocity toward the target the same way steering does.
+        self.velocity += (self.velocity_target - self.velocity) * self.velocity_smoothing_alpha
 
         # Publish the desired angle
         angle_msg = Float64()

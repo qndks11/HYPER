@@ -22,42 +22,19 @@ class ObjectDetection(Node):
     #   red
     #   green
     #   left_arrow
-    #   right_arrow
     #   none
     SIGNAL_MAP = {
         # 빨간불
-        'red': 'red',
-        'red_light': 'red',
-        'red_traffic_light': 'red',
-        'traffic_light_red': 'red',
-        'traffic_red': 'red',
-        'stop': 'red',
+        'Stop': 'red',
 
         # 초록불
-        'green': 'green',
-        'green_light': 'green',
-        'green_traffic_light': 'green',
-        'traffic_light_green': 'green',
-        'traffic_green': 'green',
-        'go': 'green',
+        'Go': 'green',
 
         # 좌회전 화살표
-        'left': 'left_arrow',
-        'left_arrow': 'left_arrow',
-        'left_light': 'left_arrow',
-        'left_turn': 'left_arrow',
-        'left_turn_light': 'left_arrow',
-        'green_left': 'left_arrow',
-        'green_left_arrow': 'left_arrow',
+        'LeftTurn': 'left_arrow',
 
-        # 우회전 화살표
-        'right': 'right_arrow',
-        'right_arrow': 'right_arrow',
-        'right_light': 'right_arrow',
-        'right_turn': 'right_arrow',
-        'right_turn_light': 'right_arrow',
-        'green_right': 'right_arrow',
-        'green_right_arrow': 'right_arrow',
+        # Yellow light
+        'Yellow': 'none',
     }
 
     def __init__(self):
@@ -125,24 +102,6 @@ class ObjectDetection(Node):
             'ObjectDetection started: publishing /perception/sign'
         )
 
-    @staticmethod
-    def normalize_class_name(class_name):
-        """
-        YOLO 클래스 이름을 비교하기 쉬운 형태로 변환한다.
-
-        예:
-            Green Light -> green_light
-            green-light -> green_light
-            LEFT ARROW  -> left_arrow
-        """
-        return (
-            str(class_name)
-            .strip()
-            .lower()
-            .replace(' ', '_')
-            .replace('-', '_')
-        )
-
     def publish_sign(self, sign_name, force_log=False):
         """
         판단 노드가 사용하는 형식으로 신호를 발행한다.
@@ -151,14 +110,12 @@ class ObjectDetection(Node):
             red
             green
             left_arrow
-            right_arrow
             none
         """
         valid_signs = {
             'red',
             'green',
             'left_arrow',
-            'right_arrow',
             'none'
         }
 
@@ -258,13 +215,9 @@ class ObjectDetection(Node):
                 self.model.names[class_id]
             )
 
-            normalized_class_name = self.normalize_class_name(
-                raw_class_name
-            )
-
             # 판단 노드에서 사용할 수 있는 신호 클래스로 변환
             sign_name = self.SIGNAL_MAP.get(
-                normalized_class_name
+                raw_class_name
             )
 
             # 자동차, 사람, 표지판 등 신호가 아닌 클래스는 제외

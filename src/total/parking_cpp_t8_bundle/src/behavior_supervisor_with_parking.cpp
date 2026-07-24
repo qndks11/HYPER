@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -163,10 +164,33 @@ private:
       paths_ = root["paths"];
       if (!events_ || !events_.IsMap()) {events_ = YAML::Node(YAML::NodeType::Map);}
       if (!paths_ || !paths_.IsMap()) {paths_ = YAML::Node(YAML::NodeType::Map);}
-      RCLCPP_INFO(get_logger(), "Loaded %zu events and %zu paths.", events_.size(), paths_.size());
+
+      std::vector<std::string> sequence = yaml_value<std::vector<std::string>>(
+        root, "event_sequence", std::vector<std::string>{});
+      if (sequence.empty()) {
+        sequence = {"slope_A", "intersection_A", "intersection_B", "intersection_C", "accel_A"};
+        RCLCPP_WARN(get_logger(),
+          "course.yaml has no valid non-empty 'event_sequence' list; using hardcoded default order.");
+      }
+      for (const auto & id : sequence) {
+        if (!events_[id]) {
+          RCLCPP_WARN(get_logger(), "event_sequence references unknown event id '%s'.", id.c_str());
+        }
+      }
+      event_sequence_ = std::move(sequence);
+      if (sequence_index_ >= event_sequence_.size()) {
+        RCLCPP_WARN(get_logger(),
+          "sequence_index_ (%zu) is out of range for event_sequence (size=%zu) after reload; "
+          "no sequenced events are eligible until this is corrected.",
+          sequence_index_, event_sequence_.size());
+      }
+
+      RCLCPP_INFO(get_logger(), "Loaded %zu events, %zu paths, %zu sequenced event ids.",
+        events_.size(), paths_.size(), event_sequence_.size());
     } catch (const std::exception & e) {
       events_ = YAML::Node(YAML::NodeType::Map);
       paths_ = YAML::Node(YAML::NodeType::Map);
+      event_sequence_.clear();
       RCLCPP_ERROR(get_logger(), "Failed to load event YAML: %s", e.what());
     }
   }
@@ -243,7 +267,12 @@ private:
     const std::string command = trim(msg->data);
     if (command == "reset") {reset_to_lane_follow("manual reset"); return;}
     if (command == "reload") {load_yaml(); return;}
-    if (command == "clear_completed") {completed_events_.clear(); return;}
+    if (command == "clear_completed") {
+      completed_events_.clear();
+      sequence_index_ = 0;
+      RCLCPP_INFO(get_logger(), "Cleared completed_events_ and reset sequence_index_ to 0.");
+      return;
+    }
 
     const auto separator = command.find(':');
     if (separator != std::string::npos && command.substr(0, separator) == "force_event") {
@@ -305,12 +334,25 @@ private:
     } catch (const YAML::Exception &) {return std::numeric_limits<double>::infinity();}
   }
 
+  std::optional<std::string> next_sequence_event() const
+  {
+    if (sequence_index_ < event_sequence_.size()) {return event_sequence_[sequence_index_];}
+    return std::nullopt;
+  }
+
+  bool is_sequenced(const std::string & id) const
+  {
+    return std::find(event_sequence_.begin(), event_sequence_.end(), id) != event_sequence_.end();
+  }
+
   std::optional<std::string> find_event_in_range()
   {
+    const auto expected = next_sequence_event();
     std::optional<std::string> best;
     double best_distance = std::numeric_limits<double>::infinity();
     for (auto it = events_.begin(); it != events_.end(); ++it) {
       const std::string id = it->first.as<std::string>();
+      if (is_sequenced(id) && (!expected || id != *expected)) {continue;}
       const bool accel_event = event_type(id) == "accel_obstacle";
       const double radius = accel_event ?
         yaml_value<double>(it->second, "start_radius_m",
@@ -327,16 +369,24 @@ private:
 
   void activate_event(const std::string & id, const std::string & reason)
   {
-    active_event_id_ = id;
     const std::string type = event_type(id);
-    if (type == "hill_stop") {set_state(kHillApproach, reason);}
-    else if (type == "accel_obstacle") {
+    if (type == "accel_obstacle") {
       const YAML::Node event = events_[id];
       if (!event["start"] || !event["end"]) {
         RCLCPP_WARN(get_logger(), "Accel event '%s' requires both start and end GPS points", id.c_str());
-        active_event_id_.reset();
         return;
       }
+    }
+
+    active_event_id_ = id;
+    const auto sequence_it = std::find(event_sequence_.begin(), event_sequence_.end(), id);
+    if (sequence_it != event_sequence_.end()) {
+      sequence_index_ = std::max(
+        sequence_index_, static_cast<std::size_t>(sequence_it - event_sequence_.begin()));
+    }
+
+    if (type == "hill_stop") {set_state(kHillApproach, reason);}
+    else if (type == "accel_obstacle") {
       obstacle_clear_started_.reset();
       accel_zone_enter_time_s_ = now_s();
       set_state(kAccelObstacleZone, reason);
@@ -428,7 +478,16 @@ private:
 
   void complete_active_event(const std::string & reason)
   {
-    if (active_event_id_) {completed_events_.insert(*active_event_id_);}
+    if (active_event_id_) {
+      completed_events_.insert(*active_event_id_);
+      const auto expected = next_sequence_event();
+      if (expected && *active_event_id_ == *expected) {
+        ++sequence_index_;
+        RCLCPP_INFO(get_logger(), "Sequence advanced: '%s' complete -> next=%s",
+          active_event_id_->c_str(),
+          next_sequence_event() ? next_sequence_event()->c_str() : "(none)");
+      }
+    }
     reset_to_lane_follow(reason);
   }
 
@@ -590,6 +649,7 @@ private:
 
   YAML::Node events_;
   YAML::Node paths_;
+  std::vector<std::string> event_sequence_;
   std::string state_{kLaneFollow};
   std::optional<std::string> active_event_id_;
   std::optional<nav_msgs::msg::Path> transformed_path_;
@@ -598,6 +658,7 @@ private:
   std::chrono::steady_clock::time_point hill_stop_started_{};
   std::optional<std::chrono::steady_clock::time_point> obstacle_clear_started_;
   std::set<std::string> completed_events_;
+  std::size_t sequence_index_{0};
 
   std::optional<GpsPoint> current_gps_;
   std::optional<Pose2D> current_pose_;
