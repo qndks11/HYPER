@@ -52,6 +52,9 @@ constexpr const char * kHillStop = "HILL_STOP";
 constexpr const char * kAccelObstacleZone = "ACCEL_OBSTACLE_ZONE";
 // Stopped in an accel/obstacle zone because an obstacle is too close (or the scan timed out); resumes once clear for obstacle_clear_hold_s.
 constexpr const char * kObstacleStop = "OBSTACLE_STOP";
+// Terminal state once the course-end GPS zone is reached: holds a full stop indefinitely. Unlike
+// every other event there's nothing after it in kCourseSequence, so this is never left.
+constexpr const char * kEndStop = "END_STOP_AT_LIGHT";
 // Safety fallback published when odometry is stale, regardless of what was happening before.
 constexpr const char * kOdomStaleStop = "STOP_AT_LIGHT";
 
@@ -74,6 +77,7 @@ enum class SlotKind
   kAccelObstacle,
   kLaneChange4, // Left lane -> Right lane
   kLaneChange5, // Left lane -> Right lane
+  kEnd,
 };
 
 const std::vector<SlotKind> kCourseSequence = {
@@ -97,7 +101,8 @@ const std::vector<SlotKind> kCourseSequence = {
   SlotKind::kLaneChange4,
   SlotKind::kCruiseLeft,
   SlotKind::kLaneChange5,
-  SlotKind::kCruiseRight
+  SlotKind::kCruiseRight,
+  SlotKind::kEnd
 };
 
 // Maps a course slot to its course.yaml event id, i.e. the key under `events:` (and, for
@@ -116,6 +121,7 @@ std::string event_id_for(SlotKind kind)
     case SlotKind::kLaneChange3: return "lane_change_3";
     case SlotKind::kLaneChange4: return "lane_change_4";
     case SlotKind::kLaneChange5: return "lane_change_5";
+    case SlotKind::kEnd: return "end";
     default: return "";
   }
 }
@@ -460,6 +466,7 @@ private:
       complete_active_event(reason);
       set_state(kLeftLaneFollow, reason);
     }
+    else if (kind == SlotKind::kEnd) {set_state(kEndStop, reason);}
     else {RCLCPP_WARN(get_logger(), "Unknown event kind %d", static_cast<int>(kind));}
   }
 
