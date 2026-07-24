@@ -88,7 +88,7 @@ constexpr double kMinStoplineAspectRatio = 3.0;
 // out narrower marks (e.g. a single crossing stripe) that happen to pass the aspect ratio test.
 constexpr double kMinStoplineWidthFraction = 0.10;
 // Floor on contour area [px^2] to reject small mask noise before the shape checks run.
-constexpr double kMinStoplineAreaPx = 400.0;
+constexpr double kMinStoplineAreaPx = 500.0;
 
 constexpr int kWindowWidth = 420;
 constexpr int kWindowHeight = 300;
@@ -183,7 +183,7 @@ cv::Mat LaneDetection::yellow_mask(const cv::Mat & image) const
   // the course texture's own pixels showed lane paint (including its anti-aliased blends against
   // the gray road, which only shift S/V, not hue) clustering at H 26-31, while brown dirt/curb
   // pixels sit in a separate cluster at H 16-19 with a clean, essentially empty gap at H 20-25 --
-  // so 22 excludes the brown without narrowing the yellow paint's own hue range at all.
+  // so 22 excludes the brown without narrowing the   yellow paint's own hue range at all.
   cv::inRange(hsv, cv::Scalar(22, 80, 80), cv::Scalar(35, 255, 255), mask);
 
   const cv::Mat kernel = cv::Mat::ones(3, 3, CV_8U);

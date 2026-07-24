@@ -6,7 +6,7 @@ coordinate_convention:
 events:
   intersection_A:
     event_type: intersection
-    approach_radius_m: 3.0
+    approach_radius_m: 5.0
     signal_required: true
     paths:
       straight: intersection_A_straight
@@ -14,7 +14,7 @@ events:
     longitude: 126.97812399130001
   intersection_B:
     event_type: intersection
-    approach_radius_m: 3.5
+    approach_radius_m: 5.0
     signal_required: true
     paths:
       straight: intersection_B_straight
@@ -24,7 +24,7 @@ events:
     event_type: hill_stop
     latitude: 37.56648791752855
     longitude: 126.97845149641721
-    approach_radius_m: 3.8
+    approach_radius_m: 5.0
     stop_duration_s: 5.0
     signal_required: false
     paths: {}

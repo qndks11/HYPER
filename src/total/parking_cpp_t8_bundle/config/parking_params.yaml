@@ -4,10 +4,10 @@ controller:
     wheelbase: 1.005
     max_steering_angle: 0.5235988
     max_steering_angular_velocity: 2.0
-    max_velocity: 8.0
+    max_velocity: 5.0
     control_hz: 40.0
 
-    cruise_speed: 4.75
+    cruise_speed: 4.0
     approach_speed: 0.50
     hill_approach_speed: 0.40
     accel_zone_speed: 4.00

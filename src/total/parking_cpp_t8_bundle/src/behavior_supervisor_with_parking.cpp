@@ -25,13 +25,21 @@
 
 namespace
 {
+// Default cruising state: follow the lane and scan for GPS-radius entry into a scripted event.
 constexpr const char * kLaneFollow = "LANE_FOLLOW";
+// Inside an intersection event's approach radius, closing on the stop line before requesting entry.
 constexpr const char * kApproach = "APPROACH";
+// Stopped at the stop line waiting for a signal/sign that permits entry (also the safety fallback when odometry is stale).
 constexpr const char * kStopAtLight = "STOP_AT_LIGHT";
+// Entry granted: following the transformed relative path through the intersection until the path end is reached.
 constexpr const char * kTurnBridge = "TURN_BRIDGE";
+// Inside a hill_stop event's approach radius, closing on the stop line before beginning the timed hill stop.
 constexpr const char * kHillApproach = "HILL_APPROACH";
+// Stopped at the hill for a fixed duration (stop_duration_s), then the event completes and control returns to lane following.
 constexpr const char * kHillStop = "HILL_STOP";
+// Inside an accel/obstacle zone, driving while monitoring LIDAR freshness and front obstacle distance until the end radius is reached.
 constexpr const char * kAccelObstacleZone = "ACCEL_OBSTACLE_ZONE";
+// Stopped in an accel/obstacle zone because an obstacle is too close (or the scan timed out); resumes once clear for obstacle_clear_hold_s.
 constexpr const char * kObstacleStop = "OBSTACLE_STOP";
 
 struct Pose2D {double x{0.0}; double y{0.0}; double yaw{0.0};};
