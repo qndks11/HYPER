@@ -22,6 +22,12 @@ namespace
 {
 struct Point2D {double x{0.0}; double y{0.0};};
 struct Command {double steering{0.0}; double speed{0.0}; bool valid{false};};
+
+bool has_suffix(const std::string & value, const std::string & suffix)
+{
+  return value.size() >= suffix.size() &&
+    value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
 }
 
 class ControllerWithParking : public rclcpp::Node
@@ -46,13 +52,6 @@ public:
     deceleration_limit_ = declare_parameter<double>("decel_limit", 4.0);
     curve_slow_k_ = declare_parameter<double>("curve_slow_k", 1.2);
     lane_curve_speed_reduction_ = declare_parameter<double>("lane_curve_speed_reduction", 0.40);
-    lane_lookahead_straight_ = declare_parameter<double>("lane_lookahead_straight", 1.0);
-    lane_lookahead_curve_ = declare_parameter<double>("lane_lookahead_curve", 0.60);
-    lane_straight_radius_px_ = declare_parameter<double>("lane_straight_radius_px", 1400.0);
-    lane_sharp_curve_radius_px_ = declare_parameter<double>("lane_sharp_curve_radius_px", 280.0);
-    lane_min_forward_ = declare_parameter<double>("lane_min_forward", 0.10);
-    lane_path_min_points_ = declare_parameter<int>("lane_path_min_points", 3);
-    lane_target_filter_alpha_ = declare_parameter<double>("lane_target_filter_alpha", 0.35);
     stanley_k_ = declare_parameter<double>("stanley_k", 0.8);
     stanley_v_min_ = declare_parameter<double>("stanley_v_min", 0.5);
     lane_offset_sign_ = declare_parameter<double>("lane_offset_sign", -1.0);
@@ -93,41 +92,35 @@ private:
 
   void on_mode(const std_msgs::msg::String::SharedPtr msg)
   {
-    if (msg->data != mode_) {filtered_lane_target_.reset();}
     mode_ = msg->data;
   }
 
   void on_lane(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
   {
     lane_time_s_ = now_s();
-    if (msg->data.size() < 4U) {
-      lane_valid_ = false; lane_path_local_.clear(); filtered_lane_target_.reset(); return;
+    if (msg->data.size() < 6U) {
+      left_valid_ = false; right_valid_ = false; return;
     }
-    const double raw_offset = msg->data[0];
-    const double raw_heading = msg->data[1] * parking_cpp::kPi / 180.0;
-    lane_radius_px_ = msg->data[2];
-    lane_valid_ = msg->data[3] > 0.5;
-    if (!lane_valid_) {lane_path_local_.clear(); filtered_lane_target_.reset(); lane_initialized_ = false; return;}
+    const double raw_left_angle = msg->data[0] * parking_cpp::kPi / 180.0;
+    const double raw_left_offset = msg->data[1];
+    left_valid_ = msg->data[2] > 0.5;
+    const double raw_right_angle = msg->data[3] * parking_cpp::kPi / 180.0;
+    const double raw_right_offset = msg->data[4];
+    right_valid_ = msg->data[5] > 0.5;
 
-    if (!lane_initialized_) {lane_offset_ = raw_offset; lane_heading_ = raw_heading; lane_initialized_ = true;}
+    const double alpha = parking_cpp::clamp(lane_filter_alpha_, 0.0, 1.0);
+    if (!left_valid_) {left_initialized_ = false;}
+    else if (!left_initialized_) {left_angle_ = raw_left_angle; left_offset_ = raw_left_offset; left_initialized_ = true;}
     else {
-      const double alpha = parking_cpp::clamp(lane_filter_alpha_, 0.0, 1.0);
-      lane_offset_ = alpha * raw_offset + (1.0 - alpha) * lane_offset_;
-      lane_heading_ = alpha * raw_heading + (1.0 - alpha) * lane_heading_;
+      left_angle_ = alpha * raw_left_angle + (1.0 - alpha) * left_angle_;
+      left_offset_ = alpha * raw_left_offset + (1.0 - alpha) * left_offset_;
     }
 
-    lane_path_local_.clear();
-    for (std::size_t i = 4; i + 1U < msg->data.size(); i += 2U) {
-      const double forward = msg->data[i];
-      const double left = msg->data[i + 1U];
-      if (std::isfinite(forward) && std::isfinite(left) && forward >= lane_min_forward_) {
-        lane_path_local_.push_back(Point2D{forward, left});
-      }
-    }
-    std::sort(lane_path_local_.begin(), lane_path_local_.end(),
-      [](const Point2D & a, const Point2D & b) {return a.x < b.x;});
-    if (static_cast<int>(lane_path_local_.size()) < lane_path_min_points_) {
-      lane_path_local_.clear(); filtered_lane_target_.reset();
+    if (!right_valid_) {right_initialized_ = false;}
+    else if (!right_initialized_) {right_angle_ = raw_right_angle; right_offset_ = raw_right_offset; right_initialized_ = true;}
+    else {
+      right_angle_ = alpha * raw_right_angle + (1.0 - alpha) * right_angle_;
+      right_offset_ = alpha * raw_right_offset + (1.0 - alpha) * right_offset_;
     }
   }
 
@@ -152,40 +145,14 @@ private:
     odom_time_s_ = now_s();
   }
 
-  Point2D select_lane_target(double lookahead)
+  double lane_follow_command(double offset_bias, bool use_right)
   {
-    if (lane_path_local_.empty()) {return Point2D{lookahead, lane_offset_sign_ * lane_offset_};}
-    Point2D best = lane_path_local_.back();
-    double error = std::abs(best.x - lookahead);
-    for (const auto & point : lane_path_local_) {
-      const double e = std::abs(point.x - lookahead);
-      if (e < error) {best = point; error = e;}
-    }
-    if (!filtered_lane_target_) {filtered_lane_target_ = best;}
-    else {
-      const double a = parking_cpp::clamp(lane_target_filter_alpha_, 0.0, 1.0);
-      filtered_lane_target_->x = a * best.x + (1.0 - a) * filtered_lane_target_->x;
-      filtered_lane_target_->y = a * best.y + (1.0 - a) * filtered_lane_target_->y;
-    }
-    return *filtered_lane_target_;
-  }
-
-  double lane_follow_command(double offset_bias)
-  {
-    const double ratio = parking_cpp::clamp(
-      (lane_radius_px_ - lane_sharp_curve_radius_px_) /
-      std::max(1.0, lane_straight_radius_px_ - lane_sharp_curve_radius_px_), 0.0, 1.0);
-    const double lookahead = lane_lookahead_curve_ + ratio *
-      (lane_lookahead_straight_ - lane_lookahead_curve_);
-    if (!lane_path_local_.empty()) {
-      Point2D target = select_lane_target(lookahead);
-      target.y += offset_bias;
-      const double ld2 = target.x * target.x + target.y * target.y;
-      if (ld2 > 1e-6) {return std::atan2(2.0 * wheelbase_ * target.y, ld2);}
-    }
-    const double heading = lane_heading_sign_ * lane_heading_;
-    const double offset = lane_offset_sign_ * lane_offset_ + offset_bias;
-    return heading + std::atan2(stanley_k_ * offset, std::max(stanley_v_min_, std::abs(velocity_)));
+    const double angle = use_right ? right_angle_ : left_angle_;
+    const double offset = use_right ? right_offset_ : left_offset_;
+    const double heading = lane_heading_sign_ * angle;
+    const double effective_offset = lane_offset_sign_ * offset + offset_bias;
+    return heading +
+      std::atan2(stanley_k_ * effective_offset, std::max(stanley_v_min_, std::abs(velocity_)));
   }
 
   double speed_for_curve(double steering) const
@@ -217,6 +184,31 @@ private:
     return Command{std::atan2(2.0 * wheelbase_ * ly, ld2), 0.0, true};
   }
 
+  enum class Phase
+  {
+    kLeftLaneFollow, kRightLaneFollow, kApproach, kHillApproach, kStopAtLight, kHillStop,
+    kTurnBridge, kAccelZone, kObstacleStop, kOther
+  };
+
+  // Maps the supervisor's slot-scoped /driving_mode strings (e.g. INTERSECTION_A_APPROACH,
+  // INTERSECTION_B_APPROACH, ...) down to the same generic phases this controller has always
+  // branched on, so control_step doesn't need a near-duplicate branch per intersection. Exact
+  // matches are checked before the generic "_APPROACH" suffix so HILL_APPROACH doesn't fall
+  // through to the intersection-approach speed profile.
+  Phase classify_mode(const std::string & mode) const
+  {
+    if (mode == "LEFT_LANE_FOLLOW") {return Phase::kLeftLaneFollow;}
+    if (mode == "RIGHT_LANE_FOLLOW") {return Phase::kRightLaneFollow;}
+    if (mode == "HILL_APPROACH") {return Phase::kHillApproach;}
+    if (mode == "HILL_STOP") {return Phase::kHillStop;}
+    if (mode == "ACCEL_OBSTACLE_ZONE") {return Phase::kAccelZone;}
+    if (mode == "OBSTACLE_STOP") {return Phase::kObstacleStop;}
+    if (has_suffix(mode, "_APPROACH")) {return Phase::kApproach;}
+    if (has_suffix(mode, "_STOP_AT_LIGHT")) {return Phase::kStopAtLight;}
+    if (has_suffix(mode, "_TURN_BRIDGE")) {return Phase::kTurnBridge;}
+    return Phase::kOther;
+  }
+
   void control_step()
   {
     const double t = now_s();
@@ -224,40 +216,61 @@ private:
     if (dt <= 0.0 || dt > 1.0) {dt = 1.0 / std::max(1.0, control_hz_);}
     last_control_time_s_ = t;
     const bool odom_ok = t - odom_time_s_ < input_timeout_s_;
-    const bool lane_ok = t - lane_time_s_ < input_timeout_s_ && lane_valid_;
+
+    const Phase phase = classify_mode(mode_);
+    // Cruise phases set which side to track; every other phase keeps steering with whichever
+    // side was active immediately before entering it, since the supervisor doesn't (and doesn't
+    // need to) publish a left/right variant of every approach/stop/turn-bridge phase.
+    if (phase == Phase::kLeftLaneFollow) {use_right_lane_ = false;}
+    else if (phase == Phase::kRightLaneFollow) {use_right_lane_ = true;}
+    const bool lane_ok = t - lane_time_s_ < input_timeout_s_ &&
+      (use_right_lane_ ? right_valid_ : left_valid_);
 
     double target_steering = commanded_steering_;
     double target_speed = 0.0;
 
     if (!odom_ok) {target_steering = 0.0; target_speed = 0.0;}
-    else if (mode_ == "TURN_BRIDGE") {
+    else if (phase == Phase::kTurnBridge) {
       const Command c = pure_pursuit_on_map_path(bridge_path_, map_lookahead_);
       target_steering = c.steering; target_speed = c.valid ? bridge_speed_ : 0.0;
-    } else if (mode_ == "APPROACH") {
-      if (lane_ok) {target_steering = lane_follow_command(0.0); target_speed = std::min(approach_speed_, speed_for_curve(target_steering));}
-    } else if (mode_ == "HILL_APPROACH") {
-      if (lane_ok) {target_steering = lane_follow_command(0.0); target_speed = std::min(hill_approach_speed_, speed_for_curve(target_steering));}
-    } else if (mode_ == "ACCEL_OBSTACLE_ZONE") {
-      if (lane_ok) {target_steering = lane_follow_command(0.0); target_speed = std::min(accel_zone_speed_, speed_for_curve(target_steering));}
-    } else if (mode_ == "OBSTACLE_STOP") {
-      target_steering = lane_ok ? lane_follow_command(0.0) : 0.0;
+    } else if (phase == Phase::kApproach) {
+      if (lane_ok) {
+        target_steering = lane_follow_command(0.0, use_right_lane_);
+        target_speed = std::min(approach_speed_, speed_for_curve(target_steering));
+      }
+    } else if (phase == Phase::kHillApproach) {
+      if (lane_ok) {
+        target_steering = lane_follow_command(0.0, use_right_lane_);
+        target_speed = std::min(hill_approach_speed_, speed_for_curve(target_steering));
+      }
+    } else if (phase == Phase::kAccelZone) {
+      if (lane_ok) {
+        target_steering = lane_follow_command(0.0, use_right_lane_);
+        target_speed = std::min(accel_zone_speed_, speed_for_curve(target_steering));
+      }
+    } else if (phase == Phase::kObstacleStop) {
+      target_steering = lane_ok ? lane_follow_command(0.0, use_right_lane_) : 0.0;
       target_speed = 0.0;
-    } else if (mode_ == "STOP_AT_LIGHT" || mode_ == "HILL_STOP") {
-      target_steering = lane_ok ? lane_follow_command(0.0) : 0.0;
+    } else if (phase == Phase::kStopAtLight || phase == Phase::kHillStop) {
+      target_steering = lane_ok ? lane_follow_command(0.0, use_right_lane_) : 0.0;
       target_speed = 0.0;
     } else if (mode_ == "AVOID") {
-      if (lane_ok) {target_steering = lane_follow_command(avoid_offset_bias_); target_speed = 0.6 * speed_for_curve(target_steering);}
+      if (lane_ok) {
+        target_steering = lane_follow_command(avoid_offset_bias_, use_right_lane_);
+        target_speed = 0.6 * speed_for_curve(target_steering);
+      }
     } else if (mode_ == "WAYPOINT_FOLLOW") {
       const Command c = pure_pursuit_on_map_path(waypoint_path_, map_lookahead_);
       target_steering = c.steering; target_speed = c.valid ? waypoint_speed_ : 0.0;
     } else if (lane_ok) {
-      target_steering = lane_follow_command(0.0); target_speed = speed_for_curve(target_steering);
+      target_steering = lane_follow_command(0.0, use_right_lane_);
+      target_speed = speed_for_curve(target_steering);
     }
 
     target_steering = parking_cpp::clamp(target_steering, -max_steer_, max_steer_);
     target_speed = parking_cpp::clamp(target_speed, -max_velocity_, max_velocity_);
     commanded_steering_ = parking_cpp::rate_limit(commanded_steering_, target_steering, steering_rate_ * dt);
-    const double active_decel_limit = mode_ == "OBSTACLE_STOP" ?
+    const double active_decel_limit = phase == Phase::kObstacleStop ?
       emergency_deceleration_limit_ : deceleration_limit_;
     commanded_speed_ = parking_cpp::ramp(commanded_speed_, target_speed,
       acceleration_limit_ * dt, active_decel_limit * dt);
@@ -275,17 +288,15 @@ private:
   double accel_zone_speed_{4.0}, emergency_deceleration_limit_{8.0};
   double bridge_speed_{2.5}, waypoint_speed_{2.5}, minimum_speed_{1.25};
   double acceleration_limit_{2.0}, deceleration_limit_{4.0}, curve_slow_k_{1.2};
-  double lane_curve_speed_reduction_{0.4}, lane_lookahead_straight_{1.0}, lane_lookahead_curve_{0.6};
-  double lane_straight_radius_px_{1400.0}, lane_sharp_curve_radius_px_{280.0};
-  double lane_min_forward_{0.1}, lane_target_filter_alpha_{0.35}, stanley_k_{0.8}, stanley_v_min_{0.5};
+  double lane_curve_speed_reduction_{0.4};
+  double stanley_k_{0.8}, stanley_v_min_{0.5};
   double lane_offset_sign_{-1.0}, lane_heading_sign_{1.0}, lane_filter_alpha_{0.3};
   double avoid_offset_bias_{0.45}, map_lookahead_{1.0}, input_timeout_s_{0.3};
-  int lane_path_min_points_{3};
-  std::string base_frame_id_{"body_link"}, mode_{"LANE_FOLLOW"};
-  double lane_offset_{0.0}, lane_heading_{0.0}, lane_radius_px_{1e6};
-  bool lane_valid_{false}, lane_initialized_{false};
-  std::vector<Point2D> lane_path_local_, bridge_path_, waypoint_path_;
-  std::optional<Point2D> filtered_lane_target_;
+  std::string base_frame_id_{"body_link"}, mode_{"LEFT_LANE_FOLLOW"};
+  bool use_right_lane_{false};
+  double left_angle_{0.0}, left_offset_{0.0}, right_angle_{0.0}, right_offset_{0.0};
+  bool left_valid_{false}, right_valid_{false}, left_initialized_{false}, right_initialized_{false};
+  std::vector<Point2D> bridge_path_, waypoint_path_;
   double x_{0.0}, y_{0.0}, yaw_{0.0}, velocity_{0.0};
   double commanded_steering_{0.0}, commanded_speed_{0.0}, last_control_time_s_{0.0};
   double odom_time_s_{-1e9}, lane_time_s_{-1e9};

@@ -42,12 +42,12 @@ private:
    * centerline) via walk_lane_chain(), dropping any chain that crosses to the other side without
    * getting farther from the vehicle -- see walk_lane_chain()'s doc for why that indicates both
    * sides latched onto the same physical lane line. Each surviving chain is fit to a straight
-   * line via fit_lane(); when both are valid the two are averaged into a true lane-center estimate
-   * (see kLaneCenterOffsetBiasM), otherwise whichever single side is valid is used as-is. Stop-line
-   * side: masks white paint and hands it to find_stopline() to pick out the stop-line bar by
-   * shape. Publishes lane offset/steering angle/curvature-radius on `/lane/center` and stop-line
-   * validity/distance on `/stopline/detection`, and shows one combined BEV debug view (both
-   * masks, walked chains, fitted lines, stop-line box, and both sets of stats).
+   * line via fit_lane() and published independently -- see kLaneCenterOffsetBiasM for how each
+   * side's offset is biased toward an estimated lane-center. Stop-line side: masks white paint
+   * and hands it to find_stopline() to pick out the stop-line bar by shape. Publishes each side's
+   * offset/steering angle/validity on `/lane/center` and stop-line validity/distance on
+   * `/stopline/detection`, and shows one combined BEV debug view (both masks, walked chains,
+   * fitted lines, stop-line box, and both sets of stats).
    *
    * Lane and stop-line detection used to live in separate nodes trading a shared bird's-eye image
    * over topics (plus a third node just producing that image); folding all three into one node

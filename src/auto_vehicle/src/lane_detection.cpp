@@ -51,35 +51,21 @@ constexpr double kLaneWidthMeters = 3.7;
 constexpr double kNumLaneInScreen = 6.2;  // how many lanes fit across the BEV image width
 constexpr double kArrowLength = 100.0;
 
-// Tolerance above kLaneWidthMeters before two simultaneously-detected lines are treated as
-// implausibly far apart to be the same lane's pair (e.g. one side actually latched onto an
-// adjacent lane's paint). Loose enough to tolerate normal fit noise on a real lane.
-constexpr double kMaxPlausibleLaneWidthMeters = kLaneWidthMeters * 1.4;
-
 // Empirical half-lane-width offset [m] from a single tracked lane line to the estimated lane
 // center, calibrated back when only the right lane was tracked. Baked into fit_lane()'s offset_m,
 // signed per side (subtracted for the right lane, added for the left, since the center sits on
-// opposite sides of each line), so the single-lane fallback (only one side detected this frame)
-// still reports a centered estimate. When both sides are valid, the opposite signs cancel when
-// averaged, so image_callback's combined offset is just the plain average -- no bias to add back.
+// opposite sides of each line), so each side's own biased offset reports a centered estimate
+// even though the two sides are no longer combined into one fit.
 constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 
-// Empirical gain [m per degree] converting a single tracked lane line's own outward lean --
+// Empirical gain [m per degree] converting a tracked lane line's own outward lean --
 // steering_angle_deg's magnitude, in the direction that means the line is angling away from the
 // vehicle rather than toward it -- into extra lateral offset correction. kLaneCenterOffsetBiasM
-// alone assumes the single visible line runs parallel to the vehicle's heading; once it's
-// visibly leaning outward that assumption undershoots the true center offset, and more so the
-// more it leans. Only applied in image_callback's single-line fallback (see
-// kMaxPlausibleLaneWidthMeters too), since a true two-line fit already measures the real center
-// directly. Untuned placeholder -- adjust against real single-line footage.
+// alone assumes the visible line runs parallel to the vehicle's heading; once it's visibly
+// leaning outward that assumption undershoots the true center offset, and more so the more it
+// leans. Applied to both sides unconditionally, since each side is always published as its own
+// independent single-line estimate now. Untuned placeholder -- adjust against real footage.
 constexpr double kOutwardLeanGainMPerDeg = 0.04;
-
-// Empirical gain [m per degree] pushing the L+R combined offset toward the curve's outside lane
-// -- e.g. on a rightward curve (negative combined steering_angle_deg) shifting toward the left
-// lane. A plain 50/50 blend of both sides' offsets has no notion of which lane the vehicle should
-// favor mid-turn; this adds that on top once the true two-line center estimate is already
-// averaged. Untuned placeholder -- adjust against real curve footage.
-constexpr double kCurveOutsideBiasGainMPerDeg = 0.04;
 
 // A stop-line bar spans most of the lane, so its bounding box is much wider than it is tall; a
 // single zebra-crossing stripe is comparatively close to square. This floor separates the two.
@@ -488,17 +474,14 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   for (const auto & p : right_points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
   for (const auto & p : left_points) cv::circle(view, p, 3, cv::Scalar(255, 0, 0), -1);
 
-  const LaneFitResult right_fit = fit_lane(right_points, origin, warped.cols, LaneSide::kRight);
-  const LaneFitResult left_fit = fit_lane(left_points, origin, warped.cols, LaneSide::kLeft);
+  LaneFitResult right_fit = fit_lane(right_points, origin, warped.cols, LaneSide::kRight);
+  LaneFitResult left_fit = fit_lane(left_points, origin, warped.cols, LaneSide::kLeft);
 
-  // Combine both sides into a single published estimate: when both are valid, average their
-  // offsets into a true lane-center estimate -- each fit's kLaneCenterOffsetBiasM is signed
-  // opposite to the other's, so the average needs no further correction; otherwise fall back to
-  // whichever single side is valid, unchanged from the single-lane behavior.
-  // Only tracking one line (no true two-line center measurement to lean on): if that line is
-  // angling outward -- away from the vehicle rather than parallel to it -- kLaneCenterOffsetBiasM
-  // alone undershoots the true center offset, more so the more it leans. See
-  // kOutwardLeanGainMPerDeg.
+  // Each side is published as its own independent estimate now (no more width-based decision
+  // between left-only / right-only / averaged-both). If a line is angling outward -- away from
+  // the vehicle rather than parallel to it -- kLaneCenterOffsetBiasM alone (baked into
+  // fit_lane()'s offset_m) undershoots the true center offset, more so the more it leans; correct
+  // for that on whichever side(s) are valid. See kOutwardLeanGainMPerDeg.
   auto apply_outward_lean_correction = [](LaneFitResult & f, LaneSide side) {
     const double outward_lean_deg =
       side == LaneSide::kRight ? -f.steering_angle_deg : f.steering_angle_deg;
@@ -508,87 +491,51 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     const double extra_m = outward_lean_deg * kOutwardLeanGainMPerDeg;
     f.offset_m += side == LaneSide::kRight ? -extra_m : extra_m;
   };
-
-  LaneFitResult fit;
-  // Lane width is only actually measurable when both sides are valid; also doubles as which
-  // side(s) fed the published fit below, for the debug overlay.
-  double lane_width_m = 0.0;
-  bool lane_width_valid = false;
-  const char * tracking_side = "--";
-  if (right_fit.valid && left_fit.valid) {
-    const double computed_lane_width_m =
-      (right_points.front().x - left_points.front().x) * meters_per_pixel;
-    if (computed_lane_width_m > kMaxPlausibleLaneWidthMeters) {
-      // The two lines are farther apart than a real lane, so at least one of them isn't this
-      // lane's own line -- trust whichever side is physically closer to the vehicle rather than
-      // averaging in a bogus far side. Functionally a single-line read at that point, so the
-      // outward-lean correction applies here too.
-      const bool right_closer =
-        std::abs(right_points.front().x - origin.x) < std::abs(left_points.front().x - origin.x);
-      fit = right_closer ? right_fit : left_fit;
-      apply_outward_lean_correction(fit, right_closer ? LaneSide::kRight : LaneSide::kLeft);
-      tracking_side = right_closer ? "R" : "L";
-    } else {
-      fit.valid = true;
-      fit.offset_m = (right_fit.offset_m + left_fit.offset_m) / 2.0;
-      fit.steering_angle_deg = (right_fit.steering_angle_deg + left_fit.steering_angle_deg) / 2.0;
-      fit.curvature_radius_px = (right_fit.curvature_radius_px + left_fit.curvature_radius_px) / 2.0;
-      // Push the averaged center estimate toward the curve's outside lane -- see
-      // kCurveOutsideBiasGainMPerDeg. steering_angle_deg is negative on a right curve, and a more
-      // negative offset_m means further left (toward the left lane, the outside on a right
-      // curve); positive on a left curve pushes the other way, symmetrically.
-      fit.offset_m += kCurveOutsideBiasGainMPerDeg * fit.steering_angle_deg;
-      lane_width_m = computed_lane_width_m;
-      lane_width_valid = true;
-      tracking_side = "L+R";
-    }
-  } else if (right_fit.valid) {
-    fit = right_fit;
-    apply_outward_lean_correction(fit, LaneSide::kRight);
-    tracking_side = "R";
-  } else if (left_fit.valid) {
-    fit = left_fit;
-    apply_outward_lean_correction(fit, LaneSide::kLeft);
-    tracking_side = "L";
-  }
+  if (right_fit.valid) apply_outward_lean_correction(right_fit, LaneSide::kRight);
+  if (left_fit.valid) apply_outward_lean_correction(left_fit, LaneSide::kLeft);
 
   if (right_fit.valid) cv::polylines(view, right_fit.curve_points, false, cv::Scalar(255, 0, 255), 3);
   if (left_fit.valid) cv::polylines(view, left_fit.curve_points, false, cv::Scalar(0, 255, 255), 3);
 
-  if (fit.valid) {
-    // steering_angle_deg is defined as -atan2(direction.x, -direction.y) in fit_lane, so a
-    // rightward-tilting fitted line comes out as a *negative* angle; reconstructing a direction
-    // vector from the angle therefore needs sin() negated too (-sin, not sin), or the drawn
-    // direction ends up mirrored left/right from the line it's supposed to represent.
-    const double heading_rad = fit.steering_angle_deg * CV_PI / 180.0;
+  // steering_angle_deg is defined as -atan2(direction.x, -direction.y) in fit_lane, so a
+  // rightward-tilting fitted line comes out as a *negative* angle; reconstructing a direction
+  // vector from the angle therefore needs sin() negated too (-sin, not sin), or the drawn
+  // direction ends up mirrored left/right from the line it's supposed to represent.
+  auto draw_side_overlay = [&](const LaneFitResult & f, cv::Scalar color) {
+    if (!f.valid) return;
+    const double heading_rad = f.steering_angle_deg * CV_PI / 180.0;
     const cv::Point2d heading_dir(-std::sin(heading_rad), -std::cos(heading_rad));
 
     const cv::Point arrow_start(static_cast<int>(origin.x), static_cast<int>(origin.y));
     const cv::Point arrow_end(
       static_cast<int>(std::lround(origin.x + heading_dir.x * kArrowLength)),
       static_cast<int>(std::lround(origin.y + heading_dir.y * kArrowLength)));
-    cv::line(view, arrow_start, arrow_end, cv::Scalar(255, 0, 0), 2);
+    cv::line(view, arrow_start, arrow_end, color, 2);
 
-    // The target lane-center line the controller is actually tracking: unlike the heading arrow
-    // above (which starts at the vehicle's own position), this starts at the vehicle's lateral
-    // offset from that center (fit.offset_m converted back to px) and extends along the same
+    // The target line this side is actually tracking: unlike the heading arrow above (which
+    // starts at the vehicle's own position), this starts at the vehicle's lateral offset from
+    // that side's estimated center (f.offset_m converted back to px) and extends along the same
     // heading all the way to the top of the frame, so it reads as the path being followed rather
     // than just a direction.
-    const double offset_px = fit.offset_m / meters_per_pixel;
+    const double offset_px = f.offset_m / meters_per_pixel;
     const cv::Point target_start(
       static_cast<int>(std::lround(origin.x + offset_px)), static_cast<int>(origin.y));
     const cv::Point target_end(
       static_cast<int>(std::lround(target_start.x + heading_dir.x * view.rows)),
       static_cast<int>(std::lround(target_start.y + heading_dir.y * view.rows)));
-    cv::line(view, target_start, target_end, cv::Scalar(0, 255, 0), 2);
-  }
+    cv::line(view, target_start, target_end, color, 2);
+  };
+  draw_side_overlay(left_fit, cv::Scalar(255, 0, 0));
+  draw_side_overlay(right_fit, cv::Scalar(0, 255, 0));
 
   std_msgs::msg::Float64MultiArray lane_msg;
-  lane_msg.data = {fit.offset_m, fit.steering_angle_deg, fit.curvature_radius_px,
-                    fit.valid ? 1.0 : 0.0};
+  lane_msg.data = {
+    left_fit.steering_angle_deg, left_fit.offset_m, left_fit.valid ? 1.0 : 0.0,
+    right_fit.steering_angle_deg, right_fit.offset_m, right_fit.valid ? 1.0 : 0.0};
   lane_center_publisher_->publish(lane_msg);
 
-  const cv::Scalar lane_text_color = fit.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
+  const cv::Scalar lane_text_color = (left_fit.valid || right_fit.valid) ?
+    cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
   // Dedicated black strip below the BEV image for all overlay text, sized independently of the
   // BEV image's own (config-dependent) height so the lines below never run out of room.
@@ -596,47 +543,33 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     view, view, 0, kTextPanelHeight, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
   const int panel_top = view.rows - kTextPanelHeight;
 
-  char offset_text[64];
-  std::snprintf(offset_text, sizeof(offset_text), "Offset: %.2f m", fit.offset_m);
+  char left_text[64];
+  if (left_fit.valid) {
+    std::snprintf(left_text, sizeof(left_text), "L: %.2f m / %.2f deg",
+      left_fit.offset_m, left_fit.steering_angle_deg);
+  } else {
+    std::snprintf(left_text, sizeof(left_text), "L: --");
+  }
   cv::putText(
-    view, offset_text, cv::Point(30, panel_top + kTextLinePitch * 1), cv::FONT_HERSHEY_SIMPLEX,
+    view, left_text, cv::Point(30, panel_top + kTextLinePitch * 1), cv::FONT_HERSHEY_SIMPLEX,
     1.0, lane_text_color, 2);
 
-  char angle_text[64];
-  std::snprintf(angle_text, sizeof(angle_text), "Angle: %.2f deg", fit.steering_angle_deg);
+  char right_text[64];
+  if (right_fit.valid) {
+    std::snprintf(right_text, sizeof(right_text), "R: %.2f m / %.2f deg",
+      right_fit.offset_m, right_fit.steering_angle_deg);
+  } else {
+    std::snprintf(right_text, sizeof(right_text), "R: --");
+  }
   cv::putText(
-    view, angle_text, cv::Point(30, panel_top + kTextLinePitch * 2), cv::FONT_HERSHEY_SIMPLEX,
+    view, right_text, cv::Point(30, panel_top + kTextLinePitch * 2), cv::FONT_HERSHEY_SIMPLEX,
     1.0, lane_text_color, 2);
 
-  if (!fit.valid) {
+  if (!left_fit.valid && !right_fit.valid) {
     cv::putText(
       view, "Lane not detected", cv::Point(30, panel_top + kTextLinePitch * 3),
       cv::FONT_HERSHEY_SIMPLEX, 1.0, lane_text_color, 2);
   }
-
-  char sides_text[64];
-  std::snprintf(
-    sides_text, sizeof(sides_text), "L: %s  R: %s", left_fit.valid ? "OK" : "--",
-    right_fit.valid ? "OK" : "--");
-  cv::putText(
-    view, sides_text, cv::Point(30, panel_top + kTextLinePitch * 4), cv::FONT_HERSHEY_SIMPLEX,
-    1.0, lane_text_color, 2);
-
-  char width_text[64];
-  if (lane_width_valid) {
-    std::snprintf(width_text, sizeof(width_text), "Width: %.2f m", lane_width_m);
-  } else {
-    std::snprintf(width_text, sizeof(width_text), "Width: --");
-  }
-  cv::putText(
-    view, width_text, cv::Point(30, panel_top + kTextLinePitch * 5), cv::FONT_HERSHEY_SIMPLEX,
-    1.0, lane_text_color, 2);
-
-  char tracking_text[64];
-  std::snprintf(tracking_text, sizeof(tracking_text), "Tracking: %s", tracking_side);
-  cv::putText(
-    view, tracking_text, cv::Point(30, panel_top + kTextLinePitch * 6), cv::FONT_HERSHEY_SIMPLEX,
-    1.0, lane_text_color, 2);
 
   // --- Stop-line detection ---
 
@@ -653,7 +586,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   const cv::Scalar stopline_text_color =
     stopline.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
 
-  // Anchored below the lane section's own lines (rows 1-6 above), with a blank row of padding
+  // Anchored below the lane section's own lines (rows 1-3 above), with a blank row of padding
   // between them, so it never collides with that block regardless of how many of those lines
   // are showing.
   char distance_text[64];

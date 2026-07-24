@@ -10,7 +10,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -26,22 +25,77 @@
 
 namespace
 {
-// Default cruising state: follow the lane and scan for GPS-radius entry into a scripted event.
-constexpr const char * kLaneFollow = "LANE_FOLLOW";
-// Inside an intersection event's approach radius, closing on the stop line before requesting entry.
-constexpr const char * kApproach = "APPROACH";
-// Stopped at the stop line waiting for a signal/sign that permits entry (also the safety fallback when odometry is stale).
-constexpr const char * kStopAtLight = "STOP_AT_LIGHT";
-// Entry granted: following the transformed relative path through the intersection until the path end is reached.
-constexpr const char * kTurnBridge = "TURN_BRIDGE";
-// Inside a hill_stop event's approach radius, closing on the stop line before beginning the timed hill stop.
+// Default cruising states: follow the left or right lane and scan for GPS-radius entry into the
+// next scripted event in kCourseSequence.
+constexpr const char * kLeftLaneFollow = "LEFT_LANE_FOLLOW";
+constexpr const char * kRightLaneFollow = "RIGHT_LANE_FOLLOW";
+// Inside an intersection event's approach radius, closing on the stop line before requesting
+// entry. Split per intersection (rather than one shared generic state) so /driving_mode always
+// says which of A/B/C is active, instead of leaving that only inferable from /active_event.
+constexpr const char * kIntersectionAApproach = "INTERSECTION_A_APPROACH";
+constexpr const char * kIntersectionAStopAtLight = "INTERSECTION_A_STOP_AT_LIGHT";
+constexpr const char * kIntersectionATurnBridge = "INTERSECTION_A_TURN_BRIDGE";
+constexpr const char * kIntersectionBApproach = "INTERSECTION_B_APPROACH";
+constexpr const char * kIntersectionBStopAtLight = "INTERSECTION_B_STOP_AT_LIGHT";
+constexpr const char * kIntersectionBTurnBridge = "INTERSECTION_B_TURN_BRIDGE";
+constexpr const char * kIntersectionCApproach = "INTERSECTION_C_APPROACH";
+constexpr const char * kIntersectionCStopAtLight = "INTERSECTION_C_STOP_AT_LIGHT";
+constexpr const char * kIntersectionCTurnBridge = "INTERSECTION_C_TURN_BRIDGE";
+// Inside a hill_stop event's approach radius, closing on the stop line before beginning the timed
+// hill stop. Only one hill-stop event exists in the course, so unlike intersections this doesn't
+// need a per-event variant to stay unambiguous.
 constexpr const char * kHillApproach = "HILL_APPROACH";
 // Stopped at the hill for a fixed duration (stop_duration_s), then the event completes and control returns to lane following.
 constexpr const char * kHillStop = "HILL_STOP";
-// Inside an accel/obstacle zone, driving while monitoring LIDAR freshness and front obstacle distance until the end radius is reached.
+// Inside an accel/obstacle zone, driving while monitoring LIDAR freshness and front obstacle
+// distance until the end radius is reached. Only one such event exists in the course.
 constexpr const char * kAccelObstacleZone = "ACCEL_OBSTACLE_ZONE";
 // Stopped in an accel/obstacle zone because an obstacle is too close (or the scan timed out); resumes once clear for obstacle_clear_hold_s.
 constexpr const char * kObstacleStop = "OBSTACLE_STOP";
+// Safety fallback published when odometry is stale, regardless of what was happening before.
+constexpr const char * kOdomStaleStop = "STOP_AT_LIGHT";
+
+// The course's fixed slot order. Cruise slots carry the lane side to follow; event slots name
+// which scripted event (looked up in course.yaml via event_id_for()) is active. Replaces what
+// used to be a separate event_sequence_ (YAML list of event ids) + sequence_index_ pair -- the
+// ordering now lives directly in this vector instead of alongside-but-separate-from the FSM
+// state, so there's one place, not two, that says "what's next."
+enum class SlotKind
+{
+  kCruiseLeft, kCruiseRight, kHillstop, kIntersectionA, kIntersectionB, kIntersectionC,
+  kAccelObstacle
+};
+
+const std::vector<SlotKind> kCourseSequence = {
+  SlotKind::kCruiseLeft, SlotKind::kHillstop, SlotKind::kCruiseLeft, SlotKind::kIntersectionA,
+  SlotKind::kCruiseRight, SlotKind::kIntersectionB, SlotKind::kCruiseLeft,
+  SlotKind::kIntersectionC, SlotKind::kCruiseLeft, SlotKind::kAccelObstacle,
+  SlotKind::kCruiseLeft};
+
+// Maps a course slot to its course.yaml event id, i.e. the key under `events:` (and, for
+// intersections, transitively under `paths:`) that carries that slot's GPS/radius/path data.
+// Returns an empty string for the cruise slots, which have no associated YAML event.
+std::string event_id_for(SlotKind kind)
+{
+  switch (kind) {
+    case SlotKind::kHillstop: return "slope_A";
+    case SlotKind::kIntersectionA: return "intersection_A";
+    case SlotKind::kIntersectionB: return "intersection_B";
+    case SlotKind::kIntersectionC: return "intersection_C";
+    case SlotKind::kAccelObstacle: return "accel_A";
+    default: return "";
+  }
+}
+
+bool is_cruise(SlotKind kind)
+{
+  return kind == SlotKind::kCruiseLeft || kind == SlotKind::kCruiseRight;
+}
+
+const char * cruise_state(SlotKind kind)
+{
+  return kind == SlotKind::kCruiseRight ? kRightLaneFollow : kLeftLaneFollow;
+}
 
 struct Pose2D {double x{0.0}; double y{0.0}; double yaw{0.0};};
 struct GpsPoint {double latitude{0.0}; double longitude{0.0};};
@@ -90,7 +144,6 @@ public:
     stop_distance_m_ = declare_parameter<double>("stop_line_trigger_distance_m", 3.0);
     bridge_exit_tolerance_m_ = declare_parameter<double>("bridge_exit_tolerance_m", 0.50);
     minimum_bridge_time_s_ = declare_parameter<double>("min_bridge_time_s", 1.0);
-    event_rearm_margin_m_ = declare_parameter<double>("event_rearm_margin_m", 3.0);
     approach_cancel_margin_m_ = declare_parameter<double>("approach_cancel_margin_m", 1.5);
     default_hill_stop_duration_s_ = declare_parameter<double>("hill_stop_duration_s", 5.0);
     default_mission_ = lower(declare_parameter<std::string>("default_mission", "straight"));
@@ -165,32 +218,22 @@ private:
       if (!events_ || !events_.IsMap()) {events_ = YAML::Node(YAML::NodeType::Map);}
       if (!paths_ || !paths_.IsMap()) {paths_ = YAML::Node(YAML::NodeType::Map);}
 
-      std::vector<std::string> sequence = yaml_value<std::vector<std::string>>(
-        root, "event_sequence", std::vector<std::string>{});
-      if (sequence.empty()) {
-        sequence = {"slope_A", "intersection_A", "intersection_B", "intersection_C", "accel_A"};
-        RCLCPP_WARN(get_logger(),
-          "course.yaml has no valid non-empty 'event_sequence' list; using hardcoded default order.");
-      }
-      for (const auto & id : sequence) {
+      // The course order itself is hardcoded (kCourseSequence), not read from YAML anymore --
+      // just sanity-check that every event slot it references actually exists in this file.
+      for (const auto kind : kCourseSequence) {
+        if (is_cruise(kind)) {continue;}
+        const std::string id = event_id_for(kind);
         if (!events_[id]) {
-          RCLCPP_WARN(get_logger(), "event_sequence references unknown event id '%s'.", id.c_str());
+          RCLCPP_WARN(get_logger(),
+            "kCourseSequence references event id '%s', which is missing from course.yaml.",
+            id.c_str());
         }
       }
-      event_sequence_ = std::move(sequence);
-      if (sequence_index_ >= event_sequence_.size()) {
-        RCLCPP_WARN(get_logger(),
-          "sequence_index_ (%zu) is out of range for event_sequence (size=%zu) after reload; "
-          "no sequenced events are eligible until this is corrected.",
-          sequence_index_, event_sequence_.size());
-      }
 
-      RCLCPP_INFO(get_logger(), "Loaded %zu events, %zu paths, %zu sequenced event ids.",
-        events_.size(), paths_.size(), event_sequence_.size());
+      RCLCPP_INFO(get_logger(), "Loaded %zu events, %zu paths.", events_.size(), paths_.size());
     } catch (const std::exception & e) {
       events_ = YAML::Node(YAML::NodeType::Map);
       paths_ = YAML::Node(YAML::NodeType::Map);
-      event_sequence_.clear();
       RCLCPP_ERROR(get_logger(), "Failed to load event YAML: %s", e.what());
     }
   }
@@ -240,9 +283,9 @@ private:
     scan_received_ = true;
     scan_time_s_ = now_s();
     double closest_x = std::numeric_limits<double>::infinity();
-    const double half_width = active_event_id_ ?
-      yaml_value<double>(events_[*active_event_id_], "obstacle_half_width_m",
-        default_obstacle_half_width_m_) : default_obstacle_half_width_m_;
+    const double half_width = active_event_index_ ?
+      yaml_value<double>(events_[event_id_for(kCourseSequence[*active_event_index_])],
+        "obstacle_half_width_m", default_obstacle_half_width_m_) : default_obstacle_half_width_m_;
 
     for (std::size_t i = 0; i < msg->ranges.size(); ++i) {
       const double range = msg->ranges[i];
@@ -267,12 +310,6 @@ private:
     const std::string command = trim(msg->data);
     if (command == "reset") {reset_to_lane_follow("manual reset"); return;}
     if (command == "reload") {load_yaml(); return;}
-    if (command == "clear_completed") {
-      completed_events_.clear();
-      sequence_index_ = 0;
-      RCLCPP_INFO(get_logger(), "Cleared completed_events_ and reset sequence_index_ to 0.");
-      return;
-    }
 
     const auto separator = command.find(':');
     if (separator != std::string::npos && command.substr(0, separator) == "force_event") {
@@ -281,7 +318,15 @@ private:
         RCLCPP_WARN(get_logger(), "Unknown event: %s", event_id.c_str());
         return;
       }
-      activate_event(event_id, "manual force_event");
+      for (std::size_t i = 0; i < kCourseSequence.size(); ++i) {
+        if (!is_cruise(kCourseSequence[i]) && event_id_for(kCourseSequence[i]) == event_id) {
+          activate_event(i, "manual force_event");
+          return;
+        }
+      }
+      RCLCPP_WARN(get_logger(),
+        "Event '%s' exists in course.yaml but is not part of the hardcoded course sequence.",
+        event_id.c_str());
     }
   }
 
@@ -334,41 +379,27 @@ private:
     } catch (const YAML::Exception &) {return std::numeric_limits<double>::infinity();}
   }
 
-  std::optional<std::string> next_sequence_event() const
+  // The next event to watch for is always deterministic now -- whatever immediately follows the
+  // current cruise slot in kCourseSequence -- so this just checks that one candidate's GPS
+  // radius, replacing what used to be a scan over every unsequenced event in the YAML map.
+  std::optional<std::size_t> next_event_index_in_range() const
   {
-    if (sequence_index_ < event_sequence_.size()) {return event_sequence_[sequence_index_];}
-    return std::nullopt;
+    const std::size_t next_index = cruise_index_ + 1U;
+    if (next_index >= kCourseSequence.size()) {return std::nullopt;}
+    const SlotKind kind = kCourseSequence[next_index];
+    const std::string id = event_id_for(kind);
+    const bool accel_event = kind == SlotKind::kAccelObstacle;
+    const double radius = accel_event ?
+      yaml_value<double>(events_[id], "start_radius_m",
+        yaml_value<double>(events_[id], "approach_radius_m", 2.5)) :
+      yaml_value<double>(events_[id], "approach_radius_m", 2.5);
+    return distance_to_event(id) <= radius ? std::optional<std::size_t>(next_index) : std::nullopt;
   }
 
-  bool is_sequenced(const std::string & id) const
+  void activate_event(std::size_t index, const std::string & reason)
   {
-    return std::find(event_sequence_.begin(), event_sequence_.end(), id) != event_sequence_.end();
-  }
-
-  std::optional<std::string> find_event_in_range()
-  {
-    const auto expected = next_sequence_event();
-    std::optional<std::string> best;
-    double best_distance = std::numeric_limits<double>::infinity();
-    for (auto it = events_.begin(); it != events_.end(); ++it) {
-      const std::string id = it->first.as<std::string>();
-      if (is_sequenced(id) && (!expected || id != *expected)) {continue;}
-      const bool accel_event = event_type(id) == "accel_obstacle";
-      const double radius = accel_event ?
-        yaml_value<double>(it->second, "start_radius_m",
-          yaml_value<double>(it->second, "approach_radius_m", 2.5)) :
-        yaml_value<double>(it->second, "approach_radius_m", 2.5);
-      const double distance = distance_to_event(id);
-      if (completed_events_.count(id) > 0U) {
-        if (distance > radius + event_rearm_margin_m_) {completed_events_.erase(id);} else {continue;}
-      }
-      if (distance <= radius && distance < best_distance) {best = id; best_distance = distance;}
-    }
-    return best;
-  }
-
-  void activate_event(const std::string & id, const std::string & reason)
-  {
+    const SlotKind kind = kCourseSequence[index];
+    const std::string id = event_id_for(kind);
     const std::string type = event_type(id);
     if (type == "accel_obstacle") {
       const YAML::Node event = events_[id];
@@ -378,19 +409,16 @@ private:
       }
     }
 
-    active_event_id_ = id;
-    const auto sequence_it = std::find(event_sequence_.begin(), event_sequence_.end(), id);
-    if (sequence_it != event_sequence_.end()) {
-      sequence_index_ = std::max(
-        sequence_index_, static_cast<std::size_t>(sequence_it - event_sequence_.begin()));
-    }
+    active_event_index_ = index;
 
-    if (type == "hill_stop") {set_state(kHillApproach, reason);}
-    else if (type == "accel_obstacle") {
+    if (kind == SlotKind::kHillstop) {set_state(kHillApproach, reason);}
+    else if (kind == SlotKind::kAccelObstacle) {
       obstacle_clear_started_.reset();
       accel_zone_enter_time_s_ = now_s();
       set_state(kAccelObstacleZone, reason);
-    } else {set_state(kApproach, reason);}
+    } else if (kind == SlotKind::kIntersectionA) {set_state(kIntersectionAApproach, reason);}
+    else if (kind == SlotKind::kIntersectionB) {set_state(kIntersectionBApproach, reason);}
+    else if (kind == SlotKind::kIntersectionC) {set_state(kIntersectionCApproach, reason);}
   }
 
   std::string selected_direction(double t) const
@@ -406,8 +434,8 @@ private:
 
   bool signal_allows_entry(double t) const
   {
-    if (!active_event_id_) {return false;}
-    const YAML::Node event = events_[*active_event_id_];
+    if (!active_event_index_) {return false;}
+    const YAML::Node event = events_[event_id_for(kCourseSequence[*active_event_index_])];
     if (!yaml_value<bool>(event, "signal_required", true)) {return true;}
     const std::string signal = current_sign(t);
     const std::string direction = selected_direction(t);
@@ -444,8 +472,9 @@ private:
 
   void enter_bridge()
   {
-    if (!active_event_id_) {reset_to_lane_follow("bridge requested without event"); return;}
-    const YAML::Node event = events_[*active_event_id_];
+    if (!active_event_index_) {reset_to_lane_follow("bridge requested without event"); return;}
+    const SlotKind kind = kCourseSequence[*active_event_index_];
+    const YAML::Node event = events_[event_id_for(kind)];
     const std::string direction = selected_direction(now_s());
     const YAML::Node key_node = event["paths"] ? event["paths"][direction] : YAML::Node();
     if (!key_node) {reset_to_lane_follow("missing event path"); return;}
@@ -456,7 +485,9 @@ private:
     const auto & p = transformed_path_->poses.back().pose.position;
     bridge_end_ = std::make_pair(p.x, p.y);
     bridge_started_ = std::chrono::steady_clock::now();
-    set_state(kTurnBridge, "path=" + key);
+    const char * turn_state = kind == SlotKind::kIntersectionA ? kIntersectionATurnBridge :
+      kind == SlotKind::kIntersectionB ? kIntersectionBTurnBridge : kIntersectionCTurnBridge;
+    set_state(turn_state, "path=" + key);
   }
 
   void publish_bridge_path()
@@ -469,36 +500,35 @@ private:
 
   void begin_hill_stop()
   {
-    if (!active_event_id_) {return;}
+    if (!active_event_index_) {return;}
     hill_stop_duration_current_s_ = yaml_value<double>(
-      events_[*active_event_id_], "stop_duration_s", default_hill_stop_duration_s_);
+      events_[event_id_for(kCourseSequence[*active_event_index_])],
+      "stop_duration_s", default_hill_stop_duration_s_);
     hill_stop_started_ = std::chrono::steady_clock::now();
     set_state(kHillStop, "stop_duration=" + std::to_string(hill_stop_duration_current_s_) + "s");
   }
 
   void complete_active_event(const std::string & reason)
   {
-    if (active_event_id_) {
-      completed_events_.insert(*active_event_id_);
-      const auto expected = next_sequence_event();
-      if (expected && *active_event_id_ == *expected) {
-        ++sequence_index_;
-        RCLCPP_INFO(get_logger(), "Sequence advanced: '%s' complete -> next=%s",
-          active_event_id_->c_str(),
-          next_sequence_event() ? next_sequence_event()->c_str() : "(none)");
-      }
+    if (active_event_index_) {
+      // The event slot's index is always cruise_index_ + 1 (see next_event_index_in_range()), so
+      // the cruise slot right after it is simply the next index.
+      cruise_index_ = std::min(*active_event_index_ + 1U, kCourseSequence.size() - 1U);
+      RCLCPP_INFO(get_logger(), "Sequence advanced: '%s' complete -> next cruise slot is %s",
+        event_id_for(kCourseSequence[*active_event_index_]).c_str(),
+        cruise_state(kCourseSequence[cruise_index_]));
     }
     reset_to_lane_follow(reason);
   }
 
   void reset_to_lane_follow(const std::string & reason)
   {
-    active_event_id_.reset();
+    active_event_index_.reset();
     transformed_path_.reset();
     bridge_end_.reset();
     obstacle_clear_started_.reset();
     accel_zone_enter_time_s_ = -1e9;
-    set_state(kLaneFollow, reason);
+    set_state(cruise_state(kCourseSequence[cruise_index_]), reason);
   }
 
   void publish_state()
@@ -507,7 +537,7 @@ private:
     mode.data = state_;
     mode_pub_->publish(mode);
     std_msgs::msg::String active;
-    active.data = active_event_id_.value_or("");
+    active.data = active_event_index_ ? event_id_for(kCourseSequence[*active_event_index_]) : "";
     active_event_pub_->publish(active);
   }
 
@@ -516,31 +546,43 @@ private:
     const double t = now_s();
     if (!odom_fresh(t)) {
       std_msgs::msg::String stop;
-      stop.data = kStopAtLight;
+      stop.data = kOdomStaleStop;
       mode_pub_->publish(stop);
       return;
     }
 
-    if (state_ == kLaneFollow) {
+    if (!active_event_index_) {
+      // Cruising: publish this slot's lane side and watch the single deterministic next event
+      // (whatever immediately follows this cruise slot in kCourseSequence) for GPS entry.
+      set_state(cruise_state(kCourseSequence[cruise_index_]));
       if (gps_fresh(t)) {
-        const auto event = find_event_in_range();
-        if (event) {activate_event(*event, "entered GPS event radius");}
+        const auto next_index = next_event_index_in_range();
+        if (next_index) {activate_event(*next_index, "entered GPS event radius");}
       }
-    } else if (state_ == kApproach) {
-      if (!active_event_id_) {reset_to_lane_follow("no active event");}
-      else {
-        const YAML::Node event = events_[*active_event_id_];
-        const double radius = yaml_value<double>(event, "approach_radius_m", 2.5);
-        const double distance = distance_to_event(*active_event_id_);
-        if (distance > radius + approach_cancel_margin_m_) {reset_to_lane_follow("left event radius");}
-        else if (stop_line_fresh(t) && stop_line_distance_m_ <= stop_distance_m_) {
-          if (signal_allows_entry(t)) {enter_bridge();}
-          else {set_state(kStopAtLight, "sign=" + current_sign(t));}
+    } else if (state_ == kIntersectionAApproach || state_ == kIntersectionBApproach ||
+      state_ == kIntersectionCApproach)
+    {
+      const std::string id = event_id_for(kCourseSequence[*active_event_index_]);
+      const YAML::Node event = events_[id];
+      const double radius = yaml_value<double>(event, "approach_radius_m", 2.5);
+      const double distance = distance_to_event(id);
+      if (distance > radius + approach_cancel_margin_m_) {reset_to_lane_follow("left event radius");}
+      else if (stop_line_fresh(t) && stop_line_distance_m_ <= stop_distance_m_) {
+        if (signal_allows_entry(t)) {enter_bridge();}
+        else {
+          const SlotKind kind = kCourseSequence[*active_event_index_];
+          const char * stop_state = kind == SlotKind::kIntersectionA ? kIntersectionAStopAtLight :
+            kind == SlotKind::kIntersectionB ? kIntersectionBStopAtLight : kIntersectionCStopAtLight;
+          set_state(stop_state, "sign=" + current_sign(t));
         }
       }
-    } else if (state_ == kStopAtLight) {
+    } else if (state_ == kIntersectionAStopAtLight || state_ == kIntersectionBStopAtLight ||
+      state_ == kIntersectionCStopAtLight)
+    {
       if (signal_allows_entry(t)) {enter_bridge();}
-    } else if (state_ == kTurnBridge) {
+    } else if (state_ == kIntersectionATurnBridge || state_ == kIntersectionBTurnBridge ||
+      state_ == kIntersectionCTurnBridge)
+    {
       publish_bridge_path();
       const double elapsed = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - bridge_started_).count();
@@ -548,72 +590,65 @@ private:
         std::hypot(current_pose_->x - bridge_end_->first, current_pose_->y - bridge_end_->second) <=
         bridge_exit_tolerance_m_) {complete_active_event("event path completed");}
     } else if (state_ == kHillApproach) {
-      if (!active_event_id_) {reset_to_lane_follow("no active hill event");}
-      else {
-        const YAML::Node event = events_[*active_event_id_];
-        const double radius = yaml_value<double>(event, "approach_radius_m", 2.5);
-        const double distance = distance_to_event(*active_event_id_);
-        if (distance > radius + approach_cancel_margin_m_) {reset_to_lane_follow("left hill event radius");}
-        else if (stop_line_fresh(t) && stop_line_distance_m_ <= stop_distance_m_) {begin_hill_stop();}
-      }
+      const std::string id = event_id_for(kCourseSequence[*active_event_index_]);
+      const YAML::Node event = events_[id];
+      const double radius = yaml_value<double>(event, "approach_radius_m", 2.5);
+      const double distance = distance_to_event(id);
+      if (distance > radius + approach_cancel_margin_m_) {reset_to_lane_follow("left hill event radius");}
+      else if (stop_line_fresh(t) && stop_line_distance_m_ <= stop_distance_m_) {begin_hill_stop();}
     } else if (state_ == kHillStop) {
       const double elapsed = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - hill_stop_started_).count();
       if (elapsed >= hill_stop_duration_current_s_) {complete_active_event("hill stop completed");}
     } else if (state_ == kAccelObstacleZone) {
-      if (!active_event_id_) {
-        reset_to_lane_follow("invalid accel obstacle zone");
-      } else {
-        const YAML::Node event = events_[*active_event_id_];
-        const double stop_distance = yaml_value<double>(
-          event, "obstacle_stop_distance_m", default_obstacle_stop_distance_m_);
-        const double end_radius = yaml_value<double>(event, "end_radius_m", 2.5);
-        const double end_distance = distance_to_accel_end(*active_event_id_);
-        const bool scan_fresh =
-          scan_received_ && (t - scan_time_s_ <= scan_timeout_s_);
-        const double time_in_zone = t - accel_zone_enter_time_s_;
+      const std::string id = event_id_for(kCourseSequence[*active_event_index_]);
+      const YAML::Node event = events_[id];
+      const double stop_distance = yaml_value<double>(
+        event, "obstacle_stop_distance_m", default_obstacle_stop_distance_m_);
+      const double end_radius = yaml_value<double>(event, "end_radius_m", 2.5);
+      const double end_distance = distance_to_accel_end(id);
+      const bool scan_fresh =
+        scan_received_ && (t - scan_time_s_ <= scan_timeout_s_);
+      const double time_in_zone = t - accel_zone_enter_time_s_;
 
-        if (end_distance <= end_radius) {
-          complete_active_event("accel obstacle zone end reached");
-        } else if (!scan_fresh) {
-          if (time_in_zone >= scan_startup_grace_s_) {
-            if (stop_on_lidar_timeout_) {
-              set_state(kObstacleStop, "lidar timeout");
-            } else {
-              RCLCPP_WARN_THROTTLE(
-                get_logger(), *get_clock(), 2000,
-                "Lidar data is stale, but stop_on_lidar_timeout=false. "
-                "scan_received=%d, scan_age=%.3f s, timeout=%.3f s",
-                scan_received_,
-                scan_received_ ? (t - scan_time_s_) : -1.0,
-                scan_timeout_s_);
-            }
+      if (end_distance <= end_radius) {
+        complete_active_event("accel obstacle zone end reached");
+      } else if (!scan_fresh) {
+        if (time_in_zone >= scan_startup_grace_s_) {
+          if (stop_on_lidar_timeout_) {
+            set_state(kObstacleStop, "lidar timeout");
+          } else {
+            RCLCPP_WARN_THROTTLE(
+              get_logger(), *get_clock(), 2000,
+              "Lidar data is stale, but stop_on_lidar_timeout=false. "
+              "scan_received=%d, scan_age=%.3f s, timeout=%.3f s",
+              scan_received_,
+              scan_received_ ? (t - scan_time_s_) : -1.0,
+              scan_timeout_s_);
           }
-        } else if (front_obstacle_distance_m_ <= stop_distance) {
-          obstacle_clear_started_.reset();
-          set_state(kObstacleStop, "front obstacle detected");
         }
+      } else if (front_obstacle_distance_m_ <= stop_distance) {
+        obstacle_clear_started_.reset();
+        set_state(kObstacleStop, "front obstacle detected");
       }
     } else if (state_ == kObstacleStop) {
-      if (!active_event_id_) {reset_to_lane_follow("no active obstacle event");}
-      else {
-        const YAML::Node event = events_[*active_event_id_];
-        const double clear_distance = yaml_value<double>(
-          event, "obstacle_clear_distance_m", default_obstacle_clear_distance_m_);
-        const double hold_s = yaml_value<double>(
-          event, "obstacle_clear_hold_s", default_obstacle_clear_hold_s_);
-        const bool scan_fresh =
-          scan_received_ && (t - scan_time_s_ <= scan_timeout_s_);
-        if (scan_fresh && front_obstacle_distance_m_ >= clear_distance) {
-          if (!obstacle_clear_started_) {obstacle_clear_started_ = std::chrono::steady_clock::now();}
-          const double clear_elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - *obstacle_clear_started_).count();
-          if (clear_elapsed >= hold_s) {
-            obstacle_clear_started_.reset();
-            set_state(kAccelObstacleZone, "obstacle cleared");
-          }
-        } else {obstacle_clear_started_.reset();}
-      }
+      const std::string id = event_id_for(kCourseSequence[*active_event_index_]);
+      const YAML::Node event = events_[id];
+      const double clear_distance = yaml_value<double>(
+        event, "obstacle_clear_distance_m", default_obstacle_clear_distance_m_);
+      const double hold_s = yaml_value<double>(
+        event, "obstacle_clear_hold_s", default_obstacle_clear_hold_s_);
+      const bool scan_fresh =
+        scan_received_ && (t - scan_time_s_ <= scan_timeout_s_);
+      if (scan_fresh && front_obstacle_distance_m_ >= clear_distance) {
+        if (!obstacle_clear_started_) {obstacle_clear_started_ = std::chrono::steady_clock::now();}
+        const double clear_elapsed = std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - *obstacle_clear_started_).count();
+        if (clear_elapsed >= hold_s) {
+          obstacle_clear_started_.reset();
+          set_state(kAccelObstacleZone, "obstacle cleared");
+        }
+      } else {obstacle_clear_started_.reset();}
     }
 
     publish_state();
@@ -628,7 +663,6 @@ private:
   double stop_distance_m_{0.5};
   double bridge_exit_tolerance_m_{0.5};
   double minimum_bridge_time_s_{1.0};
-  double event_rearm_margin_m_{3.0};
   double approach_cancel_margin_m_{1.5};
   double default_hill_stop_duration_s_{5.0};
   double hill_stop_duration_current_s_{5.0};
@@ -649,16 +683,14 @@ private:
 
   YAML::Node events_;
   YAML::Node paths_;
-  std::vector<std::string> event_sequence_;
-  std::string state_{kLaneFollow};
-  std::optional<std::string> active_event_id_;
+  std::string state_{kLeftLaneFollow};
+  std::size_t cruise_index_{0};
+  std::optional<std::size_t> active_event_index_;
   std::optional<nav_msgs::msg::Path> transformed_path_;
   std::optional<std::pair<double, double>> bridge_end_;
   std::chrono::steady_clock::time_point bridge_started_{};
   std::chrono::steady_clock::time_point hill_stop_started_{};
   std::optional<std::chrono::steady_clock::time_point> obstacle_clear_started_;
-  std::set<std::string> completed_events_;
-  std::size_t sequence_index_{0};
 
   std::optional<GpsPoint> current_gps_;
   std::optional<Pose2D> current_pose_;
