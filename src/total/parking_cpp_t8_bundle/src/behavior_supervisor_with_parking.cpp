@@ -62,15 +62,43 @@ constexpr const char * kOdomStaleStop = "STOP_AT_LIGHT";
 // state, so there's one place, not two, that says "what's next."
 enum class SlotKind
 {
-  kCruiseLeft, kCruiseRight, kHillstop, kIntersectionA, kIntersectionB, kIntersectionC,
-  kAccelObstacle
+  kCruiseLeft,
+  kCruiseRight,
+  kHillstop, 
+  kLaneChange1, // Left lane -> Right lane
+  kLaneChange2, // Right lane -> Left lane
+  kIntersectionA, 
+  kIntersectionB, 
+  kLaneChange3, // Left lane -> Right lane
+  kIntersectionC,
+  kAccelObstacle,
+  kLaneChange4, // Left lane -> Right lane
+  kLaneChange5, // Left lane -> Right lane
 };
 
 const std::vector<SlotKind> kCourseSequence = {
-  SlotKind::kCruiseLeft, SlotKind::kHillstop, SlotKind::kCruiseLeft, SlotKind::kIntersectionA,
-  SlotKind::kCruiseRight, SlotKind::kIntersectionB, SlotKind::kCruiseLeft,
-  SlotKind::kIntersectionC, SlotKind::kCruiseLeft, SlotKind::kAccelObstacle,
-  SlotKind::kCruiseLeft};
+  SlotKind::kCruiseLeft, 
+  SlotKind::kHillstop, 
+  SlotKind::kCruiseLeft, 
+  SlotKind::kLaneChange1,
+  SlotKind::kCruiseRight,
+  SlotKind::kLaneChange2,
+  SlotKind::kCruiseLeft, 
+  SlotKind::kIntersectionA,
+  SlotKind::kCruiseRight, 
+  SlotKind::kIntersectionB, 
+  SlotKind::kCruiseLeft,
+  SlotKind::kLaneChange3,
+  SlotKind::kCruiseRight,
+  SlotKind::kIntersectionC, 
+  SlotKind::kCruiseRight,
+  SlotKind::kAccelObstacle,
+  SlotKind::kCruiseRight,
+  SlotKind::kLaneChange4,
+  SlotKind::kCruiseLeft,
+  SlotKind::kLaneChange5,
+  SlotKind::kCruiseRight
+};
 
 // Maps a course slot to its course.yaml event id, i.e. the key under `events:` (and, for
 // intersections, transitively under `paths:`) that carries that slot's GPS/radius/path data.
@@ -83,6 +111,11 @@ std::string event_id_for(SlotKind kind)
     case SlotKind::kIntersectionB: return "intersection_B";
     case SlotKind::kIntersectionC: return "intersection_C";
     case SlotKind::kAccelObstacle: return "accel_A";
+    case SlotKind::kLaneChange1: return "lane_change_1";
+    case SlotKind::kLaneChange2: return "lane_change_2";
+    case SlotKind::kLaneChange3: return "lane_change_3";
+    case SlotKind::kLaneChange4: return "lane_change_4";
+    case SlotKind::kLaneChange5: return "lane_change_5";
     default: return "";
   }
 }
@@ -419,6 +452,15 @@ private:
     } else if (kind == SlotKind::kIntersectionA) {set_state(kIntersectionAApproach, reason);}
     else if (kind == SlotKind::kIntersectionB) {set_state(kIntersectionBApproach, reason);}
     else if (kind == SlotKind::kIntersectionC) {set_state(kIntersectionCApproach, reason);}
+    else if (kind == SlotKind::kLaneChange1 || kind == SlotKind::kLaneChange3 || kind == SlotKind::kLaneChange5) {
+      complete_active_event(reason);
+      set_state(kRightLaneFollow, reason);
+    }
+    else if (kind == SlotKind::kLaneChange2 || kind == SlotKind::kLaneChange4) {
+      complete_active_event(reason);
+      set_state(kLeftLaneFollow, reason);
+    }
+    else {RCLCPP_WARN(get_logger(), "Unknown event kind %d", static_cast<int>(kind));}
   }
 
   std::string selected_direction(double t) const
