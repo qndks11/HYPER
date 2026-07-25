@@ -72,11 +72,11 @@ enum class SlotKind
   kLaneChange2, // Right lane -> Left lane
   kIntersectionA, 
   kIntersectionB, 
-  kLaneChange3, // Left lane -> Right lane
+  kReverseParking,
   kIntersectionC,
   kAccelObstacle,
+  kLaneChange3, // Right lane ->  Left lane
   kLaneChange4, // Left lane -> Right lane
-  kLaneChange5, // Left lane -> Right lane
   kEnd,
 };
 
@@ -91,16 +91,16 @@ const std::vector<SlotKind> kCourseSequence = {
   SlotKind::kIntersectionA,
   SlotKind::kCruiseRight, 
   SlotKind::kIntersectionB, 
-  SlotKind::kCruiseLeft,
-  SlotKind::kLaneChange3,
+  SlotKind::kCruiseRight,
+  SlotKind::kReverseParking,
   SlotKind::kCruiseRight,
   SlotKind::kIntersectionC, 
   SlotKind::kCruiseRight,
   SlotKind::kAccelObstacle,
   SlotKind::kCruiseRight,
-  SlotKind::kLaneChange4,
+  SlotKind::kLaneChange3,
   SlotKind::kCruiseLeft,
-  SlotKind::kLaneChange5,
+  SlotKind::kLaneChange4,
   SlotKind::kCruiseRight,
   SlotKind::kEnd
 };
@@ -120,7 +120,6 @@ std::string event_id_for(SlotKind kind)
     case SlotKind::kLaneChange2: return "lane_change_2";
     case SlotKind::kLaneChange3: return "lane_change_3";
     case SlotKind::kLaneChange4: return "lane_change_4";
-    case SlotKind::kLaneChange5: return "lane_change_5";
     case SlotKind::kEnd: return "end";
     default: return "";
   }
@@ -458,11 +457,11 @@ private:
     } else if (kind == SlotKind::kIntersectionA) {set_state(kIntersectionAApproach, reason);}
     else if (kind == SlotKind::kIntersectionB) {set_state(kIntersectionBApproach, reason);}
     else if (kind == SlotKind::kIntersectionC) {set_state(kIntersectionCApproach, reason);}
-    else if (kind == SlotKind::kLaneChange1 || kind == SlotKind::kLaneChange3 || kind == SlotKind::kLaneChange5) {
+    else if (kind == SlotKind::kLaneChange1 || kind == SlotKind::kLaneChange4) {
       complete_active_event(reason);
       set_state(kRightLaneFollow, reason);
     }
-    else if (kind == SlotKind::kLaneChange2 || kind == SlotKind::kLaneChange4) {
+    else if (kind == SlotKind::kLaneChange2 || kind == SlotKind::kLaneChange3) {
       complete_active_event(reason);
       set_state(kLeftLaneFollow, reason);
     }

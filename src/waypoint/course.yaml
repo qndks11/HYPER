@@ -4,6 +4,28 @@ coordinate_convention:
   y: left
   yaw: relative_radians
 events:
+  slope_A:
+    event_type: hill_stop
+    latitude: 37.56648791752855
+    longitude: 126.97845149641721
+    approach_radius_m: 5.0
+    stop_duration_s: 5.0
+    signal_required: false
+    paths: {}
+  lane_change_1:
+    event_type: lane_change
+    approach_radius_m: 4
+    signal_required: true
+    paths: {}
+    latitude: 37.56670557533581
+    longitude: 126.97815437863801
+  lane_change_2:
+    event_type: lane_change
+    approach_radius_m: 4
+    signal_required: true
+    paths: {}
+    latitude: 37.56662524741978
+    longitude: 126.9782374658231
   intersection_A:
     event_type: intersection
     approach_radius_m: 5.0
@@ -28,14 +50,6 @@ events:
     signal_required: true
     paths:
       left: intersection_C_left
-  slope_A:
-    event_type: hill_stop
-    latitude: 37.56648791752855
-    longitude: 126.97845149641721
-    approach_radius_m: 5.0
-    stop_duration_s: 5.0
-    signal_required: false
-    paths: {}
   accel_A:
     event_type: accel_obstacle
     start:
@@ -53,35 +67,14 @@ events:
     end:
       latitude: 37.56621402232966
       longitude: 126.97755349962085
-  lane_change_1:
-    event_type: lane_change
-    approach_radius_m: 4
-    signal_required: true
-    paths: {}
-    latitude: 37.56670557533581
-    longitude: 126.97815437863801
-  lane_change_2:
-    event_type: lane_change
-    approach_radius_m: 4
-    signal_required: true
-    paths: {}
-    latitude: 37.56662524741978
-    longitude: 126.9782374658231
   lane_change_3:
-    event_type: lane_change
-    approach_radius_m: 4
-    signal_required: true
-    paths: {}
-    latitude: 37.56613518462459
-    longitude: 126.97797308297751
-  lane_change_4:
     event_type: lane_change
     approach_radius_m: 4
     signal_required: true
     paths: {}
     latitude: 37.56609514819766
     longitude: 126.97783283163042
-  lane_change_5:
+  lane_change_4:
     event_type: lane_change
     approach_radius_m: 4
     signal_required: true
