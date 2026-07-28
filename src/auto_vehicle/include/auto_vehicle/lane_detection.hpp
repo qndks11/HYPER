@@ -1,6 +1,7 @@
 #ifndef AUTO_VEHICLE__LANE_DETECTION_HPP_
 #define AUTO_VEHICLE__LANE_DETECTION_HPP_
 
+#include <string>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
@@ -58,6 +59,40 @@ private:
    * @param msg Incoming camera image.
    */
   void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+
+  /**
+   * @brief Same processing as image_callback(), for the rear camera -- used while backing into a
+   * parking spot to track the T-zone/parallel bay's side lines (yellow_mask + walk_lane_chain +
+   * fit_lane, same as the front) and the bay's back wall as a stop-line (white_mask +
+   * find_stopline). Publishes to /lane/rear_center and /stopline/rear_detection instead of the
+   * front topics, and draws its own debug window rather than sharing the front's.
+   *
+   * @param msg Incoming rear camera image.
+   */
+  void rear_image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+
+  /**
+   * @brief The full per-frame pipeline shared by image_callback() and rear_image_callback():
+   * bird's-eye warp, lane and stop-line detection, message publish, and debug view. Factored out
+   * so both cameras run the identical algorithm against whichever publishers/window belong to
+   * them, rather than duplicating this body per camera.
+   *
+   * @param image Raw camera frame (BGR8).
+   * @param lane_publisher Where to publish this camera's lane/center result.
+   * @param stopline_publisher Where to publish this camera's stop-line result.
+   * @param window_name Debug window title for this camera's view.
+   * @param lane_center_bias_m Distance from a single detected line to the target the offset is
+   * measured against -- see fit_lane()'s `center_bias_m`. The front camera passes
+   * kLaneCenterOffsetBiasM (mid-lane, assuming a same-width paired line); the rear camera passes
+   * kRearParkingLineStandoffM (a fixed standoff from the parking bay's one side line, not a
+   * lane-center assumption).
+   */
+  void process_and_publish(
+    const cv::Mat & image,
+    const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & lane_publisher,
+    const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & stopline_publisher,
+    const std::string & window_name,
+    double lane_center_bias_m);
 
   /**
    * @brief Builds the perspective transform mapping the trapezoidal ROI (sampled from the
@@ -132,19 +167,22 @@ private:
    * least squares formulation (as opposed to regressing x on y or y on x) has no axis it breaks
    * down along, so it stays well-conditioned for a lane running in any direction, including
    * near-horizontal. A straight-line model has no curvature to derive, so curvature_radius_px is
-   * always a large sentinel value. The lane-center bias (kLaneCenterOffsetBiasM) is applied with
-   * a sign matching `side`: the center sits on the vehicle's side of a right lane line, but on
-   * the far side of a left lane line.
+   * always a large sentinel value. `center_bias_m` is applied with a sign matching `side`: the
+   * target sits on the vehicle's side of a right line, but on the far side of a left line -- so
+   * for the front camera's paired-lane assumption this places the target at the lane's center,
+   * while for the rear camera's single parking-bay line it places the target at a fixed standoff
+   * from it. See kLaneCenterOffsetBiasM / kRearParkingLineStandoffM at the call sites.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
    * @param origin The bottom-center point the chain was anchored to.
    * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
    * @param side Which lane line `points` traces, so the center-offset bias is signed correctly.
+   * @param center_bias_m Distance from the detected line to the target, signed per `side`.
    * @return The lane fit result; `valid` is false if there are too few points.
    */
   LaneFitResult fit_lane(
     const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
-    LaneSide side) const;
+    LaneSide side, double center_bias_m) const;
 
   /**
    * @brief Finds the stop-line bar in a white mask, if any.
@@ -172,6 +210,10 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_publisher_;
+
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr rear_image_subscriber_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_lane_center_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_stopline_publisher_;
 
   std::vector<cv::Point> prev_left_points_;
   std::vector<cv::Point> prev_right_points_;

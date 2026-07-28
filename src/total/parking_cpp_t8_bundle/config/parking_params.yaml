@@ -38,6 +38,24 @@ controller:
     lookahead: 1.0
     input_timeout: 0.30
 
+    # 주차: 진입경로(전진)/기동경로(전후진) 속도 및 후진 추종 파라미터
+    parking_approach_speed: 1.5
+    parking_forward_speed: 0.25
+    parking_reverse_speed: 1.0
+    parking_lookahead: 0.60
+    gear_change_pause_s: 0.6
+
+    # 후진 중 후방카메라 차선 인식을 주 조향으로 사용 (spot_path는 유효한 인식이 없을 때만 폴백).
+    # offset/heading sign은 후방카메라가 전방 대비 180도 돌아있어서 아직 실측 검증 안 됨 --
+    # LaneDetectionRear 창 보면서 반대로 돌면 -1.0<->1.0 뒤집을 것.
+    parking_rear_offset_sign: -1.0
+    parking_rear_heading_sign: 1.0
+    # 인식 시작 시 조향이 갑자기 안 튀도록 이 시간(초) 동안 서서히 전환
+    parking_rear_blend_time_s: 0.3
+    # 이 거리(m)보다 먼 오프셋이 감지되면 오검출로 보고 무시 (spot_path로 폴백)
+    # 목표 offset이 이제 차체 반폭 기준 0.55m 지점이라, 그보다 여유 있게 잡음
+    parking_rear_offset_plausible_max_m: 1.0
+
 behavior_supervisor:
   ros__parameters:
     event_path_yaml: ~/HYPER/src/waypoint/course.yaml
@@ -68,3 +86,11 @@ behavior_supervisor:
     obstacle_clear_distance_m: 2.5
     obstacle_half_width_m: 0.55
     obstacle_clear_hold_s: 1.0
+
+    # 주차: entry_path 도착 판정(위치/헤딩), spot_path 도착 판정, 도착 후 정차 시간
+    parking_entry_tolerance_m: 0.35
+    parking_entry_heading_tolerance_deg: 15.0
+    parking_exit_tolerance_m: 0.25
+    parking_hold_duration_s: 0.0
+    # 후방카메라로 정지선(박스 뒷벽)까지 거리가 이 이하면 도착으로 판정 (position 기반 판정보다 우선)
+    parking_rear_stop_distance_m: 0.12

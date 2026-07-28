@@ -35,11 +35,26 @@ event_path_recorder_gps.py
   status
   save
 
+  # 주차 (T존/평행주차)
+  mark_parking:<event_id>:<t_zone|parallel>
+  record_start:<event_id>:entry       # 차선 없는 구간을 건너 주차 시작점까지 (전진만)
+  record_end
+  record_start:<event_id>:spot        # 주차 시작점 -> 실제 주차 위치 (전후진 가능)
+  set_gear:<forward|reverse>          # spot 기록 중 기어 전환 시점마다 호출
+  record_end
+  set_hold_duration:<event_id>:<seconds>
+
 예:
   record_start:intersection_A:straight
   mark_stopline:slope_A
   set_radius:slope_A:2.5
   set_stop_duration:slope_A:5.0
+  mark_parking:parking_t1:t_zone
+  record_start:parking_t1:entry
+  record_end
+  record_start:parking_t1:spot
+  set_gear:reverse
+  record_end
   save
 """
 
@@ -57,6 +72,9 @@ from std_msgs.msg import String
 
 
 DIRECTIONS = {'straight', 'left', 'right'}
+PARKING_STYLES = {'t_zone': 't_zone_parking', 'parallel': 'parallel_parking'}
+PARKING_KEYS = {'entry', 'spot'}
+GEARS = {'forward': 'forward', 'reverse': 'reverse', 'back': 'reverse'}
 
 
 def normalize_angle(angle):
@@ -190,7 +208,7 @@ def calculate_yaws(points):
     return yaws
 
 
-def process_path(raw_points, smooth_window, spacing):
+def process_path(raw_points, smooth_window, spacing, fix_origin=True):
     points = remove_duplicates(raw_points)
 
     if len(points) == 0:
@@ -200,8 +218,11 @@ def process_path(raw_points, smooth_window, spacing):
     points = resample_xy(points, spacing)
     points[:, 2] = calculate_yaws(points)
 
-    # 기록 시작 자세를 항상 로컬 원점으로 고정한다.
-    points[0, :] = [0.0, 0.0, 0.0]
+    if fix_origin:
+        # 기록 시작 자세를 항상 로컬 원점으로 고정한다. 주차 spot_path의 두 번째 이후 기어
+        # 구간에는 적용하지 않는다 -- 그 구간의 첫 점은 진짜 로컬 원점이 아니라 이전 구간이
+        # 끝난 실제 위치이므로, 여기서 [0,0,0]으로 밀어버리면 구간 사이가 끊어진다.
+        points[0, :] = [0.0, 0.0, 0.0]
 
     return [
         {
@@ -272,6 +293,16 @@ class EventPathRecorderGps(Node):
         self.raw_points = []
         self.last_local_xy = None
 
+        # 주차 entry/spot 기록 상태. entry는 위 raw_points와 같은 단일 구간 방식이지만
+        # event_type을 덮어쓰지 않기 위해 별도 경로로 처리한다. spot은 기어 전환마다
+        # 새 구간을 시작하는 다중 구간 방식이라 상태를 통째로 분리했다.
+        self.parking_recording_event = None
+        self.parking_recording_key = None  # 'entry' or 'spot'
+        self.parking_origin_pose = None
+        self.parking_last_local_xy = None
+        self.parking_raw_points = []
+        self.parking_segments = []  # [{'gear': 'forward'|'reverse', 'points': [[x,y,yaw], ...]}]
+        self.parking_current_gear = 'forward'
 
         self.create_subscription(
             Odometry,
@@ -355,24 +386,43 @@ class EventPathRecorderGps(Node):
         self.current_odom = (x, y, yaw)
         self.t_odom = self.now_s()
 
-        if self.recording_path_key is None:
-            return
+        if self.recording_path_key is not None:
+            local = self.map_to_local(x, y, yaw)
 
-        local = self.map_to_local(x, y, yaw)
+            if self.last_local_xy is None:
+                self.raw_points.append(local)
+                self.last_local_xy = (local[0], local[1])
+            else:
+                distance = math.hypot(
+                    local[0] - self.last_local_xy[0],
+                    local[1] - self.last_local_xy[1],
+                )
 
-        if self.last_local_xy is None:
-            self.raw_points.append(local)
-            self.last_local_xy = (local[0], local[1])
-            return
+                if distance >= self.min_dist:
+                    self.raw_points.append(local)
+                    self.last_local_xy = (local[0], local[1])
 
-        distance = math.hypot(
-            local[0] - self.last_local_xy[0],
-            local[1] - self.last_local_xy[1],
-        )
+        if self.parking_recording_key is not None:
+            local = self.pose_to_local(self.parking_origin_pose, x, y, yaw)
 
-        if distance >= self.min_dist:
-            self.raw_points.append(local)
-            self.last_local_xy = (local[0], local[1])
+            if self.parking_last_local_xy is None:
+                self._append_parking_point(local)
+                self.parking_last_local_xy = (local[0], local[1])
+            else:
+                distance = math.hypot(
+                    local[0] - self.parking_last_local_xy[0],
+                    local[1] - self.parking_last_local_xy[1],
+                )
+
+                if distance >= self.min_dist:
+                    self._append_parking_point(local)
+                    self.parking_last_local_xy = (local[0], local[1])
+
+    def _append_parking_point(self, local):
+        if self.parking_recording_key == 'entry':
+            self.parking_raw_points.append(local)
+        else:
+            self.parking_segments[-1]['points'].append(local)
 
     @staticmethod
     def pose_to_local(origin_pose, x, y, yaw):
@@ -396,7 +446,10 @@ class EventPathRecorderGps(Node):
         command = str(msg.data).strip()
 
         if command == 'record_end':
-            self.end_recording()
+            if self.parking_recording_key is not None:
+                self.end_recording_parking()
+            else:
+                self.end_recording()
             return
 
         if command == 'save':
@@ -416,8 +469,16 @@ class EventPathRecorderGps(Node):
         if not parts:
             return
 
-        if parts[0] == 'record_start' and len(parts) == 3:
+        if parts[0] == 'record_start' and len(parts) == 3 and parts[2] in PARKING_KEYS:
+            self.start_recording_parking(parts[1], parts[2])
+        elif parts[0] == 'record_start' and len(parts) == 3:
             self.start_recording(parts[1], parts[2])
+        elif parts[0] == 'mark_parking' and len(parts) == 3:
+            self.mark_parking(parts[1], parts[2])
+        elif parts[0] == 'set_gear' and len(parts) == 2:
+            self.set_gear(parts[1])
+        elif parts[0] == 'set_hold_duration' and len(parts) == 3:
+            self.set_hold_duration(parts[1], parts[2])
         elif parts[0] == 'mark_event' and len(parts) == 2:
             self.mark_event(parts[1])
         elif parts[0] == 'set_radius' and len(parts) == 3:
@@ -709,6 +770,62 @@ class EventPathRecorderGps(Node):
             f"'{event_id}' 정지 시간={duration:.2f}s"
         )
 
+    def mark_parking(self, event_id, style_text):
+        style = style_text.lower()
+        if style not in PARKING_STYLES:
+            self.get_logger().warn(
+                f"주차 스타일은 {sorted(PARKING_STYLES)} 중 하나여야 합니다."
+            )
+            return
+
+        if not self.gps_fresh():
+            self.get_logger().warn('신선한 /gps/fix가 없습니다.')
+            return
+
+        latitude, longitude = self.current_gps
+        previous = self.events.get(event_id) or {}
+
+        event = {
+            'event_type': PARKING_STYLES[style],
+            'latitude': float(latitude),
+            'longitude': float(longitude),
+            'approach_radius_m': float(previous.get('approach_radius_m', self.default_radius)),
+            'signal_required': False,
+            'hold_duration_s': float(previous.get('hold_duration_s', 0.0)),
+            'paths': {},
+        }
+        if previous.get('entry_path'):
+            event['entry_path'] = previous['entry_path']
+        if previous.get('spot_path'):
+            event['spot_path'] = previous['spot_path']
+
+        self.events[event_id] = event
+        self.get_logger().info(
+            f"주차 이벤트 등록: '{event_id}' style={style} "
+            f'({latitude:.8f}, {longitude:.8f})'
+        )
+
+    def set_hold_duration(self, event_id, duration_text):
+        try:
+            duration = float(duration_text)
+        except ValueError:
+            self.get_logger().warn('정차 시간은 숫자여야 합니다.')
+            return
+
+        if duration < 0.0:
+            self.get_logger().warn('정차 시간은 0 이상이어야 합니다.')
+            return
+
+        event = self.events.get(event_id)
+        if not event or event.get('event_type') not in PARKING_STYLES.values():
+            self.get_logger().warn(
+                f"'{event_id}'는 주차 이벤트가 아닙니다. mark_parking을 먼저 실행하세요."
+            )
+            return
+
+        event['hold_duration_s'] = duration
+        self.get_logger().info(f"'{event_id}' 정차 시간={duration:.2f}s")
+
     def start_recording(self, event_id, direction):
         direction = direction.lower()
 
@@ -797,6 +914,133 @@ class EventPathRecorderGps(Node):
         self.raw_points = []
         self.last_local_xy = None
 
+    def start_recording_parking(self, event_id, key):
+        if event_id not in self.events:
+            self.get_logger().warn(
+                f"'{event_id}'가 없습니다. mark_parking을 먼저 실행하세요."
+            )
+            return
+
+        if self.events[event_id].get('event_type') not in PARKING_STYLES.values():
+            self.get_logger().warn(
+                f"'{event_id}'는 주차 이벤트가 아닙니다. mark_parking을 먼저 실행하세요."
+            )
+            return
+
+        if self.recording_path_key is not None or self.parking_recording_key is not None:
+            self.get_logger().warn('이미 다른 경로를 기록 중입니다.')
+            return
+
+        if not self.odom_fresh():
+            self.get_logger().warn('신선한 /odometry/filtered_map이 없습니다.')
+            return
+
+        self.parking_recording_event = event_id
+        self.parking_recording_key = key
+        self.parking_origin_pose = self.current_odom
+        self.parking_last_local_xy = (0.0, 0.0)
+
+        if key == 'entry':
+            self.parking_raw_points = [[0.0, 0.0, 0.0]]
+            self.get_logger().info(
+                f"주차 진입경로 기록 시작: event='{event_id}'\n"
+                '이 위치가 실행 시 트리거 기준점이 됩니다 (차선 없는 구간만 기록, 전진 전용).'
+            )
+        else:
+            # T존은 대회 규정상 기동 구간에서 전진을 안 쓰므로 처음부터 reverse로 시작한다
+            # (매번 set_gear:reverse를 안 눌러도 되고, forward/reverse 시작점이 같은 위치에
+            # 찍혀서 기어 판정이 애매해지는 것도 방지). 평행주차는 기존대로 forward로 시작.
+            default_gear = 'reverse' if self.events[event_id]['event_type'] == 't_zone_parking' else 'forward'
+            self.parking_current_gear = default_gear
+            self.parking_segments = [{'gear': default_gear, 'points': [[0.0, 0.0, 0.0]]}]
+            self.get_logger().info(
+                f"주차 기동경로 기록 시작: event='{event_id}' (기본 기어={default_gear})\n"
+                'set_gear:forward/reverse로 전후진 구간을 나누세요.'
+            )
+
+    def set_gear(self, gear_text):
+        gear = GEARS.get(gear_text.lower())
+        if gear is None:
+            self.get_logger().warn('기어는 forward 또는 reverse 여야 합니다.')
+            return
+
+        if self.parking_recording_key != 'spot':
+            self.get_logger().warn('spot_path 기록 중에만 set_gear를 사용할 수 있습니다.')
+            return
+
+        if gear == self.parking_current_gear:
+            return
+
+        if not self.odom_fresh():
+            self.get_logger().warn('신선한 /odometry/filtered_map이 없어 구간을 나눌 수 없습니다.')
+            return
+
+        x, y, yaw = self.current_odom
+        seed = self.pose_to_local(self.parking_origin_pose, x, y, yaw)
+        self.parking_current_gear = gear
+        self.parking_segments.append({'gear': gear, 'points': [seed]})
+        self.parking_last_local_xy = (seed[0], seed[1])
+        self.get_logger().info(f'기어 전환: {gear} (구간 {len(self.parking_segments)})')
+
+    def end_recording_parking(self):
+        if self.parking_recording_key is None:
+            self.get_logger().warn('기록 중인 주차 경로가 없습니다.')
+            return
+
+        event_id = self.parking_recording_event
+        key = self.parking_recording_key
+
+        if self.odom_fresh():
+            x, y, yaw = self.current_odom
+            final_point = self.pose_to_local(self.parking_origin_pose, x, y, yaw)
+            if key == 'entry':
+                if math.hypot(
+                    final_point[0] - self.parking_last_local_xy[0],
+                    final_point[1] - self.parking_last_local_xy[1],
+                ) > 1e-3:
+                    self.parking_raw_points.append(final_point)
+            else:
+                last_points = self.parking_segments[-1]['points']
+                if math.hypot(
+                    final_point[0] - last_points[-1][0],
+                    final_point[1] - last_points[-1][1],
+                ) > 1e-3:
+                    last_points.append(final_point)
+
+        path_key = f'{event_id}_{key}'
+
+        if key == 'entry':
+            processed = process_path(self.parking_raw_points, self.smooth_window, self.resample_ds)
+            if len(processed) < 2:
+                self.get_logger().warn(f"'{path_key}' 점이 너무 적어 저장하지 않았습니다.")
+            else:
+                self.paths[path_key] = processed
+                self.events[event_id]['entry_path'] = path_key
+                self.get_logger().info(f"기록 완료: '{path_key}', points={len(processed)}")
+        else:
+            combined = []
+            for index, segment in enumerate(self.parking_segments):
+                processed = process_path(
+                    segment['points'], self.smooth_window, self.resample_ds, fix_origin=(index == 0))
+                for point in processed:
+                    point['gear'] = segment['gear']
+                    combined.append(point)
+            if len(combined) < 2:
+                self.get_logger().warn(f"'{path_key}' 점이 너무 적어 저장하지 않았습니다.")
+            else:
+                self.paths[path_key] = combined
+                self.events[event_id]['spot_path'] = path_key
+                self.get_logger().info(
+                    f"기록 완료: '{path_key}', points={len(combined)}, "
+                    f"segments={len(self.parking_segments)}"
+                )
+
+        self.parking_recording_event = None
+        self.parking_recording_key = None
+        self.parking_origin_pose = None
+        self.parking_raw_points = []
+        self.parking_segments = []
+        self.parking_last_local_xy = None
 
     def delete_path(self, event_id, direction):
         event = self.events.get(event_id)
@@ -826,6 +1070,10 @@ class EventPathRecorderGps(Node):
 
         for path_key in (event.get('paths') or {}).values():
             self.paths.pop(path_key, None)
+        if event.get('entry_path'):
+            self.paths.pop(event['entry_path'], None)
+        if event.get('spot_path'):
+            self.paths.pop(event['spot_path'], None)
 
         self.get_logger().info(
             f"이벤트와 연결 경로 삭제: '{event_id}'"
@@ -854,6 +1102,14 @@ class EventPathRecorderGps(Node):
                     f"end_radius={event.get('end_radius_m', self.default_radius)}m, "
                     f"speed={event.get('target_speed_mps', 4.0)}m/s, "
                     f"stop={event.get('obstacle_stop_distance_m', 2.0)}m"
+                )
+            elif event_type in PARKING_STYLES.values():
+                lines.append(
+                    f"  {event_id}: type={event_type}, "
+                    f"radius={event.get('approach_radius_m', self.default_radius)}m, "
+                    f"entry_path={event.get('entry_path')}, "
+                    f"spot_path={event.get('spot_path')}, "
+                    f"hold={event.get('hold_duration_s', 0.0)}s"
                 )
             else:
                 lines.append(

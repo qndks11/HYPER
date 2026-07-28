@@ -58,6 +58,13 @@ constexpr double kArrowLength = 100.0;
 // even though the two sides are no longer combined into one fit.
 constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 
+// Rear camera equivalent of kLaneCenterOffsetBiasM: while backing into a parking bay, only one
+// side line is visible and it is not the near side of a same-width paired lane, so the
+// lane-center assumption above doesn't apply. Instead the target is a fixed standoff from that
+// one line, measured to the vehicle's own centerline -- body_width/2 (~0.5m, see vehicle.xacro)
+// plus a small margin, so the body's near-side edge clears the line instead of crossing it.
+constexpr double kRearParkingLineStandoffM = 0.55;
+
 // Empirical gain [m per degree] converting a tracked lane line's own outward lean --
 // steering_angle_deg's magnitude, in the direction that means the line is angling away from the
 // vehicle rather than toward it -- into extra lateral offset correction. kLaneCenterOffsetBiasM
@@ -124,12 +131,24 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   stopline_publisher_ =
     create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/detection", 10);
 
+  rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
+    "/rear_image_raw", 10,
+    std::bind(&LaneDetection::rear_image_callback, this, std::placeholders::_1));
+  rear_lane_center_publisher_ =
+    create_publisher<std_msgs::msg::Float64MultiArray>("/lane/rear_center", 10);
+  rear_stopline_publisher_ =
+    create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/rear_detection", 10);
+
   cv::namedWindow("LaneDetection", cv::WINDOW_NORMAL);
   cv::resizeWindow(
     "LaneDetection", kWindowWidth,
     static_cast<int>(kWindowHeight * kBevHeightScale) + kTextPanelHeight);
+  cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
+  cv::resizeWindow(
+    "LaneDetectionRear", kWindowWidth,
+    static_cast<int>(kWindowHeight * kBevHeightScale) + kTextPanelHeight);
 
-  RCLCPP_INFO(get_logger(), "LaneDetection started");
+  RCLCPP_INFO(get_logger(), "LaneDetection started (front + rear)");
 }
 
 cv::Mat LaneDetection::build_transform(
@@ -296,7 +315,7 @@ std::vector<cv::Point> LaneDetection::walk_lane_chain(
 
 LaneDetection::LaneFitResult LaneDetection::fit_lane(
   const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
-  LaneSide side) const
+  LaneSide side, double center_bias_m) const
 {
   LaneFitResult result;
   if (static_cast<int>(points.size()) < kMinLanePoints) {
@@ -365,11 +384,10 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   // (origin - p0) with the unit direction vector; it reduces to the old (p0.x - origin.x) formula
   // exactly when direction is vertical (a straight-ahead lane).
   const double perp_px = (origin.x - p0.x) * direction.y - (origin.y - p0.y) * direction.x;
-  // The lane center sits on the vehicle's side of a right lane line, but on the far side of a
-  // left lane line, so the bias flips sign between the two -- see kLaneCenterOffsetBiasM.
-  const double center_bias_m =
-    side == LaneSide::kRight ? -kLaneCenterOffsetBiasM : kLaneCenterOffsetBiasM;
-  result.offset_m = perp_px * meters_per_pixel + center_bias_m;
+  // The target sits on the vehicle's side of a right line, but on the far side of a left line, so
+  // the bias flips sign between the two -- see the call sites for what center_bias_m represents.
+  const double signed_bias_m = side == LaneSide::kRight ? -center_bias_m : center_bias_m;
+  result.offset_m = perp_px * meters_per_pixel + signed_bias_m;
 
   result.valid = true;
   return result;
@@ -436,8 +454,33 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
     return;
   }
+  process_and_publish(
+    cv_ptr->image, lane_center_publisher_, stopline_publisher_, "LaneDetection",
+    kLaneCenterOffsetBiasM);
+}
 
-  const cv::Mat warped = bird_eye(cv_ptr->image);
+void LaneDetection::rear_image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+  cv_bridge::CvImageConstPtr cv_ptr;
+  try {
+    cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
+  } catch (const cv_bridge::Exception & e) {
+    RCLCPP_ERROR(get_logger(), "cv_bridge exception (rear): %s", e.what());
+    return;
+  }
+  process_and_publish(
+    cv_ptr->image, rear_lane_center_publisher_, rear_stopline_publisher_, "LaneDetectionRear",
+    kRearParkingLineStandoffM);
+}
+
+void LaneDetection::process_and_publish(
+  const cv::Mat & image,
+  const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & lane_publisher,
+  const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & stopline_publisher,
+  const std::string & window_name,
+  double lane_center_bias_m)
+{
+  const cv::Mat warped = bird_eye(image);
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0 + kOriginBelowFrameMarginPx);
   // Shared by the lane-width plausibility check and stop-line distance below; fit_lane() also
   // derives this internally per side, since it only receives `width` rather than this node's
@@ -474,8 +517,10 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   for (const auto & p : right_points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
   for (const auto & p : left_points) cv::circle(view, p, 3, cv::Scalar(255, 0, 0), -1);
 
-  LaneFitResult right_fit = fit_lane(right_points, origin, warped.cols, LaneSide::kRight);
-  LaneFitResult left_fit = fit_lane(left_points, origin, warped.cols, LaneSide::kLeft);
+  LaneFitResult right_fit =
+    fit_lane(right_points, origin, warped.cols, LaneSide::kRight, lane_center_bias_m);
+  LaneFitResult left_fit =
+    fit_lane(left_points, origin, warped.cols, LaneSide::kLeft, lane_center_bias_m);
 
   // Each side is published as its own independent estimate now (no more width-based decision
   // between left-only / right-only / averaged-both). If a line is angling outward -- away from
@@ -532,7 +577,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   lane_msg.data = {
     left_fit.steering_angle_deg, left_fit.offset_m, left_fit.valid ? 1.0 : 0.0,
     right_fit.steering_angle_deg, right_fit.offset_m, right_fit.valid ? 1.0 : 0.0};
-  lane_center_publisher_->publish(lane_msg);
+  lane_publisher->publish(lane_msg);
 
   const cv::Scalar lane_text_color = (left_fit.valid || right_fit.valid) ?
     cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
@@ -581,7 +626,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 
   std_msgs::msg::Float64MultiArray stopline_msg;
   stopline_msg.data = {stopline.distance_m, stopline.valid ? 1.0 : 0.0};
-  stopline_publisher_->publish(stopline_msg);
+  stopline_publisher->publish(stopline_msg);
 
   const cv::Scalar stopline_text_color =
     stopline.valid ? cv::Scalar(255, 255, 255) : cv::Scalar(0, 0, 255);
@@ -601,7 +646,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
       cv::FONT_HERSHEY_SIMPLEX, 1.0, stopline_text_color, 2);
   }
 
-  cv::imshow("LaneDetection", view);
+  cv::imshow(window_name, view);
   cv::waitKey(1);
 }
 
