@@ -86,13 +86,22 @@ private:
    * kLaneCenterOffsetBiasM (mid-lane, assuming a same-width paired line); the rear camera passes
    * kRearParkingLineStandoffM (a fixed standoff from the parking bay's one side line, not a
    * lane-center assumption).
+   * @param use_curve_fit False (front camera): fit each side with fit_lane() (straight line). True
+   * (rear camera): fit each side with fit_lane_curve() (quadratic) instead, since the rear camera
+   * tracks a genuinely curved parking-bay line that a straight fit mis-estimates away from the
+   * near point.
+   * @param use_rear_roi False (front camera): warp using the front's road-lane ROI/BEV scale
+   * (kRoi* /kBevHeightScale). True (rear camera): use the rear-specific, farther-reaching,
+   * higher-resolution ROI/BEV scale (kRearRoi* /kRearBevHeightScale) instead -- see bird_eye().
    */
   void process_and_publish(
     const cv::Mat & image,
     const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & lane_publisher,
     const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & stopline_publisher,
     const std::string & window_name,
-    double lane_center_bias_m);
+    double lane_center_bias_m,
+    bool use_curve_fit,
+    bool use_rear_roi);
 
   /**
    * @brief Builds the perspective transform mapping the trapezoidal ROI (sampled from the
@@ -102,14 +111,23 @@ private:
    * @param src_width Source image width [px], used only to locate the ROI corners.
    * @param dst_height Output (bird's-eye) image height [px].
    * @param dst_width Output (bird's-eye) image width [px].
+   * @param use_rear_roi False: the front camera's ROI (kRoi*). True: the rear camera's ROI
+   * (kRearRoi*), which reaches farther toward the horizon so the rear camera can pick up the
+   * parking bay's side line earlier while backing in.
    * @return The 3x3 perspective transform matrix.
    */
-  cv::Mat build_transform(int src_height, int src_width, int dst_height, int dst_width) const;
+  cv::Mat build_transform(
+    int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi) const;
 
   /**
    * @brief Warps the input image to a bird's-eye view using build_transform().
+   *
+   * @param use_rear_roi False: the front camera's ROI/BEV height scale (kRoi* /kBevHeightScale).
+   * True: the rear camera's (kRearRoi* /kRearBevHeightScale) -- farther-reaching and stretched
+   * across more output pixels, for a clearer view of the (comparatively slow, close-range) parking
+   * maneuver than the front's ordinary-road-speed settings need.
    */
-  cv::Mat bird_eye(const cv::Mat & image) const;
+  cv::Mat bird_eye(const cv::Mat & image, bool use_rear_roi) const;
 
   /**
    * @brief Produces a binary mask isolating yellow lane paint in HSV space.
@@ -181,6 +199,39 @@ private:
    * @return The lane fit result; `valid` is false if there are too few points.
    */
   LaneFitResult fit_lane(
+    const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
+    LaneSide side, double center_bias_m) const;
+
+  /**
+   * @brief Fits a quadratic curve (x' = a*y'^2 + b*y', in coordinates shifted so the chain's near
+   * point is the origin) through the walked lane chain by weighted least squares, and derives the
+   * heading angle, lateral offset, and curvature from its near-point tangent -- the rear-camera
+   * counterpart to fit_lane()'s straight-line model, for lines that are genuinely curved (e.g. a
+   * parking bay's entrance) rather than running straight, where a global straight-line direction
+   * systematically mis-estimates heading/offset away from the near point.
+   *
+   * @details Anchored at the chain's near point p0 exactly (no free constant term), same as
+   * fit_lane(). The 2x2 weighted normal-equations system for (a, b) uses the same per-point
+   * near-field weighting as fit_lane(), solved via cv::solve(..., cv::DECOMP_SVD) rather than a
+   * strict LU decomposition, so a near-singular system degrades gracefully instead of failing
+   * outright. Requires more points than fit_lane() (kMinCurveFitPoints) since estimating a
+   * curvature term needs more spread than estimating a single direction. steering_angle_deg and
+   * offset_m are evaluated from the curve's tangent at the near point (f'(0) = b), using the same
+   * formulas as fit_lane() so both fits are drop-in interchangeable for callers; unlike fit_lane(),
+   * curvature_radius_px is a real value derived from the curve's second derivative (f''(0) = 2a)
+   * rather than always the flat-line sentinel. curve_points samples the fitted parabola across the
+   * chain's observed reach, for drawing, rather than fit_lane()'s two-point straight segment.
+   *
+   * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
+   * @param origin The bottom-center point the chain was anchored to.
+   * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
+   * @param side Which lane line `points` traces, so the center-offset bias is signed correctly.
+   * @param center_bias_m Distance from the detected line to the target, signed per `side` -- same
+   * meaning as fit_lane()'s parameter of the same name.
+   * @return The curve fit result; `valid` is false if there are too few points or the chain is too
+   * straight/short for a stable curvature estimate.
+   */
+  LaneFitResult fit_lane_curve(
     const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
     LaneSide side, double center_bias_m) const;
 

@@ -15,6 +15,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <std_msgs/msg/int8_multi_array.hpp>
@@ -76,6 +78,12 @@ public:
     // corrects the wrong way.
     parking_rear_offset_sign_ = declare_parameter<double>("parking_rear_offset_sign", -1.0);
     parking_rear_heading_sign_ = declare_parameter<double>("parking_rear_heading_sign", 1.0);
+    // Separate from stanley_k_ (shared with front lane-following, which is not the thing being
+    // tuned here) so this can be turned down independently -- observed live: oscillation ("와리가리")
+    // once inside the bay, right where rear-camera correction starts dominating the blend, matching
+    // classic Stanley overcorrection when the gain is too high for how noisy the reading is this
+    // close to the target.
+    parking_rear_stanley_k_ = declare_parameter<double>("parking_rear_stanley_k", 0.4);
     // How long a fresh, plausible rear-line reading takes to fully replace pursuit steering.
     parking_rear_blend_time_s_ = declare_parameter<double>("parking_rear_blend_time_s", 0.3);
     // A rear-line reading whose offset exceeds this is treated as a misdetection (wrong object,
@@ -83,6 +91,34 @@ public:
     // is set -- real bay boundary lines don't appear meters away from the recorded maneuver.
     parking_rear_offset_plausible_max_m_ =
       declare_parameter<double>("parking_rear_offset_plausible_max_m", 1.5);
+    // Offset alone isn't enough: a misdetection can land on a small, plausible-looking offset by
+    // coincidence while its fitted angle is nowhere near parallel to the vehicle (observed live:
+    // offset -0.23m, angle -54 deg). A real bay boundary line runs roughly parallel to the
+    // reverse path, so reject readings whose angle magnitude exceeds this bound even if their
+    // offset alone would have passed.
+    parking_rear_angle_plausible_max_deg_ =
+      declare_parameter<double>("parking_rear_angle_plausible_max_deg", 30.0);
+    // During PARKING_*_MANEUVER only, x_/y_/yaw_ are driven from wheel-encoder distance + IMU yaw
+    // instead of /odometry/filtered_map -- short-duration relative accuracy from encoder+IMU beats
+    // GPS-corrected absolute position for backing precisely into a tight bay, since a GPS/EKF
+    // correction landing mid-maneuver would otherwise show up as a steering jump that has nothing
+    // to do with how the vehicle actually moved. Real joint/wheel values below are confirmed from
+    // vehicle.xacro + gz_ros2_control.yaml, not guessed: only rear_left/right_wheel_joint publish
+    // position on /joint_states (front wheel spin joints aren't exposed), and Gazebo's configured
+    // wheel_radius is 0.2m regardless of any real-hardware value used later.
+    wheel_radius_ = declare_parameter<double>("wheel_radius", 0.2);
+    left_wheel_joint_ = declare_parameter<std::string>("left_wheel_joint", "rear_left_wheel_joint");
+    right_wheel_joint_ = declare_parameter<std::string>("right_wheel_joint", "rear_right_wheel_joint");
+    // Sign relating wheel rotation direction to signed distance -- not yet empirically verified.
+    // Drive forward and confirm delta_s (see the throttled maneuver log) is positive; flip to -1.0
+    // if it reads backwards, same as the parking_rear_*_sign parameters above.
+    wheel_encoder_distance_sign_ = declare_parameter<double>("wheel_encoder_distance_sign", 1.0);
+    // Once the rear stop-line (bay's back wall) is this close, stop steering off the rear-camera
+    // lane/pursuit correction and hold the wheels straight instead -- backing the last stretch on a
+    // steering correction risks swinging the tail into the wall at the last moment; straight is the
+    // safer final approach regardless of what the lane correction would otherwise say.
+    parking_rear_stopline_align_distance_m_ =
+      declare_parameter<double>("parking_rear_stopline_align_distance_m", 1.0);
 
     mode_sub_ = create_subscription<std_msgs::msg::String>(
       "/driving_mode", 10, std::bind(&ControllerWithParking::on_mode, this, std::placeholders::_1));
@@ -91,6 +127,9 @@ public:
     rear_lane_sub_ = create_subscription<std_msgs::msg::Float64MultiArray>(
       "/lane/rear_center", 10,
       std::bind(&ControllerWithParking::on_rear_lane, this, std::placeholders::_1));
+    rear_stopline_sub_ = create_subscription<std_msgs::msg::Float64MultiArray>(
+      "/stopline/rear_detection", 10,
+      std::bind(&ControllerWithParking::on_rear_stopline, this, std::placeholders::_1));
     bridge_sub_ = create_subscription<nav_msgs::msg::Path>(
       "/bridge_path", 10, std::bind(&ControllerWithParking::on_bridge, this, std::placeholders::_1));
     waypoint_sub_ = create_subscription<nav_msgs::msg::Path>(
@@ -108,6 +147,11 @@ public:
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odometry/filtered_map", 10,
       std::bind(&ControllerWithParking::on_odom, this, std::placeholders::_1));
+    joint_state_sub_ = create_subscription<sensor_msgs::msg::JointState>(
+      "/joint_states", 10,
+      std::bind(&ControllerWithParking::on_joint_states, this, std::placeholders::_1));
+    imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+      "/imu", 10, std::bind(&ControllerWithParking::on_imu, this, std::placeholders::_1));
 
     command_pub_ = create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/cmd", 10);
     velocity_pub_ = create_publisher<std_msgs::msg::Float64>("/velocity", 10);
@@ -180,6 +224,14 @@ private:
     rear_right_valid_ = msg->data[5] > 0.5;
   }
 
+  void on_rear_stopline(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+  {
+    rear_stopline_time_s_ = now_s();
+    if (msg->data.size() < 2U) {rear_stopline_valid_ = false; return;}
+    rear_stopline_distance_m_ = msg->data[0];
+    rear_stopline_valid_ = msg->data[1] > 0.5;
+  }
+
   void on_bridge(const nav_msgs::msg::Path::SharedPtr msg)
   {
     bridge_path_.clear();
@@ -220,6 +272,30 @@ private:
     yaw_ = parking_cpp::yaw_from_quaternion(msg->pose.pose.orientation);
     velocity_ = msg->twist.twist.linear.x;
     odom_time_s_ = now_s();
+  }
+
+  // Just caches the two drive-wheel joint positions -- the actual delta/integration math runs once
+  // per control tick in control_step(), same pattern as on_lane()/on_rear_lane() above.
+  void on_joint_states(const sensor_msgs::msg::JointState::SharedPtr msg)
+  {
+    bool have_left = false, have_right = false;
+    double left_angle = 0.0, right_angle = 0.0;
+    for (std::size_t i = 0; i < msg->name.size() && i < msg->position.size(); ++i) {
+      if (msg->name[i] == left_wheel_joint_) {left_angle = msg->position[i]; have_left = true;}
+      else if (msg->name[i] == right_wheel_joint_) {right_angle = msg->position[i]; have_right = true;}
+    }
+    if (!have_left || !have_right || !std::isfinite(left_angle) || !std::isfinite(right_angle)) {return;}
+    left_wheel_angle_ = left_angle;
+    right_wheel_angle_ = right_angle;
+    joint_state_time_s_ = now_s();
+  }
+
+  void on_imu(const sensor_msgs::msg::Imu::SharedPtr msg)
+  {
+    const double yaw = parking_cpp::yaw_from_quaternion(msg->orientation);
+    if (!std::isfinite(yaw)) {return;}
+    imu_yaw_ = yaw;
+    imu_time_s_ = now_s();
   }
 
   double lane_follow_command(double offset_bias, bool use_right)
@@ -352,16 +428,32 @@ private:
     // since a stale/wrong line is worse than the recorded-path fallback.
     bool rear_plausible = false;
     double rear_steering = pursuit_steering;
-    if (gear < 0 && t - rear_lane_time_s_ < input_timeout_s_ && (rear_left_valid_ || rear_right_valid_)) {
-      const bool has_left = rear_left_valid_, has_right = rear_right_valid_;
-      const double rear_offset_m = has_left && has_right ?
-        0.5 * (rear_left_offset_ + rear_right_offset_) : (has_left ? rear_left_offset_ : rear_right_offset_);
-      const double rear_angle_rad = has_left && has_right ?
-        0.5 * (rear_left_angle_ + rear_right_angle_) : (has_left ? rear_left_angle_ : rear_right_angle_);
-      rear_plausible = std::abs(rear_offset_m) <= parking_rear_offset_plausible_max_m_;
-      if (rear_plausible) {
+    if (gear < 0 && t - rear_lane_time_s_ < input_timeout_s_) {
+      // Plausibility is checked per side, before any averaging -- averaging first would let two
+      // individually-bad readings (e.g. one side's offset way out, the other's angle way off)
+      // cancel out into a combined number that happens to land inside both thresholds, even
+      // though neither side alone was trustworthy. Observed live: left angle -3 deg (fine) with
+      // right angle -47 deg (garbage) averaged to -25 deg, passing the old post-average check.
+      const double max_angle_rad = parking_rear_angle_plausible_max_deg_ * parking_cpp::kPi / 180.0;
+      const bool left_ok = rear_left_valid_ &&
+        std::abs(rear_left_offset_) <= parking_rear_offset_plausible_max_m_ &&
+        std::abs(rear_left_angle_) <= max_angle_rad;
+      const bool right_ok = rear_right_valid_ &&
+        std::abs(rear_right_offset_) <= parking_rear_offset_plausible_max_m_ &&
+        std::abs(rear_right_angle_) <= max_angle_rad;
+      // Prefer the left line whenever it's valid, rather than averaging with the right one --
+      // rear_parking_perception is designed around "only one side line is visible/relevant while
+      // backing into the bay" (see kRearParkingLineStandoffM's comment in lane_detection.cpp), so a
+      // simultaneous right-side reading is not necessarily the bay's other boundary; averaging it
+      // in can pull the target toward an unrelated feature instead of the line actually being
+      // tracked (observed live: left 1.71m/24.5deg vs. right 4.92m/25.4deg -- far too wide apart to
+      // be the two sides of the same bay).
+      if (left_ok || right_ok) {
+        const double rear_offset_m = left_ok ? rear_left_offset_ : rear_right_offset_;
+        const double rear_angle_rad = left_ok ? rear_left_angle_ : rear_right_angle_;
+        rear_plausible = true;
         rear_steering = parking_rear_heading_sign_ * rear_angle_rad + std::atan2(
-          stanley_k_ * parking_rear_offset_sign_ * rear_offset_m,
+          parking_rear_stanley_k_ * parking_rear_offset_sign_ * rear_offset_m,
           std::max(stanley_v_min_, std::abs(velocity_)));
       }
     }
@@ -376,6 +468,15 @@ private:
       rear_tracking_ = false;
       steering = pursuit_steering;
     }
+
+    // Once the rear stop-line is close enough, straighten the wheels for the final stretch
+    // regardless of what pursuit/lane correction above computed -- overrides everything else here,
+    // since swinging the tail on a steering correction is exactly the wrong thing to do this close
+    // to the wall.
+    const bool near_rear_stopline = gear < 0 && rear_stopline_valid_ &&
+      t - rear_stopline_time_s_ < input_timeout_s_ &&
+      rear_stopline_distance_m_ <= parking_rear_stopline_align_distance_m_;
+    if (near_rear_stopline) {steering = 0.0;}
 
     if (!pursuit_valid && !rear_plausible) {return {};}
     return Command{steering, speed, true};
@@ -416,6 +517,61 @@ private:
     return Phase::kOther;
   }
 
+  // Integrates parking_local_{x,y,yaw}_ from wheel-encoder distance + IMU yaw, but only while
+  // actually in a parking maneuver -- outside of it this just keeps the "previous" trackers current
+  // so that the *next* maneuver entry computes a clean first delta instead of a backlogged jump.
+  // Called once per control tick, before the phase dispatch below, same as every other cached-input
+  // freshness check in this function.
+  void update_parking_local_pose(Phase phase, double t)
+  {
+    const bool encoder_fresh = t - joint_state_time_s_ < input_timeout_s_;
+    const bool imu_fresh = t - imu_time_s_ < input_timeout_s_;
+
+    if (!encoder_fresh || !imu_fresh) {
+      // Sensors not ready (or stale): don't integrate a garbage/backlogged delta, and force a
+      // reseed once they return rather than resuming from a now-stale "previous" reading.
+      parking_local_seeded_ = false;
+      parking_pose_initialized_ = false;
+      return;
+    }
+
+    if (!parking_pose_initialized_) {
+      prev_left_wheel_angle_ = left_wheel_angle_;
+      prev_right_wheel_angle_ = right_wheel_angle_;
+      prev_imu_yaw_ = imu_yaw_;
+      parking_pose_initialized_ = true;
+      return;
+    }
+
+    const double delta_left = parking_cpp::normalize_angle(left_wheel_angle_ - prev_left_wheel_angle_);
+    const double delta_right = parking_cpp::normalize_angle(right_wheel_angle_ - prev_right_wheel_angle_);
+    const double delta_q = 0.5 * (delta_left + delta_right);
+    const double delta_s = wheel_encoder_distance_sign_ * wheel_radius_ * delta_q;
+    const double delta_yaw = parking_cpp::normalize_angle(imu_yaw_ - prev_imu_yaw_);
+
+    if (phase == Phase::kParkingManeuver) {
+      if (!parking_local_seeded_) {
+        parking_local_x_ = x_; parking_local_y_ = y_; parking_local_yaw_ = yaw_;
+        parking_local_seeded_ = true;
+      } else {
+        const double yaw_mid = parking_local_yaw_ + 0.5 * delta_yaw;
+        parking_local_x_ += delta_s * std::cos(yaw_mid);
+        parking_local_y_ += delta_s * std::sin(yaw_mid);
+        parking_local_yaw_ = parking_cpp::normalize_angle(parking_local_yaw_ + delta_yaw);
+      }
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+        "parking local pose: x=%.3f y=%.3f yaw=%.3f delta_s=%.4f",
+        parking_local_x_, parking_local_y_, parking_local_yaw_, delta_s);
+    } else {
+      // Not maneuvering: reseed next time it's entered, from wherever the vehicle actually is then.
+      parking_local_seeded_ = false;
+    }
+
+    prev_left_wheel_angle_ = left_wheel_angle_;
+    prev_right_wheel_angle_ = right_wheel_angle_;
+    prev_imu_yaw_ = imu_yaw_;
+  }
+
   void control_step()
   {
     const double t = now_s();
@@ -432,6 +588,7 @@ private:
     else if (phase == Phase::kRightLaneFollow) {use_right_lane_ = true;}
     const bool lane_ok = t - lane_time_s_ < input_timeout_s_ &&
       (use_right_lane_ ? right_valid_ : left_valid_);
+    update_parking_local_pose(phase, t);
 
     double target_steering = commanded_steering_;
     double target_speed = 0.0;
@@ -473,6 +630,11 @@ private:
       const Command c = pure_pursuit_windowed(parking_entry_path_, map_lookahead_, parking_entry_last_index_);
       target_steering = c.steering; target_speed = c.valid ? parking_approach_speed_ : 0.0;
     } else if (phase == Phase::kParkingManeuver) {
+      // Drive pursuit off the encoder+IMU local pose instead of raw odom, if it's seeded -- safe to
+      // overwrite these members here since control_step() runs synchronously (single-threaded
+      // executor, no callback can interleave mid-tick) and on_odom() will refresh x_/y_/yaw_ from
+      // real odom again the moment the phase changes, before any non-parking phase reads them.
+      if (parking_local_seeded_) {x_ = parking_local_x_; y_ = parking_local_y_; yaw_ = parking_local_yaw_;}
       const Command c = gear_aware_pursuit_on_map_path(
         parking_spot_path_, parking_spot_gear_, parking_lookahead_, parking_spot_last_index_);
       target_steering = c.valid ? c.steering : 0.0; target_speed = c.valid ? c.speed : 0.0;
@@ -522,23 +684,41 @@ private:
   std::size_t parking_entry_last_index_{0U};
   std::size_t parking_spot_last_index_{0U};
   double parking_rear_offset_sign_{-1.0}, parking_rear_heading_sign_{1.0};
+  double parking_rear_stanley_k_{0.4};
   double parking_rear_blend_time_s_{0.3}, parking_rear_offset_plausible_max_m_{1.5};
+  double parking_rear_angle_plausible_max_deg_{30.0};
   double rear_left_angle_{0.0}, rear_left_offset_{0.0}, rear_right_angle_{0.0}, rear_right_offset_{0.0};
   bool rear_left_valid_{false}, rear_right_valid_{false};
   double rear_lane_time_s_{-1e9};
   bool rear_tracking_{false};
   double rear_track_start_s_{0.0};
+  double parking_rear_stopline_align_distance_m_{1.0};
+  double rear_stopline_distance_m_{0.0}, rear_stopline_time_s_{-1e9};
+  bool rear_stopline_valid_{false};
   double x_{0.0}, y_{0.0}, yaw_{0.0}, velocity_{0.0};
   double commanded_steering_{0.0}, commanded_speed_{0.0}, last_control_time_s_{0.0};
   double odom_time_s_{-1e9}, lane_time_s_{-1e9};
 
+  // Wheel-encoder + IMU local pose, used only during PARKING_*_MANEUVER (see update_parking_local_pose).
+  double wheel_radius_{0.2}, wheel_encoder_distance_sign_{1.0};
+  std::string left_wheel_joint_{"rear_left_wheel_joint"}, right_wheel_joint_{"rear_right_wheel_joint"};
+  double left_wheel_angle_{0.0}, right_wheel_angle_{0.0}, joint_state_time_s_{-1e9};
+  double prev_left_wheel_angle_{0.0}, prev_right_wheel_angle_{0.0};
+  double imu_yaw_{0.0}, imu_time_s_{-1e9}, prev_imu_yaw_{0.0};
+  bool parking_pose_initialized_{false};
+  bool parking_local_seeded_{false};
+  double parking_local_x_{0.0}, parking_local_y_{0.0}, parking_local_yaw_{0.0};
+
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr lane_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr rear_lane_sub_;
+  rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr rear_stopline_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr bridge_sub_, waypoint_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr parking_entry_sub_, parking_spot_sub_;
   rclcpp::Subscription<std_msgs::msg::Int8MultiArray>::SharedPtr parking_gear_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr command_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr velocity_pub_, steering_pub_;
   rclcpp::TimerBase::SharedPtr timer_;

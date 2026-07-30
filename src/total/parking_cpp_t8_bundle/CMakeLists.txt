@@ -21,7 +21,7 @@ include_directories(include)
 
 add_executable(controller_with_parking src/controller_with_parking.cpp)
 ament_target_dependencies(controller_with_parking
-  rclcpp ackermann_msgs geometry_msgs nav_msgs std_msgs)
+  rclcpp ackermann_msgs geometry_msgs nav_msgs sensor_msgs std_msgs)
 
 add_executable(behavior_supervisor_with_parking src/behavior_supervisor_with_parking.cpp)
 ament_target_dependencies(behavior_supervisor_with_parking

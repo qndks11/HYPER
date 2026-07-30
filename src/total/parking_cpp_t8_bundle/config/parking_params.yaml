@@ -50,11 +50,32 @@ controller:
     # LaneDetectionRear 창 보면서 반대로 돌면 -1.0<->1.0 뒤집을 것.
     parking_rear_offset_sign: -1.0
     parking_rear_heading_sign: 1.0
+    # 전방 차선 추종용 stanley_k(0.8)와 공유하지 않는 후방 전용 게인 -- 박스 안에서
+    # 와리가리(오버코렉션) 나던 거 낮추려고 분리함
+    parking_rear_stanley_k: 0.6
     # 인식 시작 시 조향이 갑자기 안 튀도록 이 시간(초) 동안 서서히 전환
     parking_rear_blend_time_s: 0.3
     # 이 거리(m)보다 먼 오프셋이 감지되면 오검출로 보고 무시 (spot_path로 폴백)
-    # 목표 offset이 이제 차체 반폭 기준 0.55m 지점이라, 그보다 여유 있게 잡음
-    parking_rear_offset_plausible_max_m: 1.0
+    # 목표 offset이 차체 반폭 기준 0.55m 지점이라 그보다 여유 있게 잡아야 하는데,
+    # 후진 초반엔 실제로 1m 이상 떨어져 있는 게 정상이라(실측: 정상 왼쪽 선 1.71m가
+    # 1.0m 기준에 걸려 필터링되던 버그) 2.5m로 완화함
+    parking_rear_offset_plausible_max_m: 2.5
+    # offset은 그럴싸한데 각도가 이상한 오검출(실측: offset -0.23m에 angle -54도)을 걸러내기 위한
+    # 각도 상한. 실제 주차구역 옆선은 차량 진행방향과 거의 평행해야 함
+    parking_rear_angle_plausible_max_deg: 30.0
+    # 후방 정지선(박스 뒷벽)까지 이 거리 이하면 라인/pursuit 보정 다 무시하고 조향을 0으로
+    # 고정해서 똑바로 후진 (막판에 조향 틀다가 꼬리가 벽 쪽으로 틀어지는 걸 방지)
+    parking_rear_stopline_align_distance_m: 1.0
+
+    # PARKING_*_MANEUVER 동안에만 x_/y_/yaw_를 /odometry/filtered_map 대신 휠 엔코더 거리 +
+    # IMU yaw로 적분한 값으로 대체한다 (GPS 보정이 후진 중간에 끼어들며 생기는 위치 점프를
+    # 피하기 위함). wheel_radius/joint 이름은 vehicle.xacro + gz_ros2_control.yaml에서 실측 확인함.
+    wheel_radius: 0.2
+    left_wheel_joint: rear_left_wheel_joint
+    right_wheel_joint: rear_right_wheel_joint
+    # 바퀴 회전 방향과 signed distance 부호 관계 -- 아직 실측 검증 안 됨. 전진 시 delta_s
+    # (컨트롤러 로그의 parking local pose 줄)가 양수인지 확인하고, 반대면 -1.0으로 뒤집을 것.
+    wheel_encoder_distance_sign: 1.0
 
 behavior_supervisor:
   ros__parameters:
@@ -94,3 +115,7 @@ behavior_supervisor:
     parking_hold_duration_s: 0.0
     # 후방카메라로 정지선(박스 뒷벽)까지 거리가 이 이하면 도착으로 판정 (position 기반 판정보다 우선)
     parking_rear_stop_distance_m: 0.12
+    # 후진 시작 후 odom 기준으로 이만큼은 실제로 물러나야 위 후방카메라 판정을 인정한다.
+    # 안 그러면 진입구 문턱 표시 등을 후방카메라가 시작하자마자 오검출해서 한 발짝도
+    # 안 물러났는데 바로 "도착"으로 끝나버릴 수 있음 (실측된 버그)
+    parking_rear_stop_min_progress_m: 1.0

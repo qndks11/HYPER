@@ -23,6 +23,21 @@ constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 3;
 // down the road the BEV view looks. Width is left unscaled.
 constexpr double kBevHeightScale = 0.5;
 
+// Rear-camera-only ROI/BEV equivalents of the two constant groups above -- the rear camera needs
+// to see farther and more clearly than the front's road-lane ROI, to pick up the parking bay's
+// side line earlier while backing in. Top row ratio lowered (0.48 -> 0.30) to pull in ground
+// closer to the horizon than the front ROI reaches; height scale raised (0.5 -> 0.8) so that
+// captured range is stretched across more output pixels, giving walk_lane_chain()/fit_lane() finer
+// pixel resolution to work with instead of the same detail compressed into fewer rows. Top col
+// ratios and the bottom flare are left matching the front's, since the concern here is depth, not
+// width. Front camera (kRoi* /kBevHeightScale above) is untouched. Tune against the actual rear
+// camera feed, same as the front ROI's own comment says.
+constexpr double kRearRoiTopLeftRow = 0.48,  kRearRoiTopLeftCol = 0.35;
+constexpr double kRearRoiTopRightRow = 0.48, kRearRoiTopRightCol = 0.65;
+constexpr double kRearRoiBottomLeftRow = 1,  kRearRoiBottomLeftCol = -2;
+constexpr double kRearRoiBottomRightRow = 1, kRearRoiBottomRightCol = 3;
+constexpr double kRearBevHeightScale = 0.8;
+
 // Neighborhood radius for each step of the lane chain walk [px]. Also sets the rough spacing
 // between consecutive chain points, since each step prefers the farthest qualifying pixel within
 // this radius.
@@ -37,6 +52,9 @@ constexpr double kTopRowMargin = 20.0;
 // A few points of slack past the minimum a well-conditioned line-direction fit needs (2 points
 // determine a direction exactly; more give the weighted eigen solve something to average over).
 constexpr int kMinLanePoints = 3;
+// fit_lane_curve() needs more points than fit_lane() -- estimating a curvature term (2 unknowns:
+// a, b) from noisy pixel data needs more spread than estimating a direction alone.
+constexpr int kMinCurveFitPoints = 5;
 // Floor on the fitted line direction's weighted variance (see fit_lane): below this the chain is
 // numerically degenerate (points effectively coincident), so the eigen solve isn't trustworthy.
 constexpr double kMinLineFitVariance = 1e-6;
@@ -63,7 +81,7 @@ constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 // lane-center assumption above doesn't apply. Instead the target is a fixed standoff from that
 // one line, measured to the vehicle's own centerline -- body_width/2 (~0.5m, see vehicle.xacro)
 // plus a small margin, so the body's near-side edge clears the line instead of crossing it.
-constexpr double kRearParkingLineStandoffM = 0.55;
+constexpr double kRearParkingLineStandoffM = 0.85;
 
 // Empirical gain [m per degree] converting a tracked lane line's own outward lean --
 // steering_angle_deg's magnitude, in the direction that means the line is angling away from the
@@ -146,19 +164,28 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
   cv::resizeWindow(
     "LaneDetectionRear", kWindowWidth,
-    static_cast<int>(kWindowHeight * kBevHeightScale) + kTextPanelHeight);
+    static_cast<int>(kWindowHeight * kRearBevHeightScale) + kTextPanelHeight);
 
   RCLCPP_INFO(get_logger(), "LaneDetection started (front + rear)");
 }
 
 cv::Mat LaneDetection::build_transform(
-  int src_height, int src_width, int dst_height, int dst_width) const
+  int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi) const
 {
+  const double top_left_row = use_rear_roi ? kRearRoiTopLeftRow : kRoiTopLeftRow;
+  const double top_left_col = use_rear_roi ? kRearRoiTopLeftCol : kRoiTopLeftCol;
+  const double top_right_row = use_rear_roi ? kRearRoiTopRightRow : kRoiTopRightRow;
+  const double top_right_col = use_rear_roi ? kRearRoiTopRightCol : kRoiTopRightCol;
+  const double bottom_left_row = use_rear_roi ? kRearRoiBottomLeftRow : kRoiBottomLeftRow;
+  const double bottom_left_col = use_rear_roi ? kRearRoiBottomLeftCol : kRoiBottomLeftCol;
+  const double bottom_right_row = use_rear_roi ? kRearRoiBottomRightRow : kRoiBottomRightRow;
+  const double bottom_right_col = use_rear_roi ? kRearRoiBottomRightCol : kRoiBottomRightCol;
+
   const std::vector<cv::Point2f> src{
-    {static_cast<float>(src_width * kRoiTopLeftCol), static_cast<float>(src_height * kRoiTopLeftRow)},
-    {static_cast<float>(src_width * kRoiTopRightCol), static_cast<float>(src_height * kRoiTopRightRow)},
-    {static_cast<float>(src_width * kRoiBottomRightCol), static_cast<float>(src_height * kRoiBottomRightRow)},
-    {static_cast<float>(src_width * kRoiBottomLeftCol), static_cast<float>(src_height * kRoiBottomLeftRow)}};
+    {static_cast<float>(src_width * top_left_col), static_cast<float>(src_height * top_left_row)},
+    {static_cast<float>(src_width * top_right_col), static_cast<float>(src_height * top_right_row)},
+    {static_cast<float>(src_width * bottom_right_col), static_cast<float>(src_height * bottom_right_row)},
+    {static_cast<float>(src_width * bottom_left_col), static_cast<float>(src_height * bottom_left_row)}};
 
   const std::vector<cv::Point2f> dst{
     {0.0f, 0.0f},
@@ -169,10 +196,12 @@ cv::Mat LaneDetection::build_transform(
   return cv::getPerspectiveTransform(src, dst);
 }
 
-cv::Mat LaneDetection::bird_eye(const cv::Mat & image) const
+cv::Mat LaneDetection::bird_eye(const cv::Mat & image, bool use_rear_roi) const
 {
-  const cv::Size dst_size(image.cols, static_cast<int>(image.rows * kBevHeightScale));
-  const cv::Mat transform = build_transform(image.rows, image.cols, dst_size.height, dst_size.width);
+  const double height_scale = use_rear_roi ? kRearBevHeightScale : kBevHeightScale;
+  const cv::Size dst_size(image.cols, static_cast<int>(image.rows * height_scale));
+  const cv::Mat transform =
+    build_transform(image.rows, image.cols, dst_size.height, dst_size.width, use_rear_roi);
   cv::Mat warped;
   cv::warpPerspective(image, warped, transform, dst_size);
   return warped;
@@ -393,6 +422,92 @@ LaneDetection::LaneFitResult LaneDetection::fit_lane(
   return result;
 }
 
+LaneDetection::LaneFitResult LaneDetection::fit_lane_curve(
+  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width,
+  LaneSide side, double center_bias_m) const
+{
+  LaneFitResult result;
+  if (static_cast<int>(points.size()) < kMinCurveFitPoints) {
+    return result;
+  }
+
+  const int n = static_cast<int>(points.size());
+  const cv::Point2d p0(points[0].x, points[0].y);
+
+  // Same near-field-weighted arc length as fit_lane(), and the same anchor-at-p0 shift (x', y') --
+  // fitting x' = a*y'^2 + b*y' (no free constant term) forces the curve through p0 exactly.
+  std::vector<double> s(n);
+  s[0] = 0.0;
+  for (int i = 1; i < n; ++i) s[i] = s[i - 1] + cv::norm(points[i] - points[i - 1]);
+  const double s_far = s.back();
+
+  double sy2 = 0.0, sy3 = 0.0, sy4 = 0.0, sxy = 0.0, sxy2 = 0.0;
+  for (int i = 0; i < n; ++i) {
+    const double w = (s_far - s[i]) + 1.0;
+    const double yp = points[i].y - p0.y;
+    const double xp = points[i].x - p0.x;
+    const double yp2 = yp * yp;
+    sy2 += w * yp2;
+    sy3 += w * yp2 * yp;
+    sy4 += w * yp2 * yp2;
+    sxy += w * xp * yp;
+    sxy2 += w * xp * yp2;
+  }
+  // Degenerate if the chain barely spreads away from its own anchor -- same conceptual role as
+  // fit_lane()'s eigenvalue floor, just measured directly on y' spread here instead.
+  if (sy2 < kMinLineFitVariance) {
+    return result;
+  }
+
+  const cv::Mat normal_matrix = (cv::Mat_<double>(2, 2) << sy4, sy3, sy3, sy2);
+  const cv::Mat rhs = (cv::Mat_<double>(2, 1) << sxy2, sxy);
+  cv::Mat solution;
+  // DECOMP_SVD degrades gracefully on a near-singular system (e.g. too few distinct depths to
+  // pin down curvature confidently) instead of failing outright the way a strict LU solve would.
+  cv::solve(normal_matrix, rhs, solution, cv::DECOMP_SVD);
+  const double a = solution.at<double>(0);
+  const double b = solution.at<double>(1);
+
+  // Tangent at the near point (y'=0): dx/dy = b. A step of dy<0 (away from the vehicle, up the
+  // image) gives dx = b*dy, so the direction vector is proportional to (-b, -1) -- matching
+  // fit_lane()'s convention that direction.y is negative when pointing away from the vehicle.
+  const double direction_norm = std::sqrt(b * b + 1.0);
+  const cv::Point2d direction(-b / direction_norm, -1.0 / direction_norm);
+
+  // Sampled across the chain's actual observed reach (p0 down to the farthest point), for drawing
+  // a real curve instead of fit_lane()'s two-point straight segment.
+  constexpr int kCurveDrawSamples = 12;
+  const cv::Point2d p_far(points[n - 1].x, points[n - 1].y);
+  result.curve_points.reserve(kCurveDrawSamples + 1);
+  for (int i = 0; i <= kCurveDrawSamples; ++i) {
+    const double t = static_cast<double>(i) / kCurveDrawSamples;
+    const double yp = t * (p_far.y - p0.y);
+    const double xp = a * yp * yp + b * yp;
+    result.curve_points.push_back(cv::Point(
+      static_cast<int>(std::lround(p0.x + xp)), static_cast<int>(std::lround(p0.y + yp))));
+  }
+
+  result.steering_angle_deg = -std::atan2(direction.x, -direction.y) * 180.0 / CV_PI;
+
+  // Curvature from the second derivative at the near point (f''(0) = 2a): kappa = f'' / (1+f'^2)^1.5,
+  // radius = 1/kappa. Clamped to the same flat-line sentinel fit_lane() always reports, since a
+  // near-zero `a` (an essentially straight chain) would otherwise blow up toward infinity.
+  const double curvature = std::abs(2.0 * a) / std::pow(1.0 + b * b, 1.5);
+  result.curvature_radius_px = curvature > 1.0 / kMaxCurvatureRadiusPx ?
+    1.0 / curvature : kMaxCurvatureRadiusPx;
+
+  const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(width);
+  // Same perpendicular-distance-to-tangent-line formula as fit_lane(), just fed this curve's
+  // near-point tangent direction instead of the global straight-line direction (standard
+  // Frenet-style local approximation for lateral offset to a curve).
+  const double perp_px = (origin.x - p0.x) * direction.y - (origin.y - p0.y) * direction.x;
+  const double signed_bias_m = side == LaneSide::kRight ? -center_bias_m : center_bias_m;
+  result.offset_m = perp_px * meters_per_pixel + signed_bias_m;
+
+  result.valid = true;
+  return result;
+}
+
 LaneDetection::StoplineResult LaneDetection::find_stopline(
   const cv::Mat & mask, const cv::Point2d & origin, double meters_per_pixel) const
 {
@@ -456,7 +571,7 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   }
   process_and_publish(
     cv_ptr->image, lane_center_publisher_, stopline_publisher_, "LaneDetection",
-    kLaneCenterOffsetBiasM);
+    kLaneCenterOffsetBiasM, false, false);
 }
 
 void LaneDetection::rear_image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
@@ -470,7 +585,7 @@ void LaneDetection::rear_image_callback(const sensor_msgs::msg::Image::SharedPtr
   }
   process_and_publish(
     cv_ptr->image, rear_lane_center_publisher_, rear_stopline_publisher_, "LaneDetectionRear",
-    kRearParkingLineStandoffM);
+    kRearParkingLineStandoffM, false, true);
 }
 
 void LaneDetection::process_and_publish(
@@ -478,9 +593,11 @@ void LaneDetection::process_and_publish(
   const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & lane_publisher,
   const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & stopline_publisher,
   const std::string & window_name,
-  double lane_center_bias_m)
+  double lane_center_bias_m,
+  bool use_curve_fit,
+  bool use_rear_roi)
 {
-  const cv::Mat warped = bird_eye(image);
+  const cv::Mat warped = bird_eye(image, use_rear_roi);
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0 + kOriginBelowFrameMarginPx);
   // Shared by the lane-width plausibility check and stop-line distance below; fit_lane() also
   // derives this internally per side, since it only receives `width` rather than this node's
@@ -517,9 +634,11 @@ void LaneDetection::process_and_publish(
   for (const auto & p : right_points) cv::circle(view, p, 3, cv::Scalar(0, 165, 255), -1);
   for (const auto & p : left_points) cv::circle(view, p, 3, cv::Scalar(255, 0, 0), -1);
 
-  LaneFitResult right_fit =
+  LaneFitResult right_fit = use_curve_fit ?
+    fit_lane_curve(right_points, origin, warped.cols, LaneSide::kRight, lane_center_bias_m) :
     fit_lane(right_points, origin, warped.cols, LaneSide::kRight, lane_center_bias_m);
-  LaneFitResult left_fit =
+  LaneFitResult left_fit = use_curve_fit ?
+    fit_lane_curve(left_points, origin, warped.cols, LaneSide::kLeft, lane_center_bias_m) :
     fit_lane(left_points, origin, warped.cols, LaneSide::kLeft, lane_center_bias_m);
 
   // Each side is published as its own independent estimate now (no more width-based decision

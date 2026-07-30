@@ -95,13 +95,21 @@ enum class SlotKind
   kEnd,
 };
 
-// NOTE: kParkingParallel's slot position below is still a placeholder (near course end) pending
-// its actual course location; kParkingTZone has been placed at its real spot (right after
-// intersection_B, which goes directly into right-lane cruise). Repositioning either is a one-line
-// reorder -- nothing else depends on position other than "cruise slot right before" (the lane
-// side the approach starts from) and "cruise slot right after" (the lane side driving resumes in
-// once parked).
+// TEST ORDERING: kParkingTZone (plus the right-lane cruise slot it expects to be approached from)
+// has been pulled to the very front so a parking test run can hit the trigger immediately instead
+// of driving the whole course first. Its real competition position is right after intersection_B
+// (straight from intersection_B goes directly into right-lane cruise, no lane-change in between) --
+// move it back there (and drop the duplicate kCruiseRight/kParkingTZone at the front, restoring
+// kCruiseLeft as the first slot and the default state_ back to kLeftLaneFollow) before the actual
+// run. Repositioning either parking slot is otherwise a one-line reorder -- nothing else depends on
+// position beyond "cruise slot right before" (the lane side the approach starts from) and "cruise
+// slot right after" (the lane side driving resumes in once parked).
+//
+// NOTE: kParkingParallel's slot position below is still a placeholder (near course end) pending its
+// actual course location.
 const std::vector<SlotKind> kCourseSequence = {
+  SlotKind::kCruiseRight,
+  SlotKind::kParkingTZone,
   SlotKind::kCruiseLeft,
   SlotKind::kHillstop,
   SlotKind::kCruiseLeft,
@@ -112,10 +120,6 @@ const std::vector<SlotKind> kCourseSequence = {
   SlotKind::kIntersectionA,
   SlotKind::kCruiseRight,
   SlotKind::kIntersectionB,
-  // T-zone parking: intersection_B straight goes directly into right-lane cruise (no left-lane
-  // segment/lane-change in between) -- that's where it's reached, per course layout.
-  SlotKind::kCruiseRight,
-  SlotKind::kParkingTZone,
   SlotKind::kCruiseRight,
   SlotKind::kIntersectionC,
   SlotKind::kCruiseRight,
@@ -232,6 +236,12 @@ public:
       declare_parameter<double>("parking_entry_heading_tolerance_deg", 15.0);
     parking_exit_tolerance_m_ = declare_parameter<double>("parking_exit_tolerance_m", 0.25);
     parking_rear_stop_distance_m_ = declare_parameter<double>("parking_rear_stop_distance_m", 0.30);
+    // Minimum odom-measured distance backed up since the maneuver started before the rear-camera
+    // check above is trusted -- without this, a misdetection right at the bay entrance (e.g. the
+    // entry threshold marking, seen the instant the rear camera is pointed backward) reads as
+    // "arrived" on the maneuver's very first tick, before any real reverse progress.
+    parking_rear_stop_min_progress_m_ =
+      declare_parameter<double>("parking_rear_stop_min_progress_m", 1.0);
     default_parking_hold_duration_s_ = declare_parameter<double>("parking_hold_duration_s", 0.0);
 
     load_yaml();
@@ -490,7 +500,47 @@ private:
     return distance_to_event(id) <= radius ? std::optional<std::size_t>(next_index) : std::nullopt;
   }
 
-  void activate_event(std::size_t index, const std::string & reason)
+  // Unlike other events (triggered the instant GPS first enters approach_radius_m), parking
+  // instead tracks the closest GPS approach within that radius and activates once the vehicle has
+  // passed it (distance starts increasing again). The recorded entry_path's local origin was
+  // captured wherever the human operator happened to issue record_start during recording -- not
+  // necessarily the exact instant GPS first crosses the radius boundary, which can be up to
+  // approach_radius_m away in an arbitrary direction depending on the approach trajectory.
+  // Anchoring on the closest-approach pose instead shrinks that avoidable gap down to whatever
+  // GPS/odometry noise remains, rather than leaving up to a full radius' worth of it baked into
+  // every replay.
+  void check_parking_gps_approach(std::size_t next_index)
+  {
+    const SlotKind kind = kCourseSequence[next_index];
+    const std::string id = event_id_for(kind);
+    const double radius = yaml_value<double>(events_[id], "approach_radius_m", 2.5);
+    const double distance = distance_to_event(id);
+
+    if (distance > radius) {
+      parking_closest_distance_m_.reset();
+      parking_closest_anchor_pose_.reset();
+      return;
+    }
+
+    if (!parking_closest_distance_m_ || distance < *parking_closest_distance_m_) {
+      parking_closest_distance_m_ = distance;
+      parking_closest_anchor_pose_ = current_pose_;
+      return;
+    }
+
+    // Distance increased relative to the closest point seen so far -- we've now passed it.
+    const std::optional<Pose2D> anchor = parking_closest_anchor_pose_;
+    parking_closest_distance_m_.reset();
+    parking_closest_anchor_pose_.reset();
+    activate_event(next_index, "closest GPS approach", anchor);
+  }
+
+  // `anchor_pose`, when given, overrides current_pose_ as the parking entry_path's local origin --
+  // used for the closest-GPS-approach pose captured by check_parking_gps_approach() above. Ignored
+  // by every non-parking event kind.
+  void activate_event(
+    std::size_t index, const std::string & reason,
+    const std::optional<Pose2D> & anchor_pose = std::nullopt)
   {
     const SlotKind kind = kCourseSequence[index];
     const std::string id = event_id_for(kind);
@@ -521,8 +571,8 @@ private:
       complete_active_event(reason);
       set_state(kLeftLaneFollow, reason);
     }
-    else if (kind == SlotKind::kParkingTZone) {enter_parking_approach(kParkingTZoneApproach);}
-    else if (kind == SlotKind::kParkingParallel) {enter_parking_approach(kParkingParallelApproach);}
+    else if (kind == SlotKind::kParkingTZone) {enter_parking_approach(kParkingTZoneApproach, anchor_pose);}
+    else if (kind == SlotKind::kParkingParallel) {enter_parking_approach(kParkingParallelApproach, anchor_pose);}
     else if (kind == SlotKind::kEnd) {set_state(kEndStop, reason);}
     else {RCLCPP_WARN(get_logger(), "Unknown event kind %d", static_cast<int>(kind));}
   }
@@ -551,14 +601,21 @@ private:
     return false;
   }
 
-  std::optional<nav_msgs::msg::Path> transform_relative_path(const YAML::Node & points)
+  // `anchor_override`, when given, is used as the path's local origin instead of current_pose_ --
+  // for parking events this is the pose captured at closest GPS approach (see
+  // next_parking_trigger_pose()), not wherever current_pose_ happens to be when this function is
+  // called, since by the time an event actually activates the vehicle has typically already moved
+  // past that closest point.
+  std::optional<nav_msgs::msg::Path> transform_relative_path(
+    const YAML::Node & points, const std::optional<Pose2D> & anchor_override = std::nullopt)
   {
-    if (!current_pose_ || !points || !points.IsSequence()) {return std::nullopt;}
+    const std::optional<Pose2D> & anchor = anchor_override ? anchor_override : current_pose_;
+    if (!anchor || !points || !points.IsSequence()) {return std::nullopt;}
     nav_msgs::msg::Path path;
     path.header.frame_id = "map";
     path.header.stamp = now();
-    const double c = std::cos(current_pose_->yaw);
-    const double s = std::sin(current_pose_->yaw);
+    const double c = std::cos(anchor->yaw);
+    const double s = std::sin(anchor->yaw);
     for (const auto & point : points) {
       try {
         geometry_msgs::msg::PoseStamped pose;
@@ -566,10 +623,10 @@ private:
         const double lx = point["x"].as<double>();
         const double ly = point["y"].as<double>();
         const double lyaw = point["yaw"] ? point["yaw"].as<double>() : 0.0;
-        pose.pose.position.x = current_pose_->x + c * lx - s * ly;
-        pose.pose.position.y = current_pose_->y + s * lx + c * ly;
+        pose.pose.position.x = anchor->x + c * lx - s * ly;
+        pose.pose.position.y = anchor->y + s * lx + c * ly;
         pose.pose.orientation = parking_cpp::quaternion_from_yaw(
-          parking_cpp::normalize_angle(current_pose_->yaw + lyaw));
+          parking_cpp::normalize_angle(anchor->yaw + lyaw));
         path.poses.push_back(pose);
       } catch (const YAML::Exception &) {}
     }
@@ -635,7 +692,7 @@ private:
   // lane-less gap to the physical parking-start point. This segment tolerates GNSS/odometry
   // anchor error because spot_path is re-anchored to wherever the vehicle actually ends up here,
   // not to this trigger pose.
-  void enter_parking_approach(const char * approach_state)
+  void enter_parking_approach(const char * approach_state, const std::optional<Pose2D> & anchor_pose)
   {
     if (!active_event_index_) {reset_to_lane_follow("parking requested without event"); return;}
     const std::string id = event_id_for(kCourseSequence[*active_event_index_]);
@@ -643,7 +700,7 @@ private:
     const YAML::Node key_node = event["entry_path"];
     if (!key_node) {reset_to_lane_follow("missing parking entry_path"); return;}
     const std::string key = key_node.as<std::string>();
-    const auto transformed = transform_relative_path(paths_[key]);
+    const auto transformed = transform_relative_path(paths_[key], anchor_pose);
     if (!transformed) {reset_to_lane_follow("empty parking entry_path"); return;}
     parking_entry_path_ = *transformed;
     const auto & last = parking_entry_path_->poses.back();
@@ -677,6 +734,12 @@ private:
     parking_spot_gear_ = extract_gear_array(paths_[key]);
     const auto & last = parking_spot_path_->poses.back();
     parking_spot_end_ = std::make_pair(last.pose.position.x, last.pose.position.y);
+    // Captured so the rear-camera completion check (below) can require real reverse progress
+    // before trusting it -- otherwise a misdetection right at the bay entrance (e.g. the entry
+    // threshold marking itself, seen by the rear camera the instant it's pointed backward) reads as
+    // "arrived" on literally the first tick of the maneuver, before the vehicle has moved at all.
+    parking_maneuver_start_pos_ = current_pose_ ?
+      std::make_optional(std::make_pair(current_pose_->x, current_pose_->y)) : std::nullopt;
     set_state(maneuver_state, "path=" + key);
   }
 
@@ -727,6 +790,9 @@ private:
     parking_spot_path_.reset();
     parking_spot_gear_.clear();
     parking_spot_end_.reset();
+    parking_maneuver_start_pos_.reset();
+    parking_closest_distance_m_.reset();
+    parking_closest_anchor_pose_.reset();
     set_state(cruise_state(kCourseSequence[cruise_index_]), reason);
   }
 
@@ -755,8 +821,16 @@ private:
       // (whatever immediately follows this cruise slot in kCourseSequence) for GPS entry.
       set_state(cruise_state(kCourseSequence[cruise_index_]));
       if (gps_fresh(t)) {
-        const auto next_index = next_event_index_in_range();
-        if (next_index) {activate_event(*next_index, "entered GPS event radius");}
+        const std::size_t next_index = cruise_index_ + 1U;
+        const bool next_is_parking = next_index < kCourseSequence.size() &&
+          (kCourseSequence[next_index] == SlotKind::kParkingTZone ||
+            kCourseSequence[next_index] == SlotKind::kParkingParallel);
+        if (next_is_parking) {
+          check_parking_gps_approach(next_index);
+        } else {
+          const auto ready_index = next_event_index_in_range();
+          if (ready_index) {activate_event(*ready_index, "entered GPS event radius");}
+        }
       }
     } else if (state_ == kIntersectionAApproach || state_ == kIntersectionBApproach ||
       state_ == kIntersectionCApproach)
@@ -852,12 +926,22 @@ private:
       if (!active_event_index_ || !parking_entry_path_) {reset_to_lane_follow("no active parking event");}
       else {
         publish_parking_entry_path();
-        const double heading_tolerance_rad = parking_entry_heading_tolerance_deg_ * parking_cpp::kPi / 180.0;
-        if (current_pose_ && parking_entry_end_ &&
+        const double dist_to_entry_end = current_pose_ && parking_entry_end_ ?
           std::hypot(current_pose_->x - parking_entry_end_->first,
-            current_pose_->y - parking_entry_end_->second) <= parking_entry_tolerance_m_ &&
-          std::abs(parking_cpp::normalize_angle(current_pose_->yaw - parking_entry_end_yaw_)) <=
-            heading_tolerance_rad) {
+            current_pose_->y - parking_entry_end_->second) :
+          std::numeric_limits<double>::infinity();
+        const double heading_err_deg = current_pose_ ?
+          std::abs(parking_cpp::normalize_angle(current_pose_->yaw - parking_entry_end_yaw_)) *
+            180.0 / parking_cpp::kPi :
+          std::numeric_limits<double>::infinity();
+        // Debug aid for diagnosing "approach times out without ever reaching entry tolerance" --
+        // watch this to see whether distance keeps shrinking (still driving, just needs more time
+        // or a looser tolerance) or plateaus somewhere (pursuit stuck/stalled on the entry path).
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+          "parking entry approach: dist_to_end=%.3f m (tol=%.2f) heading_err=%.1f deg (tol=%.1f)",
+          dist_to_entry_end, parking_entry_tolerance_m_, heading_err_deg,
+          parking_entry_heading_tolerance_deg_);
+        if (dist_to_entry_end <= parking_entry_tolerance_m_ && heading_err_deg <= parking_entry_heading_tolerance_deg_) {
           const char * maneuver_state =
             state_ == kParkingTZoneApproach ? kParkingTZoneManeuver : kParkingParallelManeuver;
           enter_parking_maneuver(maneuver_state);
@@ -867,19 +951,30 @@ private:
       if (!active_event_index_ || !parking_spot_path_) {reset_to_lane_follow("no active parking maneuver");}
       else {
         publish_parking_maneuver();
-        // Rear stop-line detection (the bay's back wall, seen while backing toward it) is a
-        // direct physical measurement, not a replay of wherever spot_path's last recorded point
-        // happened to be (which drifts with anchor/GNSS error) -- so whenever it's actively
-        // seeing the wall, it alone governs completion, not just "whichever check passes first".
-        // The position-based check only applies as a fallback for whenever the camera currently
-        // isn't seeing anything (never detected yet, view lost, or this event has no rear
-        // stop-line at all), so the maneuver still has a way to complete without the camera.
+        // Either check completes the maneuver -- spot_path's last point IS the actual intended
+        // parking spot, so physically reaching it is sufficient on its own, not just a fallback for
+        // whenever the camera "currently isn't seeing anything". Making the rear camera the
+        // *exclusive* source of truth whenever it reports anything fresh (the previous if/else
+        // priority scheme) meant that if the vehicle drove all the way to the recorded destination
+        // while the camera kept reporting a fresh-but-not-yet-close-enough detection, position_reached
+        // would never even be consulted -- the maneuver could get stuck exactly at its own goal.
+        // The camera still independently lets the maneuver finish *early/more precisely* than the
+        // recorded endpoint (which can drift with anchor/GNSS error) when it's confidently close.
+        // How far the vehicle has actually moved (odom-measured) since the maneuver started --
+        // gates the rear-camera check below so a misdetection right at the entrance can't complete
+        // the maneuver before any real reverse progress has happened.
+        const double progress_m = current_pose_ && parking_maneuver_start_pos_ ?
+          std::hypot(current_pose_->x - parking_maneuver_start_pos_->first,
+            current_pose_->y - parking_maneuver_start_pos_->second) :
+          0.0;
         const bool rear_fresh = rear_stop_line_fresh(t);
-        const bool rear_stop_reached = rear_fresh && rear_stop_line_distance_m_ <= parking_rear_stop_distance_m_;
+        const bool rear_stop_reached = rear_fresh &&
+          rear_stop_line_distance_m_ <= parking_rear_stop_distance_m_ &&
+          progress_m >= parking_rear_stop_min_progress_m_;
         const bool position_reached = current_pose_ && parking_spot_end_ &&
           std::hypot(current_pose_->x - parking_spot_end_->first,
             current_pose_->y - parking_spot_end_->second) <= parking_exit_tolerance_m_;
-        if (rear_fresh ? rear_stop_reached : position_reached) {
+        if (rear_stop_reached || position_reached) {
           const char * hold_state =
             state_ == kParkingTZoneManeuver ? kParkingTZoneHold : kParkingParallelHold;
           begin_parking_hold(hold_state);
@@ -919,6 +1014,7 @@ private:
   double parking_entry_heading_tolerance_deg_{15.0};
   double parking_exit_tolerance_m_{0.25};
   double parking_rear_stop_distance_m_{0.30};
+  double parking_rear_stop_min_progress_m_{1.0};
   double default_parking_hold_duration_s_{0.0};
   double parking_hold_duration_current_s_{0.0};
   std::string default_mission_{"straight"};
@@ -929,7 +1025,9 @@ private:
 
   YAML::Node events_;
   YAML::Node paths_;
-  std::string state_{kLeftLaneFollow};
+  // TEST ORDERING: matches kCourseSequence's front slot (kCruiseRight) above -- revert to
+  // kLeftLaneFollow together with that reorder before the actual competition run.
+  std::string state_{kRightLaneFollow};
   std::size_t cruise_index_{0};
   std::optional<std::size_t> active_event_index_;
   std::optional<nav_msgs::msg::Path> transformed_path_;
@@ -944,7 +1042,10 @@ private:
   std::optional<nav_msgs::msg::Path> parking_spot_path_;
   std::vector<int8_t> parking_spot_gear_;
   std::optional<std::pair<double, double>> parking_spot_end_;
+  std::optional<std::pair<double, double>> parking_maneuver_start_pos_;
   std::chrono::steady_clock::time_point parking_hold_started_{};
+  std::optional<double> parking_closest_distance_m_;
+  std::optional<Pose2D> parking_closest_anchor_pose_;
 
   std::optional<GpsPoint> current_gps_;
   std::optional<Pose2D> current_pose_;
