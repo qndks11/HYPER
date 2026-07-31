@@ -41,6 +41,12 @@ constexpr const char * kIntersectionBTurnBridge = "INTERSECTION_B_TURN_BRIDGE";
 constexpr const char * kIntersectionCApproach = "INTERSECTION_C_APPROACH";
 constexpr const char * kIntersectionCStopAtLight = "INTERSECTION_C_STOP_AT_LIGHT";
 constexpr const char * kIntersectionCTurnBridge = "INTERSECTION_C_TURN_BRIDGE";
+// Reverse parking has no approach/stop-line phase -- there's no stop line at a parking spot, so
+// as soon as the GPS radius trigger fires the vehicle goes straight into the bridge and follows
+// the `reverse_parking` path directly (see enter_bridge()). The turn-bridge state name carries
+// "REVERSE" so the controller (mode_.find("REVERSE")) drives bridge_path_ backward instead of
+// forward.
+constexpr const char * kReverseParkingTurnBridge = "REVERSE_PARKING_TURN_BRIDGE";
 // Inside a hill_stop event's approach radius, closing on the stop line before beginning the timed
 // hill stop. Only one hill-stop event exists in the course, so unlike intersections this doesn't
 // need a per-event variant to stay unambiguous.
@@ -81,16 +87,16 @@ enum class SlotKind
 };
 
 const std::vector<SlotKind> kCourseSequence = {
-  SlotKind::kCruiseLeft, 
-  SlotKind::kHillstop, 
-  SlotKind::kCruiseLeft, 
-  SlotKind::kLaneChange1,
-  SlotKind::kCruiseRight,
-  SlotKind::kLaneChange2,
-  SlotKind::kCruiseLeft, 
-  SlotKind::kIntersectionA,
-  SlotKind::kCruiseRight, 
-  SlotKind::kIntersectionB, 
+  // SlotKind::kCruiseLeft, 
+  // SlotKind::kHillstop, 
+  // SlotKind::kCruiseLeft, 
+  // SlotKind::kLaneChange1,
+  // SlotKind::kCruiseRight,
+  // SlotKind::kLaneChange2,
+  // SlotKind::kCruiseLeft, 
+  // SlotKind::kIntersectionA,
+  // SlotKind::kCruiseRight, 
+  // SlotKind::kIntersectionB, 
   SlotKind::kCruiseRight,
   SlotKind::kReverseParking,
   SlotKind::kCruiseRight,
@@ -115,6 +121,7 @@ std::string event_id_for(SlotKind kind)
     case SlotKind::kIntersectionA: return "intersection_A";
     case SlotKind::kIntersectionB: return "intersection_B";
     case SlotKind::kIntersectionC: return "intersection_C";
+    case SlotKind::kReverseParking: return "reverse_parking";
     case SlotKind::kAccelObstacle: return "accel_A";
     case SlotKind::kLaneChange1: return "lane_change_1";
     case SlotKind::kLaneChange2: return "lane_change_2";
@@ -457,6 +464,7 @@ private:
     } else if (kind == SlotKind::kIntersectionA) {set_state(kIntersectionAApproach, reason);}
     else if (kind == SlotKind::kIntersectionB) {set_state(kIntersectionBApproach, reason);}
     else if (kind == SlotKind::kIntersectionC) {set_state(kIntersectionCApproach, reason);}
+    else if (kind == SlotKind::kReverseParking) {enter_bridge();}
     else if (kind == SlotKind::kLaneChange1 || kind == SlotKind::kLaneChange4) {
       complete_active_event(reason);
       set_state(kRightLaneFollow, reason);
@@ -522,11 +530,19 @@ private:
   {
     if (!active_event_index_) {reset_to_lane_follow("bridge requested without event"); return;}
     const SlotKind kind = kCourseSequence[*active_event_index_];
-    const YAML::Node event = events_[event_id_for(kind)];
-    const std::string direction = selected_direction(now_s());
-    const YAML::Node key_node = event["paths"] ? event["paths"][direction] : YAML::Node();
-    if (!key_node) {reset_to_lane_follow("missing event path"); return;}
-    const std::string key = key_node.as<std::string>();
+    std::string key;
+    if (kind == SlotKind::kReverseParking) {
+      // No direction indirection here -- there's only ever one reverse-parking maneuver, and its
+      // path is named after the event itself (paths.reverse_parking), not selected via
+      // signal/mission direction like the intersections.
+      key = event_id_for(kind);
+    } else {
+      const YAML::Node event = events_[event_id_for(kind)];
+      const std::string direction = selected_direction(now_s());
+      const YAML::Node key_node = event["paths"] ? event["paths"][direction] : YAML::Node();
+      if (!key_node) {reset_to_lane_follow("missing event path"); return;}
+      key = key_node.as<std::string>();
+    }
     const auto transformed = transform_relative_path(paths_[key]);
     if (!transformed) {reset_to_lane_follow("empty event path"); return;}
     transformed_path_ = *transformed;
@@ -534,7 +550,8 @@ private:
     bridge_end_ = std::make_pair(p.x, p.y);
     bridge_started_ = std::chrono::steady_clock::now();
     const char * turn_state = kind == SlotKind::kIntersectionA ? kIntersectionATurnBridge :
-      kind == SlotKind::kIntersectionB ? kIntersectionBTurnBridge : kIntersectionCTurnBridge;
+      kind == SlotKind::kIntersectionB ? kIntersectionBTurnBridge :
+      kind == SlotKind::kReverseParking ? kReverseParkingTurnBridge : kIntersectionCTurnBridge;
     set_state(turn_state, "path=" + key);
   }
 
@@ -629,7 +646,7 @@ private:
     {
       if (signal_allows_entry(t)) {enter_bridge();}
     } else if (state_ == kIntersectionATurnBridge || state_ == kIntersectionBTurnBridge ||
-      state_ == kIntersectionCTurnBridge)
+      state_ == kIntersectionCTurnBridge || state_ == kReverseParkingTurnBridge)
     {
       publish_bridge_path();
       const double elapsed = std::chrono::duration<double>(

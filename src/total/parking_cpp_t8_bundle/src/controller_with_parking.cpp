@@ -163,7 +163,12 @@ private:
     return parking_cpp::clamp(reduced, minimum_speed_, cruise_speed_);
   }
 
-  Command pure_pursuit_on_map_path(const std::vector<Point2D> & path, double lookahead) const
+  // `reverse` targets a point behind the vehicle instead of ahead of it, for driving a path
+  // backward (e.g. a back-up-then-arc parking maneuver). The steering law is unchanged: the
+  // circular arc tangent to the vehicle's heading through the target point is the same arc
+  // whether it's driven forward or backward, only the direction of travel along it (and hence
+  // the sign of speed the caller applies) differs.
+  Command pure_pursuit_on_map_path(const std::vector<Point2D> & path, double lookahead, bool reverse = false) const
   {
     if (path.empty()) {return {};}
     std::size_t nearest = 0;
@@ -180,7 +185,8 @@ private:
     const double lx = std::cos(yaw_) * dx + std::sin(yaw_) * dy;
     const double ly = -std::sin(yaw_) * dx + std::cos(yaw_) * dy;
     const double ld2 = lx * lx + ly * ly;
-    if (lx <= 0.0 || ld2 < 1e-6) {return {};}
+    if (ld2 < 1e-6) {return {};}
+    if (reverse) {if (lx >= 0.0) {return {};}} else {if (lx <= 0.0) {return {};}}
     return Command{std::atan2(2.0 * wheelbase_ * ly, ld2), 0.0, true};
   }
 
@@ -231,8 +237,10 @@ private:
 
     if (!odom_ok) {target_steering = 0.0; target_speed = 0.0;}
     else if (phase == Phase::kTurnBridge) {
-      const Command c = pure_pursuit_on_map_path(bridge_path_, map_lookahead_);
-      target_steering = c.steering; target_speed = c.valid ? bridge_speed_ : 0.0;
+      const bool reverse_bridge = mode_.find("REVERSE") != std::string::npos;
+      const Command c = pure_pursuit_on_map_path(bridge_path_, map_lookahead_, reverse_bridge);
+      target_steering = c.steering;
+      target_speed = c.valid ? (reverse_bridge ? -bridge_speed_ : bridge_speed_) : 0.0;
     } else if (phase == Phase::kApproach) {
       if (lane_ok) {
         target_steering = lane_follow_command(0.0, use_right_lane_);
