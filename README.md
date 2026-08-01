@@ -25,6 +25,8 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 | 패키지 | 설명 |
 |--------|------|
 | `auto_vehicle` | 차량 제어(Ackermann/조이스틱), Gazebo 시뮬레이션, 차선 감지 및 시각화 |
+| `ublox`, `ublox_gps`, `ublox_msgs`, `ublox_serialization` | u-blox GNSS 드라이버 (외부 패키지, `vcstool`로 받음 — [빌드 방법](#빌드-방법-colcon) 참고) |
+| `ntrip_client` | NTRIP 클라이언트, RTK 보정 데이터 수신 (외부 패키지, `vcstool`로 받음) |
 
 ### `auto_vehicle` 구성 요소
 
@@ -64,14 +66,29 @@ HYPER/
 
 ## 빌드 방법 (colcon)
 
-### 1. 의존성 설치
+### 1. 외부 패키지 받기 (vcstool)
+
+`src/ublox`, `src/ntrip_client`는 이 저장소에 포함되지 않은 외부 패키지로, `deps.repos`에 정의된 원격 저장소에서 각자 클론해야 합니다.
+
+```bash
+cd ~/HYPER
+vcs import src < deps.repos
+```
+
+이미 받은 패키지를 최신 상태로 갱신하려면:
+
+```bash
+vcs pull src < deps.repos
+```
+
+### 2. 의존성 설치
 
 ```bash
 cd ~/HYPER
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-### 2. 빌드
+### 3. 빌드
 
 ```bash
 colcon build
@@ -83,7 +100,7 @@ colcon build
 colcon build --packages-select auto_vehicle
 ```
 
-### 3. 환경 소싱 (source)
+### 4. 환경 소싱 (source)
 
 빌드 후 **터미널을 새로 열 때마다** 아래 명령을 실행해야 합니다:
 
