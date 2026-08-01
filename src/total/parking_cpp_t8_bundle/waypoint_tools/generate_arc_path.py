@@ -7,18 +7,18 @@ in the file (GPS fixes, other events/paths, key order) — same approach as
 README.md "Method 2".
 
 Usage:
-    python3 src/waypoint/generate_arc_path.py --radius 8.0
+    python3 src/total/parking_cpp_t8_bundle/waypoint_tools/generate_arc_path.py --radius 8.0
 
 Other inputs (all optional, shown with their current intersection_C_left
 values as defaults):
-    python3 src/waypoint/generate_arc_path.py \
+    python3 src/total/parking_cpp_t8_bundle/waypoint_tools/generate_arc_path.py \
         --radius 8.0 \
         --lead-in -5.05 \
         --path-key reverse_parking \
-        --course-yaml src/waypoint/course.yaml
+        --course-yaml src/total/parking_cpp_t8_bundle/waypoint_tools/course.yaml
 
 Reverse example (back up 4m, then take a 3m-radius arc in reverse):
-    python3 src/waypoint/generate_arc_path.py \
+    python3 src/total/parking_cpp_t8_bundle/waypoint_tools/generate_arc_path.py \
         --radius 4.0 \
         --lead-in 4.3 \
         --post-back 1.0 \
@@ -27,7 +27,7 @@ Reverse example (back up 4m, then take a 3m-radius arc in reverse):
 
 Post-arc backing example (after the quarter-circle turn, back up an extra
 2m in the direction the vehicle is then facing):
-    python3 src/waypoint/generate_arc_path.py \
+    python3 src/total/parking_cpp_t8_bundle/waypoint_tools/generate_arc_path.py \
         --radius 8.0 \
         --post-back 2.0
 """
@@ -86,7 +86,7 @@ def main():
     parser.add_argument('--reverse', action='store_true', help='back straight instead of driving forward, then take the arc in reverse (mirror image of the forward path)')
     parser.add_argument('--post-back', type=float, default=0.0, help='additional straight backing distance in meters after the arc completes, continuing in the direction the vehicle is then facing (default: 0, no extra backing)')
     parser.add_argument('--path-key', default='intersection_C_left', help='key under paths: to replace (default: intersection_C_left)')
-    parser.add_argument('--course-yaml', default='src/waypoint/course.yaml', help='path to course.yaml (default: src/waypoint/course.yaml)')
+    parser.add_argument('--course-yaml', default='src/total/parking_cpp_t8_bundle/waypoint_tools/course.yaml', help='path to course.yaml (default: src/total/parking_cpp_t8_bundle/waypoint_tools/course.yaml)')
     args = parser.parse_args()
 
     with open(args.course_yaml) as f:

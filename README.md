@@ -12,7 +12,7 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 ./run_all.sh
 ```
 
-터미널 창 4개(gnome-terminal)를 자동으로 열어 스택 전체를 순서대로 띄웁니다: `1-sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → `2-odometry`(dual EKF + navsat_transform) → `3-perception`(차선/정지선 감지 + 신호등 감지) → `4-behavior`(`parking_cpp` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전. 아래 Terminal 4/5에서 설명하는 `src/waypoint/behavior.py`·`controller.py`(Python)와는 별개의, 더 최신 파이프라인입니다).
+터미널 창 4개(gnome-terminal)를 자동으로 열어 스택 전체를 순서대로 띄웁니다: `1-sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → `2-odometry`(dual EKF + navsat_transform) → `3-perception`(차선/정지선 감지 + 신호등 감지) → `4-behavior`(`parking_cpp` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전. 레거시 Python 기반 behavior/controller 파이프라인과는 별개의, 더 최신 파이프라인입니다).
 
 스택을 끄려면(터미널 창은 닫지 않고 프로세스만 종료):
 

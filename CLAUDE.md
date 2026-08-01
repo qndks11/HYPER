@@ -10,8 +10,7 @@ Colcon workspace rooted here (`~/HYPER`). `build/`, `install/`, `log/` are gitig
 
 - `src/auto_vehicle` — core package: Ackermann vehicle control, joystick teleop, lane/stopline detection, YOLO-based object/traffic-light detection. MIT license.
 - `src/auto_vehicle_gazebo` — Gazebo simulation only: worlds and plugins, depends on `auto_vehicle`.
-- `src/total/parking_cpp_t8_bundle` (ROS package `parking_cpp`) — the current behavior/planning stack: costmap, hybrid A* planner, behavior supervisor, controller. Apache-2.0.
-- `src/waypoint` — **legacy, not a ROS 2 package** (no `package.xml`). Superseded by `parking_cpp`. Don't build on or edit this unless explicitly asked.
+- `src/total/parking_cpp_t8_bundle` (ROS package `parking_cpp`) — the current behavior/planning stack: costmap, hybrid A* planner, behavior supervisor, controller. Apache-2.0. Its `waypoint_tools/` subfolder holds `course.yaml` (the live event/path data the behavior supervisor reads at startup) plus the standalone Python scripts used to author it (`waypoint_recorder.py`, `generate_arc_path.py`, `waypoint_view.py`) — these aren't `ros2 run` targets, just run directly with `python3`.
 
 No test suite and no CI are set up in this repo yet.
 

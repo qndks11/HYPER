@@ -10,7 +10,8 @@ def generate_launch_description():
     default_params = PathJoinSubstitution([
         FindPackageShare('parking_cpp'), 'config', 'parking_params.yaml'])
     default_course = PathJoinSubstitution([
-        EnvironmentVariable('HOME'), 'HYPER', 'src', 'waypoint', 'course.yaml'])
+        EnvironmentVariable('HOME'), 'HYPER', 'src', 'total', 'parking_cpp_t8_bundle',
+        'waypoint_tools', 'course.yaml'])
 
     params_file = LaunchConfiguration('params_file')
     course_yaml = LaunchConfiguration('course_yaml')

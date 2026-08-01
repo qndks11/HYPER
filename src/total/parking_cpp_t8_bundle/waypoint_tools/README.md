@@ -3,8 +3,7 @@
 `course.yaml` in this folder defines the course events (intersections, hill stops, the
 accel/obstacle zone) that the behavior supervisor reacts to. It's read at startup via the
 `event_path_yaml` param in `src/total/parking_cpp_t8_bundle/config/parking_params.yaml`
-(currently pointed at `~/HYPER/src/waypoint/course.yaml`) — this folder is legacy/not a built ROS 2
-package, but this file is still the live data source for the current C++ pipeline.
+(currently pointed at `~/HYPER/src/total/parking_cpp_t8_bundle/waypoint_tools/course.yaml`).
 
 Top-level structure:
 
@@ -45,15 +44,14 @@ path (e.g. `intersection_A_straight`) if unsure.
 
 ## Method 1 — record it live in Gazebo (preferred)
 
-`waypoint_recorder.py` (also duplicated under `src/total/parking_cpp_t8_bundle/`, but **run the
-copy in this folder** — the other copy's default `output` param resolves relative to its own
-directory and will silently write a second, unused `course.yaml` instead of the one
-`parking_params.yaml` actually points at) subscribes to `/gps/fix` and `/odometry/filtered_map`,
-and listens for text commands on `/waypoint/cmd`:
+`waypoint_recorder.py` subscribes to `/gps/fix` and `/odometry/filtered_map`, and listens for text
+commands on `/waypoint/cmd`. Its default `output` param resolves relative to this script's own
+directory, so run it from anywhere — it always writes to the `course.yaml` next to it in this
+folder, which is the one `parking_params.yaml` points at:
 
 ```bash
 source install/setup.bash
-python3 src/waypoint/waypoint_recorder.py
+python3 src/total/parking_cpp_t8_bundle/waypoint_tools/waypoint_recorder.py
 ```
 
 Typical flow for a new intersection direction:

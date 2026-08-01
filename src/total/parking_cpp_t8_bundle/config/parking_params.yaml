@@ -40,7 +40,7 @@ controller:
 
 behavior_supervisor:
   ros__parameters:
-    event_path_yaml: ~/HYPER/src/waypoint/course.yaml
+    event_path_yaml: ~/HYPER/src/total/parking_cpp_t8_bundle/waypoint_tools/course.yaml
     tick_hz: 10.0
     gps_timeout: 1.5
     odom_timeout: 0.5
