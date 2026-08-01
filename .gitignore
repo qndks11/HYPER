@@ -59,3 +59,6 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+# secret
+src/combined_rtk/config/ntrip_params.yaml
