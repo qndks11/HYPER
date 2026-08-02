@@ -1,5 +1,5 @@
-#ifndef AUTO_VEHICLE__LANE_DETECTION_HPP_
-#define AUTO_VEHICLE__LANE_DETECTION_HPP_
+#ifndef HYPER_LANE_DETECTION__LANE_DETECTION_HPP_
+#define HYPER_LANE_DETECTION__LANE_DETECTION_HPP_
 
 #include <string>
 #include <vector>
@@ -270,4 +270,4 @@ private:
   std::vector<cv::Point> prev_right_points_;
 };
 
-#endif  // AUTO_VEHICLE__LANE_DETECTION_HPP_
+#endif  // HYPER_LANE_DETECTION__LANE_DETECTION_HPP_

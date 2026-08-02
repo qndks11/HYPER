@@ -3,7 +3,7 @@
 <package format="3">
   <name>auto_vehicle</name>
   <version>0.0.0</version>
-  <description>Ackermann steering vehicle: robot model (urdf), control nodes, and perception. Usable on real hardware and in simulation (see auto_vehicle_gazebo for sim-only launch/worlds).</description>
+  <description>Ackermann steering vehicle: robot model (urdf) and control nodes (vehicle controller, joystick/keyboard teleop). Usable on real hardware and in simulation (see auto_vehicle_gazebo for sim-only launch/worlds; lane/object detection now live in hyper_lane_detection/hyper_object_detection under src/perception).</description>
   <maintainer email="workabotic@gmail.com">Lucas Mazzetto</maintainer>
   <license>MIT</license>
 

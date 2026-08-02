@@ -25,14 +25,14 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STOP_PATTERNS=(
     "ros2 launch auto_vehicle_gazebo vehicle.launch.py"
     "ros2 launch auto_vehicle odometry.launch.py"
-    "ros2 launch auto_vehicle perception.launch.py"
+    "ros2 launch hyper_object_detection perception.launch.py"
     "ros2 launch parking_cpp parking_system_cpp.launch.py"
     "ign gazebo"
     "gz sim"
     "robot_localization/ekf_node"
     "robot_localization/navsat_transform_node"
-    "lib/auto_vehicle/lane_detection"
-    "lib/auto_vehicle/object_detection"
+    "lib/hyper_lane_detection/lane_detection"
+    "lib/hyper_object_detection/object_detection"
     "lib/auto_vehicle/vehicle_controller"
     "lib/parking_cpp/"
 )
@@ -97,7 +97,7 @@ sleep 5
 run_in_terminal "2-odometry"   "ros2 launch auto_vehicle odometry.launch.py"
 sleep 2
 
-run_in_terminal "3-perception" "ros2 launch auto_vehicle perception.launch.py"
+run_in_terminal "3-perception" "ros2 launch hyper_object_detection perception.launch.py"
 sleep 2
 
 run_in_terminal "4-behavior"   "ros2 launch parking_cpp parking_system_cpp.launch.py"

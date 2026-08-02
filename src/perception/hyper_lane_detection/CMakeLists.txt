@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(auto_vehicle)
+project(hyper_lane_detection)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -13,36 +13,17 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
 
 include_directories(include)
 
-add_executable(vehicle_controller src/vehicle_controller.cpp)
-ament_target_dependencies(vehicle_controller rclcpp std_msgs)
-
-add_executable(joystick_controller src/joystick_controller.cpp)
-ament_target_dependencies(joystick_controller rclcpp std_msgs sensor_msgs)
-
-install(
-  DIRECTORY launch urdf config
-  DESTINATION share/${PROJECT_NAME}
-)
+add_executable(lane_detection src/lane_detection.cpp)
+ament_target_dependencies(lane_detection rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
 
 install(TARGETS
-  vehicle_controller
-  joystick_controller
+  lane_detection
   DESTINATION lib/${PROJECT_NAME}
-)
-
-install(PROGRAMS
-  scripts/keyboard_controller.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME keyboard_controller
-)
-
-install(PROGRAMS
-  scripts/image_saver.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME image_saver
 )
 
 if(BUILD_TESTING)

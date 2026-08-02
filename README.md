@@ -24,7 +24,9 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 | 패키지 | 설명 |
 |--------|------|
-| `auto_vehicle` | 차량 제어(Ackermann/조이스틱), Gazebo 시뮬레이션, 차선 감지 및 시각화 |
+| `auto_vehicle` | 차량 제어(Ackermann/조이스틱/키보드 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
+| `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
+| `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
 
 ### `auto_vehicle` 구성 요소
@@ -33,8 +35,13 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 |------------------|------|------|
 | `vehicle_controller` | `src/vehicle_controller.cpp` | Ackermann 조향/속도 명령 처리 |
 | `joystick_controller` | `src/joystick_controller.cpp` | 조이스틱 입력 → `/cmd_vel` 변환 |
-| `lane_detection` | `src/lane_detection.cpp` | 카메라 영상 기반 차선 감지 + OpenCV 디버그 대시보드 |
-| `object_detection` | `scripts/object_detection.py` | YOLO 기반 객체 탐지 + OpenCV 디버그 대시보드 |
+
+### `hyper_lane_detection` / `hyper_object_detection` 구성 요소 (perception)
+
+| 패키지 | 실행 파일 (노드) | 소스 | 설명 |
+|--------|------------------|------|------|
+| `hyper_lane_detection` | `lane_detection` | `src/lane_detection.cpp` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
+| `hyper_object_detection` | `object_detection` | `hyper_object_detection/object_detection.py` | YOLO 기반 객체/신호등 탐지 + OpenCV 디버그 대시보드 |
 
 ---
 
@@ -45,7 +52,7 @@ HYPER/
 ├── deps.repos                      # vcstool 매니페스트 (ublox, ntrip_client 소스 임포트)
 ├── run_all.sh                      # 전체 스택 4터미널 실행/종료
 ├── src/
-│   ├── auto_vehicle/                # 차량 제어 + 인지 (핵심 패키지, MIT)
+│   ├── auto_vehicle/                # 차량 제어 (핵심 패키지, MIT)
 │   │   ├── config/                  # 파라미터 (YAML)
 │   │   │   ├── dual_ekf_navsat.yaml
 │   │   │   ├── gz_ros2_control.yaml
@@ -53,10 +60,8 @@ HYPER/
 │   │   ├── include/auto_vehicle/    # 헤더 파일
 │   │   ├── launch/                  # ROS 2 launch 파일
 │   │   │   ├── joystick.launch.py
-│   │   │   ├── odometry.launch.py
-│   │   │   └── perception.launch.py
-│   │   ├── models/                  # YOLO 가중치 (best.pt)
-│   │   ├── scripts/                 # object_detection.py 등 Python 노드
+│   │   │   └── odometry.launch.py
+│   │   ├── scripts/                 # keyboard_controller.py, image_saver.py 등 Python 노드
 │   │   ├── src/                     # 노드 소스 코드 (위 표 참고)
 │   │   ├── urdf/                    # 로봇 모델 (URDF/xacro)
 │   │   ├── CMakeLists.txt
@@ -67,6 +72,18 @@ HYPER/
 │   │   ├── launch/vehicle.launch.py
 │   │   ├── worlds/                  # track.world + 모델
 │   │   └── package.xml
+│   ├── perception/                   # 차선/객체 감지 패키지 모음
+│   │   ├── hyper_lane_detection/     # 차선/정지선 감지 (C++, MIT)
+│   │   │   ├── include/hyper_lane_detection/
+│   │   │   ├── src/lane_detection.cpp
+│   │   │   ├── CMakeLists.txt
+│   │   │   └── package.xml
+│   │   └── hyper_object_detection/   # YOLO 객체/신호등 감지 (Python, MIT)
+│   │       ├── hyper_object_detection/object_detection.py
+│   │       ├── launch/perception.launch.py  # lane_detection + object_detection 동시 실행
+│   │       ├── models/               # YOLO 가중치 (best.pt)
+│   │       ├── setup.py
+│   │       └── package.xml
 │   ├── sensing/hyper_rtk/             # u-blox GPS + NTRIP 클라이언트 (RTK)
 │   │   ├── config/ntrip_params.yaml  # 로그인 정보 포함, gitignore 대상
 │   │   ├── launch/rtk.launch.py
@@ -238,11 +255,12 @@ ros2 launch auto_vehicle vehicle.launch.py x:=2.0 y:=1.0 z:=0.1 R:=0.0 P:=0.0 Y:
 
 ## 인지(perception) 노드 실행
 
-`vehicle.launch.py`는 차선/객체 감지 노드를 포함하지 않으므로, 별도로 실행해야 합니다. 시뮬레이션 카메라(`/camera/image_raw`)와 실제 카메라/rosbag 모두 동일하게 사용할 수 있습니다.
+`vehicle.launch.py`는 차선/객체 감지 노드를 포함하지 않으므로, 별도로 실행해야 합니다. 시뮬레이션 카메라(`/camera/image_raw`)와 실제 카메라/rosbag 모두 동일하게 사용할 수 있습니다. 차선 감지(`hyper_lane_detection`)와 객체 감지(`hyper_object_detection`)는 `src/perception/` 아래 별도 패키지이며, `perception.launch.py`가 둘을 함께 실행합니다.
 
 ```bash
-# 차선 감지(/lane/center 퍼블리시) + 객체 감지(YOLO), 각각 OpenCV 디버그 대시보드 표시
-ros2 launch auto_vehicle perception.launch.py
+# 차선 감지(hyper_lane_detection, /lane/center 퍼블리시) + 객체 감지(hyper_object_detection, YOLO)
+# 각각 OpenCV 디버그 대시보드 표시
+ros2 launch hyper_object_detection perception.launch.py
 ```
 
 시뮬레이션과 함께 사용하려면 `vehicle.launch.py`를 먼저 실행한 뒤, 별도 터미널에서 위 명령을 실행하면 됩니다.
@@ -254,7 +272,9 @@ ros2 launch auto_vehicle perception.launch.py
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
 | `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 카메라 영상 |
-| `/lane/center` | `std_msgs/Float64MultiArray` | auto_vehicle → | `[offset_m, steering_angle_deg, curvature_px, valid]` |
+| `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
+| `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
+| `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |
 | `/cmd_vel` | `geometry_msgs/Twist` | ROS → Gazebo | 속도 명령 |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS | 오도메트리 |
 | `/imu` | `sensor_msgs/Imu` | Gazebo → ROS | IMU |
