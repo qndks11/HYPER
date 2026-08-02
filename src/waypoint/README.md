@@ -120,3 +120,22 @@ this preserves key order and only touches the one path you're replacing.
   loop-back/near-180° section partway through if the driver looped the vehicle around before
   calling `record_end` — that's expected from how this particular track was recorded, not a bug in
   the data.
+- Parking events' `mark_parking:<event_id>:<style>` GPS fix and the later `record_start` call
+  (`entry` or, if `entry` is skipped, `spot` directly) are generally two different physical points
+  (the operator can call them minutes and meters apart) — the fix is only used for GPS-radius
+  triggering, while the recorded path's local origin is wherever `record_start` was actually issued.
+  `waypoint_recorder.py` records the exact displacement between the two as
+  `entry_trigger_offset`/`spot_trigger_offset: {dx, dy, dyaw}` on the event, and
+  `behavior_supervisor_with_parking.cpp` composes it onto the closest-GPS-approach pose to recover
+  the true anchor at replay time. An event recorded before these fields existed (or with
+  `mark_parking` called without a fresh `/odometry/filtered_map`) just has no such node, which falls
+  back to treating the closest-approach pose itself as the origin — re-run `mark_parking` +
+  `record_start` to backfill it.
+- A parking event's `entry_path` is optional: if the approach to the parking-start point has a real
+  lane, skip `record_start:<id>:entry` entirely and go straight to `record_start:<id>:spot`. At
+  replay, `check_parking_gps_approach()` in `behavior_supervisor_with_parking.cpp` checks whether
+  `entry_path` exists on the event — if so it drives it open-loop as before (`entry_trigger_offset`
+  anchored); if not, the vehicle stays in ordinary lane-following (whatever cruise state was already
+  active) right up to the GPS trigger, then jumps straight into `spot_path` anchored via
+  `spot_trigger_offset` instead of the live arrival pose the entry_path flow otherwise uses (there's
+  no "arrival" step to re-anchor from when there's no entry_path to arrive via).

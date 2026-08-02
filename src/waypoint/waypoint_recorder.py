@@ -27,6 +27,14 @@ event_path_recorder_gps.py
   set_obstacle_width:<event_id>:<half_width_m>
   set_obstacle_clear_hold:<event_id>:<seconds>
 
+  # 장애물 회피 구간 (S자 구간 등 -- 차선 추종 중 라이다로 고정 장애물을 옆으로 피함)
+  # start/end GPS 스키마는 가속 장애물 구간과 동일하지만, 실제 회피량은 이벤트별로 저장하지 않고
+  # behavior_supervisor_with_parking.cpp가 매 tick /scan을 클러스터링해서 계산한다 (자세한 튜닝
+  # 파라미터는 parking_params.yaml의 avoid_* 항목).
+  mark_avoid_start:<event_id>
+  mark_avoid_end:<event_id>
+  set_avoid_radius:<event_id>:<start_m>:<end_m>
+
   # 공통
   set_radius:<event_id>:<meters>
   delete_path:<event_id>:<direction>
@@ -36,15 +44,22 @@ event_path_recorder_gps.py
   save
 
   # 주차 (T존/평행주차)
+  # mark_parking 시점의 odom pose를 저장해 두었다가, 이후 record_start:entry (또는 entry 없이
+  # 바로 record_start:spot)가 실제로 호출된 위치와의 차이를 entry_trigger_offset /
+  # spot_trigger_offset(dx/dy/dyaw)으로 함께 저장한다. mark_parking 위치(GPS 트리거 지점)와
+  # record_start 위치(경로 원점)는 대개 서로 다른 지점이므로, 이 offset이 없으면 실행 시 "GPS
+  # 최근접점 = 경로 원점"이라는 근사만 쓸 수 있다.
   mark_parking:<event_id>:<t_zone|parallel>
   record_start:<event_id>:entry       # 차선 없는 구간을 건너 주차 시작점까지 (전진만)
-  record_end
+  record_end                          # 이 구간의 접근로에 차선이 있다면 entry는 생략 가능 --
+                                       # 그러면 실행 시 차선 추종으로 접근하다가 GPS 트리거에서
+                                       # 바로 spot_path로 진입한다 (spot_trigger_offset로 보정).
   record_start:<event_id>:spot        # 주차 시작점 -> 실제 주차 위치 (전후진 가능)
   set_gear:<forward|reverse>          # spot 기록 중 기어 전환 시점마다 호출
   record_end
   set_hold_duration:<event_id>:<seconds>
 
-예:
+예 (entry_path 있음, 접근로에 차선이 없는 경우):
   record_start:intersection_A:straight
   mark_stopline:slope_A
   set_radius:slope_A:2.5
@@ -54,6 +69,13 @@ event_path_recorder_gps.py
   record_end
   record_start:parking_t1:spot
   set_gear:reverse
+  record_end
+  save
+
+예 (entry_path 없음, 접근로에 차선이 있어 차선 추종으로 진입하는 경우):
+  mark_parking:parking_t1:t_zone
+  record_start:parking_t1:spot        # entry 단계 생략 -- 차선 추종하다가 GPS 트리거에서 바로
+                                       # 이 spot_path로 진입 (spot_trigger_offset로 보정됨)
   record_end
   save
 """
@@ -299,6 +321,11 @@ class EventPathRecorderGps(Node):
         self.parking_recording_event = None
         self.parking_recording_key = None  # 'entry' or 'spot'
         self.parking_origin_pose = None
+        # mark_parking 시점의 odom pose. event_id -> (x, y, yaw).
+        # record_start:entry가 실제로 호출된 위치가 이 pose 기준으로 얼마나 떨어져 있는지를
+        # entry_trigger_offset으로 저장해 두면, 실행 시 GPS 트리거 지점(mark_parking 위치)과
+        # entry_path 원점(record_start:entry 위치)이 다르다는 것을 감안해 앵커를 보정할 수 있다.
+        self.parking_mark_pose = {}
         self.parking_last_local_xy = None
         self.parking_raw_points = []
         self.parking_segments = []  # [{'gear': 'forward'|'reverse', 'points': [[x,y,yaw], ...]}]
@@ -505,6 +532,12 @@ class EventPathRecorderGps(Node):
             self.set_accel_value(parts[1], 'obstacle_clear_hold_s', parts[2], '해제 유지 시간')
         elif parts[0] == 'set_obstacle_distance' and len(parts) == 4:
             self.set_obstacle_distance(parts[1], parts[2], parts[3])
+        elif parts[0] in {'mark_avoid_start', 'mark_avoid_zone'} and len(parts) == 2:
+            self.mark_avoid_start(parts[1])
+        elif parts[0] == 'mark_avoid_end' and len(parts) == 2:
+            self.mark_avoid_end(parts[1])
+        elif parts[0] == 'set_avoid_radius' and len(parts) == 4:
+            self.set_avoid_radius(parts[1], parts[2], parts[3])
         else:
             self.get_logger().warn(
                 f"명령 형식 오류: '{command}'"
@@ -743,6 +776,95 @@ class EventPathRecorderGps(Node):
             f"'{event_id}' obstacle stop={stop:.2f}m, clear={clear:.2f}m"
         )
 
+    def mark_avoid_start(self, event_id):
+        """S자 구간 등, 차선 추종 중 고정 장애물을 라이다로 피해가야 하는 구간의 시작점.
+
+        가속 장애물 구간(mark_accel_start)과 GPS start/end 스키마는 동일하지만, 실제 회피량은
+        차량이 매 tick /scan을 클러스터링해서 계산하므로(behavior_supervisor_with_parking.cpp의
+        compute_avoid_offset), 여기서는 target_speed_mps/obstacle_* 같은 가속 구간 전용 필드를
+        들고 있지 않는다 -- 회피 튜닝 파라미터는 parking_params.yaml에 전역으로 둔다.
+        """
+        if not self.gps_fresh():
+            self.get_logger().warn('신선한 /gps/fix가 없습니다.')
+            return
+
+        latitude, longitude = self.current_gps
+        previous = self.events.get(event_id) or {}
+        for path_key in (previous.get('paths') or {}).values():
+            self.paths.pop(path_key, None)
+
+        previous_end = previous.get('end')
+        self.events[event_id] = {
+            'event_type': 'avoid_obstacle',
+            'start': {
+                'latitude': float(latitude),
+                'longitude': float(longitude),
+            },
+            'end': previous_end,
+            'start_radius_m': float(previous.get(
+                'start_radius_m',
+                previous.get('approach_radius_m', self.default_radius),
+            )),
+            'end_radius_m': float(previous.get('end_radius_m', self.default_radius)),
+            'signal_required': False,
+            'paths': {},
+        }
+        if self.events[event_id]['end'] is None:
+            self.events[event_id].pop('end')
+
+        self.get_logger().info(
+            f"장애물 회피 구간 시작점 등록: '{event_id}' "
+            f"({latitude:.8f}, {longitude:.8f})"
+        )
+
+    def mark_avoid_end(self, event_id):
+        if not self.gps_fresh():
+            self.get_logger().warn('신선한 /gps/fix가 없습니다.')
+            return
+
+        event = self.events.get(event_id)
+        if not event or event.get('event_type') != 'avoid_obstacle':
+            self.get_logger().warn(
+                f"'{event_id}' 시작점이 없습니다. mark_avoid_start를 먼저 실행하세요."
+            )
+            return
+
+        latitude, longitude = self.current_gps
+        event['end'] = {
+            'latitude': float(latitude),
+            'longitude': float(longitude),
+        }
+        event.setdefault('end_radius_m', self.default_radius)
+        self.get_logger().info(
+            f"장애물 회피 구간 끝점 등록: '{event_id}' "
+            f"({latitude:.8f}, {longitude:.8f})"
+        )
+
+    def set_avoid_radius(self, event_id, start_text, end_text):
+        try:
+            start_radius = float(start_text)
+            end_radius = float(end_text)
+        except ValueError:
+            self.get_logger().warn('시작/끝 반경은 숫자여야 합니다.')
+            return
+
+        if start_radius <= 0.0 or end_radius <= 0.0:
+            self.get_logger().warn('시작/끝 반경은 0보다 커야 합니다.')
+            return
+
+        event = self.events.get(event_id)
+        if not event or event.get('event_type') != 'avoid_obstacle':
+            self.get_logger().warn(
+                f"'{event_id}'는 장애물 회피 구간이 아닙니다. mark_avoid_start를 먼저 실행하세요."
+            )
+            return
+
+        event['start_radius_m'] = start_radius
+        event['end_radius_m'] = end_radius
+        self.get_logger().info(
+            f"'{event_id}' 시작 반경={start_radius:.2f}m, 끝 반경={end_radius:.2f}m"
+        )
+
     def set_stop_duration(self, event_id, duration_text):
         try:
             duration = float(duration_text)
@@ -800,6 +922,16 @@ class EventPathRecorderGps(Node):
             event['spot_path'] = previous['spot_path']
 
         self.events[event_id] = event
+
+        if self.odom_fresh():
+            self.parking_mark_pose[event_id] = self.current_odom
+        else:
+            self.parking_mark_pose.pop(event_id, None)
+            self.get_logger().warn(
+                '신선한 odom이 없어 entry_trigger_offset을 계산할 기준점을 저장하지 못했습니다. '
+                '(record_start:entry 시 offset 없이 기록됩니다)'
+            )
+
         self.get_logger().info(
             f"주차 이벤트 등록: '{event_id}' style={style} "
             f'({latitude:.8f}, {longitude:.8f})'
@@ -942,11 +1074,19 @@ class EventPathRecorderGps(Node):
 
         if key == 'entry':
             self.parking_raw_points = [[0.0, 0.0, 0.0]]
+            self._store_trigger_offset(event_id, 'entry_trigger_offset')
             self.get_logger().info(
                 f"주차 진입경로 기록 시작: event='{event_id}'\n"
-                '이 위치가 실행 시 트리거 기준점이 됩니다 (차선 없는 구간만 기록, 전진 전용).'
+                '이 위치가 실행 시 entry_trigger_offset 보정의 기준이 됩니다 '
+                '(차선 없는 구간만 기록, 전진 전용).'
             )
         else:
+            # entry_path 없이(=진입 구간을 차선 추종에 맡기는 경우) spot부터 바로 기록하는
+            # 경우를 위해, entry와 동일하게 mark_parking 위치 기준 offset을 남겨 둔다.
+            # entry_path가 있는 이벤트라면 이 값은 쓰이지 않는다 (그때는 entry_path를 끝까지
+            # 주행한 뒤의 실제 도착 pose로 spot_path를 다시 앵커링하는 게 더 정확하므로).
+            self._store_trigger_offset(event_id, 'spot_trigger_offset')
+
             # T존은 대회 규정상 기동 구간에서 전진을 안 쓰므로 처음부터 reverse로 시작한다
             # (매번 set_gear:reverse를 안 눌러도 되고, forward/reverse 시작점이 같은 위치에
             # 찍혀서 기어 판정이 애매해지는 것도 방지). 평행주차는 기존대로 forward로 시작.
@@ -957,6 +1097,34 @@ class EventPathRecorderGps(Node):
                 f"주차 기동경로 기록 시작: event='{event_id}' (기본 기어={default_gear})\n"
                 'set_gear:forward/reverse로 전후진 구간을 나누세요.'
             )
+
+    def _store_trigger_offset(self, event_id, field_name):
+        """mark_parking 위치 기준으로, 지금 이 위치(record_start 호출 시점)까지의
+        정확한 변위(dx, dy, dyaw)를 계산해 event[field_name]에 저장한다.
+
+        실행 시 behavior_supervisor가 GPS 최근접점(mark_parking 위치의 근사치)에 이 offset을
+        합성해서, 매번 트리거되는 실제 물리적 위치가 녹화 시점과 달라도 같은 상대 변위만큼
+        보정된 지점을 경로 원점으로 쓸 수 있게 한다.
+        """
+        mark_pose = self.parking_mark_pose.get(event_id)
+        if mark_pose is None:
+            self.events[event_id].pop(field_name, None)
+            self.get_logger().warn(
+                f'mark_parking 시점의 pose가 없어 {field_name}을 저장하지 못했습니다. '
+                '실행 시 GPS 최근접점을 그대로 경로 원점으로 사용합니다.'
+            )
+            return
+
+        dx, dy, dyaw = self.pose_to_local(mark_pose, *self.parking_origin_pose)
+        self.events[event_id][field_name] = {
+            'dx': round(float(dx), 4),
+            'dy': round(float(dy), 4),
+            'dyaw': round(float(dyaw), 5),
+        }
+        self.get_logger().info(
+            f'{field_name} 저장: dx={dx:.3f} dy={dy:.3f} dyaw={dyaw:.4f} '
+            '(mark_parking 위치 -> 이 위치)'
+        )
 
     def set_gear(self, gear_text):
         gear = GEARS.get(gear_text.lower())
@@ -1102,6 +1270,13 @@ class EventPathRecorderGps(Node):
                     f"end_radius={event.get('end_radius_m', self.default_radius)}m, "
                     f"speed={event.get('target_speed_mps', 4.0)}m/s, "
                     f"stop={event.get('obstacle_stop_distance_m', 2.0)}m"
+                )
+            elif event_type == 'avoid_obstacle':
+                lines.append(
+                    f"  {event_id}: type=avoid_obstacle, "
+                    f"start={event.get('start')}, end={event.get('end')}, "
+                    f"start_radius={event.get('start_radius_m', self.default_radius)}m, "
+                    f"end_radius={event.get('end_radius_m', self.default_radius)}m"
                 )
             elif event_type in PARKING_STYLES.values():
                 lines.append(

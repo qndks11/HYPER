@@ -746,7 +746,10 @@
   <gazebo reference="lidar_link">
     <sensor name="lidar_sensor" type="gpu_lidar">
       <always_on>1</always_on>
-      <update_rate>4</update_rate>
+      <!-- Raised from 4Hz: at 4Hz the AVOID-zone obstacle-avoidance logic (behavior_supervisor's
+           compute_avoid_offset()) could be reacting to LIDAR data up to 0.25s stale, eating into the
+           already-short distance/time available to steer around a close obstacle. -->
+      <update_rate>15</update_rate>
       <visualize>true</visualize>
       <topic>/scan</topic>
       <gz_frame_id>lidar_link</gz_frame_id>

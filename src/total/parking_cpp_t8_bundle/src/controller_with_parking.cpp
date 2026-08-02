@@ -61,7 +61,18 @@ public:
     lane_offset_sign_ = declare_parameter<double>("lane_offset_sign", -1.0);
     lane_heading_sign_ = declare_parameter<double>("lane_heading_sign", 1.0);
     lane_filter_alpha_ = declare_parameter<double>("lane_filter_alpha", 0.3);
-    avoid_offset_bias_ = declare_parameter<double>("avoid_offset_bias", 0.45);
+    // Reverted to 1.0 (i.e. inert) -- this was meant to just turn the dodge *response* sharper, but
+    // Stanley control drives effective_offset (measured lane offset + this bias) toward zero, so
+    // scaling bias alone shifts the *steady-state target itself*, not just how fast it's reached.
+    // At 1.8, a 0.7m dodge (avoid_decisive_offset_m_) actually settled at 1.26m off lane-center --
+    // past avoid_max_offset_m_'s 1.0m safety ceiling entirely, measured live via the long, hard
+    // (max-steering-angle) correction needed to recover from that overshoot once released, and
+    // implicated in a second obstacle being missed while still recovering from it. Now redundant
+    // with avoid_decisive_offset_m_ anyway (added later, in compute_avoid_offset(), which sizes the
+    // dodge correctly instead of scaling the control signal) -- kept as a parameter rather than
+    // deleted only so it's easy to find if "sharper dodge" comes up again, but do not raise this
+    // above 1.0 without separately re-deriving what steady-state offset it actually produces.
+    avoid_offset_gain_ = declare_parameter<double>("avoid_offset_gain", 1.0);
     map_lookahead_ = declare_parameter<double>("lookahead", 1.0);
     input_timeout_s_ = declare_parameter<double>("input_timeout", 0.30);
     base_frame_id_ = declare_parameter<std::string>("base_frame_id", "body_link");
@@ -152,6 +163,9 @@ public:
       std::bind(&ControllerWithParking::on_joint_states, this, std::placeholders::_1));
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
       "/imu", 10, std::bind(&ControllerWithParking::on_imu, this, std::placeholders::_1));
+    avoid_offset_sub_ = create_subscription<std_msgs::msg::Float64>(
+      "/avoid/offset_bias", 10,
+      std::bind(&ControllerWithParking::on_avoid_offset, this, std::placeholders::_1));
 
     command_pub_ = create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/cmd", 10);
     velocity_pub_ = create_publisher<std_msgs::msg::Float64>("/velocity", 10);
@@ -296,6 +310,17 @@ private:
     if (!std::isfinite(yaw)) {return;}
     imu_yaw_ = yaw;
     imu_time_s_ = now_s();
+  }
+
+  // Published by behavior_supervisor_with_parking.cpp's AVOID-zone LIDAR clustering (see
+  // compute_avoid_offset() there) -- how far off lane-center to bias to clear a detected obstacle,
+  // already sized for the vehicle's own half-width plus a safety margin. Only trusted while fresh
+  // (see the AVOID branch in control_step()); a stale value falls back to 0 rather than freezing an
+  // old bias, since a stopped/crashed supervisor should not leave the vehicle permanently offset.
+  void on_avoid_offset(const std_msgs::msg::Float64::SharedPtr msg)
+  {
+    avoid_offset_bias_ = msg->data;
+    avoid_offset_time_s_ = now_s();
   }
 
   double lane_follow_command(double offset_bias, bool use_right)
@@ -619,8 +644,24 @@ private:
       target_steering = lane_ok ? lane_follow_command(0.0, use_right_lane_) : 0.0;
       target_speed = 0.0;
     } else if (mode_ == "AVOID") {
-      if (lane_ok) {
-        target_steering = lane_follow_command(avoid_offset_bias_, use_right_lane_);
+      // Don't rigidly stick to use_right_lane_ (inherited from whichever cruise state preceded this
+      // zone) the way every other phase does -- the obstacle actually being dodged sits right beside
+      // the vehicle on one side, and can occlude the camera's view of *that side's* lane line right
+      // as a dodge needs it most, at which point lane_ok (computed off use_right_lane_ alone) would
+      // go false and freeze target_steering/target_speed exactly when a reaction matters most. Prefer
+      // whichever side this zone was already tracking, but fall back to the other one if it's
+      // currently the only one valid, rather than doing nothing.
+      const bool right_fresh = t - lane_time_s_ < input_timeout_s_ && right_valid_;
+      const bool left_fresh = t - lane_time_s_ < input_timeout_s_ && left_valid_;
+      if (right_fresh || left_fresh) {
+        const bool use_right_for_avoid = right_fresh && (use_right_lane_ || !left_fresh);
+        const bool avoid_offset_fresh = (t - avoid_offset_time_s_) < input_timeout_s_;
+        // avoid_offset_gain_ only scales the dodge component (bias), not ordinary lane-following
+        // (every other mode still calls lane_follow_command(0.0, ...) or with unscaled offset) --
+        // deliberately separate from stanley_k_ so this can be tuned more aggressively without
+        // making normal lane tracking twitchier everywhere else.
+        const double bias = avoid_offset_fresh ? avoid_offset_bias_ * avoid_offset_gain_ : 0.0;
+        target_steering = lane_follow_command(bias, use_right_for_avoid);
         target_speed = 0.6 * speed_for_curve(target_steering);
       }
     } else if (mode_ == "WAYPOINT_FOLLOW") {
@@ -669,7 +710,8 @@ private:
   double lane_curve_speed_reduction_{0.4};
   double stanley_k_{0.8}, stanley_v_min_{0.5};
   double lane_offset_sign_{-1.0}, lane_heading_sign_{1.0}, lane_filter_alpha_{0.3};
-  double avoid_offset_bias_{0.45}, map_lookahead_{1.0}, input_timeout_s_{0.3};
+  double avoid_offset_bias_{0.0}, avoid_offset_time_s_{-1e9}, avoid_offset_gain_{1.0};
+  double map_lookahead_{1.0}, input_timeout_s_{0.3};
   std::string base_frame_id_{"body_link"}, mode_{"LEFT_LANE_FOLLOW"};
   bool use_right_lane_{false};
   double left_angle_{0.0}, left_offset_{0.0}, right_angle_{0.0}, right_offset_{0.0};
@@ -719,6 +761,7 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr avoid_offset_sub_;
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr command_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr velocity_pub_, steering_pub_;
   rclcpp::TimerBase::SharedPtr timer_;

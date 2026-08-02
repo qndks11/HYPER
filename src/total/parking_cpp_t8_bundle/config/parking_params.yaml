@@ -34,7 +34,11 @@ controller:
     lane_offset_sign: -1.0
     lane_heading_sign: 1.0
     lane_filter_alpha: 0.3
-    avoid_offset_bias: 0.45
+    # 1.8로 했을 때 실제 정착 위치가 0.7m가 아니라 1.26m로 밀려서(Stanley는 effective_offset을
+    # 0으로 수렴시키므로 bias에 곱한 게인이 목표 자체를 그만큼 키움) avoid_max_offset_m 안전
+    # 상한을 넘어버리는 게 실측으로 확인됨 -- 1.0(무효화)으로 되돌림. avoid_decisive_offset_m가
+    # 이미 회피량을 안전하게 키워주므로 이 게인은 더 이상 필요 없음. 다시 올리지 말 것.
+    avoid_offset_gain: 1.0
     lookahead: 1.0
     input_timeout: 0.30
 
@@ -107,6 +111,33 @@ behavior_supervisor:
     obstacle_clear_distance_m: 2.5
     obstacle_half_width_m: 0.55
     obstacle_clear_hold_s: 1.0
+
+    # S자 구간 등, 차선 추종 중 고정 장애물을 옆으로 피해야 하는 구간 (AVOID 상태)
+    avoid_scan_half_angle_deg: 100.0
+    avoid_lookahead_m: 6.0
+    # 1.3으로는 폭이 넓은 장애물의 먼 쪽 끝이 필터에 잘려서 안 보이는 문제가 실측으로 확인됨
+    # (y_max가 계속 1.3 근처에 고정돼 있고, 가까워질수록 y_min만 계속 넓어짐 -- 방향/크기 판단을
+    # 불완전한 정보로 계속 다시 하게 됨). 3m 차선의 반폭(1.5m)보다 더 넓게 봐서 진짜 폭을 미리 확보
+    avoid_corridor_half_width_m: 2.0
+    avoid_margin_m: 0.05
+    # 장애물이 실제로 겹치기 전에 미리 조향을 시작하기 위한 여유. 0.3으로는 실측 결과 반응이
+    # x=1.04m에서야 시작돼서(장애물은 x=2.88m부터 보였는데) 너무 늦었음
+    avoid_anticipation_m: 0.9
+    # 라이다 기준 "이제 안 겹침"이 뜬 뒤에도 이 시간(초) 동안은 마지막 offset을 유지 -- 차가 이미
+    # 회피 조향 중이면 장애물의 상대 방위가 빨리 옆으로 빠져 보여서 실제로 다 지나기 전에
+    # 조기 복귀하는 문제(짧게 꺾었다 바로 라인추종 복귀)를 막기 위함
+    avoid_hold_s: 1.2
+    # hold 끝난 뒤 offset을 0으로 즉시 떨어뜨리지 않고 이 속도(m/s)로 서서히 복귀 -- 즉시
+    # 떨어뜨리면 실제 차선 중앙에서 벗어나 있던 오차가 갑자기 커져서 일반 차선 추종이 최대
+    # 조향각까지 급하게 꺾는 현상이 실측으로 확인됨 (그 여파로 다음 장애물을 놓침)
+    avoid_release_rate_m_s: 0.5
+    avoid_max_offset_m: 1.0
+    # 회피가 필요하다고 판단되면 최소 이만큼은 확실히 그쪽 차선 경계에 붙임 (최소 필요량이 이보다
+    # 크면 그 값을 그대로 씀 -- 이건 하한선일 뿐, 안전 여유를 줄이지 않음)
+    avoid_decisive_offset_m: 0.7
+    # 차량 실제 반폭(auto_vehicle body_width=0.81의 절반) -- 장애물을 이 폭만큼 부풀려서 피회전 계산
+    vehicle_half_width_m: 0.405
+    avoid_cluster_break_m: 0.3
 
     # 주차: entry_path 도착 판정(위치/헤딩), spot_path 도착 판정, 도착 후 정차 시간
     parking_entry_tolerance_m: 0.35
