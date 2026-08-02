@@ -7,7 +7,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     params_file = os.path.join(
-        get_package_share_directory('interface'), 'config', 'rplidar_params.yaml')
+        get_package_share_directory('hyper_lidar'), 'config', 'rplidar_params.yaml')
 
     rplidar_node = Node(
         package='rplidar_ros',

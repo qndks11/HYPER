@@ -88,7 +88,7 @@ HYPER/
 │   │   ├── config/ntrip_params.yaml  # 로그인 정보 포함, gitignore 대상
 │   │   ├── launch/rtk.launch.py
 │   │   └── package.xml
-│   ├── interface/                    # 센서 드라이버 launch 래핑 (RPLiDAR 등)
+│   ├── sensing/hyper_lidar/           # 센서 드라이버 launch 래핑 (RPLiDAR 등)
 │   │   ├── config/rplidar_params.yaml
 │   │   └── launch/rplidar.launch.py
 │   ├── total/parking_cpp_t8_bundle/  # 행동/계획 스택 (ROS 패키지 parking_cpp, Apache-2.0)
