@@ -11,7 +11,7 @@ def generate_launch_description():
 
     lane_detection_node = Node(
         package='hyper_lane_detection',
-        executable='lane_detection',
+        executable='lane_detection_node',
         remappings=[
             ('/image_raw', '/camera/image_raw'),
             ('/rear_image_raw', '/camera_rear/image_raw'),
@@ -21,7 +21,7 @@ def generate_launch_description():
 
     object_detection_node = Node(
         package='hyper_object_detection',
-        executable='object_detection',
+        executable='object_detection_node',
         remappings=[('/image_raw', '/camera_object/image_raw')],
         parameters=[{'model_path': model_path}],
         output='screen'

@@ -19,16 +19,16 @@ find_package(yaml-cpp REQUIRED)
 
 include_directories(include)
 
-add_executable(controller_with_parking src/controller_with_parking.cpp)
-ament_target_dependencies(controller_with_parking
+add_executable(controller_with_parking_node src/controller_with_parking_node.cpp)
+ament_target_dependencies(controller_with_parking_node
   rclcpp ackermann_msgs geometry_msgs nav_msgs sensor_msgs std_msgs)
 
-add_executable(behavior_supervisor_with_parking src/behavior_supervisor_with_parking.cpp)
-ament_target_dependencies(behavior_supervisor_with_parking
+add_executable(behavior_supervisor_with_parking_node src/behavior_supervisor_with_parking_node.cpp)
+ament_target_dependencies(behavior_supervisor_with_parking_node
   rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs)
-target_link_libraries(behavior_supervisor_with_parking yaml-cpp)
+target_link_libraries(behavior_supervisor_with_parking_node yaml-cpp)
 
-install(TARGETS controller_with_parking behavior_supervisor_with_parking
+install(TARGETS controller_with_parking_node behavior_supervisor_with_parking_node
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})

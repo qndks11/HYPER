@@ -16,7 +16,7 @@ def generate_launch_description():
     joy_node = Node(package="joy", executable="joy_node")
     
     joystick_controller_node = Node(package=package_name,
-                                    executable='joystick_controller',
+                                    executable='joystick_controller_node',
                                     parameters=[vehicle_params_path],
                                     output='screen')
 

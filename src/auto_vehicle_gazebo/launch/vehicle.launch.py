@@ -74,7 +74,7 @@ def start_vehicle_control():
 
 def generate_launch_description():
     # 시뮬레이션 전용 리소스(월드, gz 플러그인, ros_gz_bridge 설정)는 auto_vehicle_gazebo에,
-    # 차량 자체(urdf, 파라미터, vehicle_controller 실행 파일)는 실차에서도 쓰는 auto_vehicle에 있다.
+    # 차량 자체(urdf, 파라미터, vehicle_controller_node 실행 파일)는 실차에서도 쓰는 auto_vehicle에 있다.
     sim_package_name = "auto_vehicle_gazebo"
     sim_package_path = get_package_share_directory(sim_package_name)
 
@@ -248,7 +248,7 @@ def generate_launch_description():
 
     vehicle_controller_node = Node(
         package='auto_vehicle',
-        executable='vehicle_controller',
+        executable='vehicle_controller_node',
         parameters=[vehicle_params_path],
         output='screen'
     )

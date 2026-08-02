@@ -31,7 +31,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'object_detection = hyper_object_detection.object_detection:main',
+            'object_detection_node = hyper_object_detection.object_detection_node:main',
         ],
     },
 )

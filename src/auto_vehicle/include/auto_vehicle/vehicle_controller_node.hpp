@@ -1,5 +1,5 @@
-#ifndef VEHICLE_CONTROLLER_HPP
-#define VEHICLE_CONTROLLER_HPP
+#ifndef VEHICLE_CONTROLLER_NODE_HPP
+#define VEHICLE_CONTROLLER_NODE_HPP
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -99,4 +99,4 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
-#endif  // VEHICLE_CONTROLLER_HPP
+#endif  // VEHICLE_CONTROLLER_NODE_HPP

@@ -1,4 +1,4 @@
-#include "auto_vehicle/joystick_controller.hpp"
+#include "auto_vehicle/joystick_controller_node.hpp"
 
 JoystickController::JoystickController(const double timer_period) :
   Node{"joystick_controller"},

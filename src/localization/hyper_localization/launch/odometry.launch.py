@@ -18,7 +18,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
-    pkg_name = 'auto_vehicle'
+    pkg_name = 'hyper_localization'
 
     config = os.path.join(
         get_package_share_directory(pkg_name),

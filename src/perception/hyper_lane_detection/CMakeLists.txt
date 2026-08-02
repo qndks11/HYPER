@@ -18,11 +18,11 @@ find_package(OpenCV REQUIRED)
 
 include_directories(include)
 
-add_executable(lane_detection src/lane_detection.cpp)
-ament_target_dependencies(lane_detection rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
+add_executable(lane_detection_node src/lane_detection_node.cpp)
+ament_target_dependencies(lane_detection_node rclcpp std_msgs sensor_msgs cv_bridge OpenCV)
 
 install(TARGETS
-  lane_detection
+  lane_detection_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

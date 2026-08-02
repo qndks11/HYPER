@@ -12,7 +12,7 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 ./run_all.sh
 ```
 
-터미널 창 4개(gnome-terminal)를 자동으로 열어 스택 전체를 순서대로 띄웁니다: `1-sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → `2-odometry`(dual EKF + navsat_transform) → `3-perception`(차선/정지선 감지 + 신호등 감지) → `4-behavior`(`parking_cpp` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전. 아래 Terminal 4/5에서 설명하는 `src/waypoint/behavior.py`·`controller.py`(Python)와는 별개의, 더 최신 파이프라인입니다).
+터미널 창 4개(gnome-terminal)를 자동으로 열어 스택 전체를 순서대로 띄웁니다: `1-sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → `2-odometry`(dual EKF + navsat_transform) → `3-perception`(차선/정지선 감지 + 신호등 감지) → `4-behavior`(`parking_cpp` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전).
 
 스택을 끄려면(터미널 창은 닫지 않고 프로세스만 종료):
 
@@ -24,7 +24,8 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 | 패키지 | 설명 |
 |--------|------|
-| `auto_vehicle` | 차량 제어(Ackermann/조이스틱/키보드 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
+| `auto_vehicle` | 차량 제어(Ackermann/조이스틱 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
+| `hyper_localization` | dual EKF + navsat_transform (robot_localization 래핑, GPS 융합 오도메트리) |
 | `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
@@ -33,15 +34,15 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 | 실행 파일 (노드) | 소스 | 설명 |
 |------------------|------|------|
-| `vehicle_controller` | `src/vehicle_controller.cpp` | Ackermann 조향/속도 명령 처리 |
-| `joystick_controller` | `src/joystick_controller.cpp` | 조이스틱 입력 → `/cmd_vel` 변환 |
+| `vehicle_controller_node` | `src/vehicle_controller_node.cpp` | Ackermann 조향/속도 명령 처리 |
+| `joystick_controller_node` | `src/joystick_controller_node.cpp` | 조이스틱 입력 → `/cmd_vel` 변환 |
 
 ### `hyper_lane_detection` / `hyper_object_detection` 구성 요소 (perception)
 
 | 패키지 | 실행 파일 (노드) | 소스 | 설명 |
 |--------|------------------|------|------|
-| `hyper_lane_detection` | `lane_detection` | `src/lane_detection.cpp` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
-| `hyper_object_detection` | `object_detection` | `hyper_object_detection/object_detection.py` | YOLO 기반 객체/신호등 탐지 + OpenCV 디버그 대시보드 |
+| `hyper_lane_detection` | `lane_detection_node` | `src/lane_detection_node.cpp` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
+| `hyper_object_detection` | `object_detection_node` | `hyper_object_detection/object_detection_node.py` | YOLO 기반 객체/신호등 탐지 + OpenCV 디버그 대시보드 |
 
 ---
 
@@ -54,14 +55,11 @@ HYPER/
 ├── src/
 │   ├── auto_vehicle/                # 차량 제어 (핵심 패키지, MIT)
 │   │   ├── config/                  # 파라미터 (YAML)
-│   │   │   ├── dual_ekf_navsat.yaml
 │   │   │   ├── gz_ros2_control.yaml
 │   │   │   └── parameters.yaml
 │   │   ├── include/auto_vehicle/    # 헤더 파일
 │   │   ├── launch/                  # ROS 2 launch 파일
-│   │   │   ├── joystick.launch.py
-│   │   │   └── odometry.launch.py
-│   │   ├── scripts/                 # keyboard_controller.py, image_saver.py 등 Python 노드
+│   │   │   └── joystick.launch.py
 │   │   ├── src/                     # 노드 소스 코드 (위 표 참고)
 │   │   ├── urdf/                    # 로봇 모델 (URDF/xacro)
 │   │   ├── CMakeLists.txt
@@ -72,15 +70,20 @@ HYPER/
 │   │   ├── launch/vehicle.launch.py
 │   │   ├── worlds/                  # track.world + 모델
 │   │   └── package.xml
+│   ├── localization/hyper_localization/  # dual EKF + navsat_transform (robot_localization 래핑)
+│   │   ├── config/dual_ekf_navsat.yaml
+│   │   ├── launch/odometry.launch.py
+│   │   ├── CMakeLists.txt
+│   │   └── package.xml
 │   ├── perception/                   # 차선/객체 감지 패키지 모음
 │   │   ├── hyper_lane_detection/     # 차선/정지선 감지 (C++, MIT)
 │   │   │   ├── include/hyper_lane_detection/
-│   │   │   ├── src/lane_detection.cpp
+│   │   │   ├── src/lane_detection_node.cpp
 │   │   │   ├── CMakeLists.txt
 │   │   │   └── package.xml
 │   │   └── hyper_object_detection/   # YOLO 객체/신호등 감지 (Python, MIT)
-│   │       ├── hyper_object_detection/object_detection.py
-│   │       ├── launch/perception.launch.py  # lane_detection + object_detection 동시 실행
+│   │       ├── hyper_object_detection/object_detection_node.py
+│   │       ├── launch/perception.launch.py  # lane_detection_node + object_detection_node 동시 실행
 │   │       ├── models/               # YOLO 가중치 (best.pt)
 │   │       ├── setup.py
 │   │       └── package.xml
@@ -95,13 +98,13 @@ HYPER/
 │   │   ├── config/parking_params.yaml
 │   │   ├── include/parking_cpp/
 │   │   ├── launch/parking_system_cpp.launch.py
-│   │   ├── src/                      # behavior_supervisor_with_parking.cpp, controller_with_parking.cpp
+│   │   ├── src/                      # behavior_supervisor_with_parking_node.cpp, controller_with_parking_node.cpp
 │   │   └── CMakeLists.txt
 │   ├── waypoint/                     # course.yaml(경로/이벤트 데이터) 및 작성 도구
 │   │   ├── course.yaml               # behavior_supervisor가 참조하는 실주행 코스 데이터
-│   │   ├── waypoint_recorder.py      # 코스 좌표 기록 (ros2 run 아님, python3로 직접 실행)
+│   │   ├── waypoint_recorder_node.py # 코스 좌표 기록 (ros2 run 아님, python3로 직접 실행)
 │   │   ├── generate_arc_path.py
-│   │   ├── waypoint_view.py
+│   │   ├── waypoint_view_node.py
 │   ├── ublox/                        # vcstool로 받는 소스 (deps.repos), gitignore 대상
 │   └── ntrip_client/                 # vcstool로 받는 소스 (deps.repos), gitignore 대상
 └── README.md
@@ -230,13 +233,13 @@ ros2 launch hyper_rtk rtk.launch.py
 ros2 launch auto_vehicle vehicle.launch.py
 ```
 
-Gazebo 월드, 로봇 스폰, `robot_state_publisher`, `vehicle_controller`, `ros_gz_bridge`가 실행되고, 로봇 스폰이 끝나면 `ros2_control` 컨트롤러들이 순서대로 활성화됩니다.
+Gazebo 월드, 로봇 스폰, `robot_state_publisher`, `vehicle_controller_node`, `ros_gz_bridge`가 실행되고, 로봇 스폰이 끝나면 `ros2_control` 컨트롤러들이 순서대로 활성화됩니다.
 
 ### 실행 순서 (이벤트 기반으로 자동 처리)
 
 | 순서 | 실행되는 것 |
 |------|------------|
-| 1 | Gazebo 월드 (`track.world`) 시작 + `robot_state_publisher`, `vehicle_controller`, `ros_gz_bridge` 동시 실행 |
+| 1 | Gazebo 월드 (`track.world`) 시작 + `robot_state_publisher`, `vehicle_controller_node`, `ros_gz_bridge` 동시 실행 |
 | 2 | 로봇 엔티티 스폰 (`ackermann_steering_vehicle`) |
 | 3 | 스폰 완료 → `joint_state_broadcaster` 활성화 |
 | 4 | 활성화 완료 → `forward_velocity_controller`, `forward_position_controller` 활성화 |

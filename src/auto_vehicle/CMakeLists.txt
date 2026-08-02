@@ -16,11 +16,11 @@ find_package(sensor_msgs REQUIRED)
 
 include_directories(include)
 
-add_executable(vehicle_controller src/vehicle_controller.cpp)
-ament_target_dependencies(vehicle_controller rclcpp std_msgs)
+add_executable(vehicle_controller_node src/vehicle_controller_node.cpp)
+ament_target_dependencies(vehicle_controller_node rclcpp std_msgs)
 
-add_executable(joystick_controller src/joystick_controller.cpp)
-ament_target_dependencies(joystick_controller rclcpp std_msgs sensor_msgs)
+add_executable(joystick_controller_node src/joystick_controller_node.cpp)
+ament_target_dependencies(joystick_controller_node rclcpp std_msgs sensor_msgs)
 
 install(
   DIRECTORY launch urdf config
@@ -28,21 +28,9 @@ install(
 )
 
 install(TARGETS
-  vehicle_controller
-  joystick_controller
+  vehicle_controller_node
+  joystick_controller_node
   DESTINATION lib/${PROJECT_NAME}
-)
-
-install(PROGRAMS
-  scripts/keyboard_controller.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME keyboard_controller
-)
-
-install(PROGRAMS
-  scripts/image_saver.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME image_saver
 )
 
 if(BUILD_TESTING)

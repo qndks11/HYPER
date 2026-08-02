@@ -1,5 +1,5 @@
-#ifndef JOY_CONTROLLER_HPP
-#define JOY_CONTROLLER_HPP
+#ifndef JOYSTICK_CONTROLLER_NODE_HPP
+#define JOYSTICK_CONTROLLER_NODE_HPP
 
 #include <cmath>
 #include "rclcpp/rclcpp.hpp"
@@ -45,4 +45,4 @@ private:
   double velocity_;
 };
 
-#endif  // JOY_CONTROLLER_HPP
+#endif  // JOYSTICK_CONTROLLER_NODE_HPP

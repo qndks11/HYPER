@@ -19,12 +19,12 @@ def generate_launch_description():
         DeclareLaunchArgument('params_file', default_value=default_params),
         DeclareLaunchArgument('course_yaml', default_value=default_course),
         Node(
-            package='parking_cpp', executable='behavior_supervisor_with_parking',
+            package='parking_cpp', executable='behavior_supervisor_with_parking_node',
             name='behavior_supervisor', output='screen',
             parameters=[params_file, {'event_path_yaml': course_yaml}],
         ),
         Node(
-            package='parking_cpp', executable='controller_with_parking',
+            package='parking_cpp', executable='controller_with_parking_node',
             name='controller', output='screen', parameters=[params_file],
         ),
     ])

@@ -1,4 +1,4 @@
-#include "hyper_lane_detection/lane_detection.hpp"
+#include "hyper_lane_detection/lane_detection_node.hpp"
 
 #include <algorithm>
 #include <cmath>

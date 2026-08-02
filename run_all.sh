@@ -24,16 +24,16 @@ WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # behind if a launch tree was already killed uncleanly in a previous run.
 STOP_PATTERNS=(
     "ros2 launch auto_vehicle_gazebo vehicle.launch.py"
-    "ros2 launch auto_vehicle odometry.launch.py"
+    "ros2 launch hyper_localization odometry.launch.py"
     "ros2 launch hyper_object_detection perception.launch.py"
     "ros2 launch parking_cpp parking_system_cpp.launch.py"
     "ign gazebo"
     "gz sim"
     "robot_localization/ekf_node"
     "robot_localization/navsat_transform_node"
-    "lib/hyper_lane_detection/lane_detection"
-    "lib/hyper_object_detection/object_detection"
-    "lib/auto_vehicle/vehicle_controller"
+    "lib/hyper_lane_detection/lane_detection_node"
+    "lib/hyper_object_detection/object_detection_node"
+    "lib/auto_vehicle/vehicle_controller_node"
     "lib/parking_cpp/"
 )
 
@@ -94,7 +94,7 @@ run_in_terminal() {
 run_in_terminal "1-sim"        "ros2 launch auto_vehicle_gazebo vehicle.launch.py"
 sleep 5
 
-run_in_terminal "2-odometry"   "ros2 launch auto_vehicle odometry.launch.py"
+run_in_terminal "2-odometry"   "ros2 launch hyper_localization odometry.launch.py"
 sleep 2
 
 run_in_terminal "3-perception" "ros2 launch hyper_object_detection perception.launch.py"

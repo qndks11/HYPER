@@ -1,4 +1,4 @@
-#include "auto_vehicle/vehicle_controller.hpp"
+#include "auto_vehicle/vehicle_controller_node.hpp"
 
 VehicleController::VehicleController(const double timer_period, const double timeout_duration) :
   Node{"vehicle_controller"},

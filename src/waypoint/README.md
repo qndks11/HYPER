@@ -25,7 +25,7 @@ paths:
 ```
 
 `event_type`, GPS-based triggering, and each event's `paths` dict are all read generically by
-`behavior_supervisor_with_parking.cpp` — there's no per-event-ID special-casing anywhere in the
+`behavior_supervisor_with_parking_node.cpp` — there's no per-event-ID special-casing anywhere in the
 C++, so adding a new intersection or a new direction (`left`/`right`/`straight`) for an existing
 one only ever requires editing this one file.
 
@@ -36,8 +36,8 @@ relative to its own start pose, which is always `(0, 0, 0)`.
 
 **Positive yaw = a left turn**, and a left turn naturally drifts toward positive x (forward) *and*
 positive y (left) — e.g. a clean quarter-circle left turn of radius `R` ends at exactly
-`(R, R, +90°)`. This was confirmed by cross-checking `vehicle_controller.cpp` (which documents
-`steering_angle_ > 0.0` as steering left) against `waypoint_recorder.py`'s `pose_to_local()`
+`(R, R, +90°)`. This was confirmed by cross-checking `vehicle_controller_node.cpp` (which documents
+`steering_angle_ > 0.0` as steering left) against `waypoint_recorder_node.py`'s `pose_to_local()`
 rotation (the function that produces every recorded path's local x/y/yaw) — both use the same
 standard CCW-positive yaw convention. Get this sign backwards and a "left" path curves right (and
 vice versa) — this repo has had left/right mix-ups before, so double check against a known-good
@@ -45,15 +45,12 @@ path (e.g. `intersection_A_straight`) if unsure.
 
 ## Method 1 — record it live in Gazebo (preferred)
 
-`waypoint_recorder.py` (also duplicated under `src/total/parking_cpp_t8_bundle/`, but **run the
-copy in this folder** — the other copy's default `output` param resolves relative to its own
-directory and will silently write a second, unused `course.yaml` instead of the one
-`parking_params.yaml` actually points at) subscribes to `/gps/fix` and `/odometry/filtered_map`,
+`waypoint_recorder_node.py` subscribes to `/gps/fix` and `/odometry/filtered_map`,
 and listens for text commands on `/waypoint/cmd`:
 
 ```bash
 source install/setup.bash
-python3 src/waypoint/waypoint_recorder.py
+python3 src/waypoint/waypoint_recorder_node.py
 ```
 
 Typical flow for a new intersection direction:
@@ -74,7 +71,7 @@ ros2 topic pub --once /waypoint/cmd std_msgs/msg/String "{data: 'save'}"
 
 See the recorder's own docstring (top of the file, in Korean) for the full command list
 (`mark_stopline`, `mark_accel_start`/`end`, `delete_event`, `list`, `status`, ...). A clean `Ctrl-C`
-also auto-saves. `waypoint_view.py` in this folder visualizes the saved events/paths in RViz.
+also auto-saves. `waypoint_view_node.py` in this folder visualizes the saved events/paths in RViz.
 
 ## Method 2 — generate a path programmatically
 
@@ -88,7 +85,7 @@ parametrized by arc length and resampled at the same ~0.15 m spacing the recorde
 import math
 
 R = 10.0        # turn radius, meters
-spacing = 0.15  # match waypoint_recorder.py's resample_ds default
+spacing = 0.15  # match waypoint_recorder_node.py's resample_ds default
 
 arc_length = R * (math.pi / 2)   # quarter circle
 n = round(arc_length / spacing)
@@ -124,16 +121,16 @@ this preserves key order and only touches the one path you're replacing.
   (`entry` or, if `entry` is skipped, `spot` directly) are generally two different physical points
   (the operator can call them minutes and meters apart) — the fix is only used for GPS-radius
   triggering, while the recorded path's local origin is wherever `record_start` was actually issued.
-  `waypoint_recorder.py` records the exact displacement between the two as
+  `waypoint_recorder_node.py` records the exact displacement between the two as
   `entry_trigger_offset`/`spot_trigger_offset: {dx, dy, dyaw}` on the event, and
-  `behavior_supervisor_with_parking.cpp` composes it onto the closest-GPS-approach pose to recover
+  `behavior_supervisor_with_parking_node.cpp` composes it onto the closest-GPS-approach pose to recover
   the true anchor at replay time. An event recorded before these fields existed (or with
   `mark_parking` called without a fresh `/odometry/filtered_map`) just has no such node, which falls
   back to treating the closest-approach pose itself as the origin — re-run `mark_parking` +
   `record_start` to backfill it.
 - A parking event's `entry_path` is optional: if the approach to the parking-start point has a real
   lane, skip `record_start:<id>:entry` entirely and go straight to `record_start:<id>:spot`. At
-  replay, `check_parking_gps_approach()` in `behavior_supervisor_with_parking.cpp` checks whether
+  replay, `check_parking_gps_approach()` in `behavior_supervisor_with_parking_node.cpp` checks whether
   `entry_path` exists on the event — if so it drives it open-loop as before (`entry_trigger_offset`
   anchored); if not, the vehicle stays in ordinary lane-following (whatever cruise state was already
   active) right up to the GPS trigger, then jumps straight into `spot_path` anchored via
