@@ -698,6 +698,7 @@
       <update_rate>50</update_rate>
       <visualize>true</visualize>
       <topic>imu</topic>
+      <gz_frame_id>body_link</gz_frame_id>
       <imu>
         <!-- <angular_velocity>
           <x>
@@ -786,6 +787,7 @@
       <update_rate>5</update_rate>
       <visualize>true</visualize>
       <topic>gps/fix</topic>
+      <gz_frame_id>gps_link</gz_frame_id>
 
       <!-- <navsat>
         <position_sensing>
