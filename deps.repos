@@ -1,0 +1,9 @@
+repositories:
+  src/ublox:
+    type: git
+    url: https://github.com/KumarRobotics/ublox.git
+    version: ros2
+  src/ntrip_client:
+    type: git
+    url: https://github.com/LORD-MicroStrain/ntrip_client.git
+    version: ros2

@@ -10,8 +10,8 @@ Colcon workspace rooted here (`~/HYPER`). `build/`, `install/`, `log/` are gitig
 
 - `src/auto_vehicle` — core package: Ackermann vehicle control, joystick teleop, lane/stopline detection, YOLO-based object/traffic-light detection. MIT license.
 - `src/auto_vehicle_gazebo` — Gazebo simulation only: worlds and plugins, depends on `auto_vehicle`.
-- `src/total/parking_cpp_t8_bundle` (ROS package `parking_cpp`) — the current behavior/planning stack: costmap, hybrid A* planner, behavior supervisor, controller. Apache-2.0.
-- `src/waypoint` — **legacy, not a ROS 2 package** (no `package.xml`). Superseded by `parking_cpp`. Don't build on or edit this unless explicitly asked.
+- `src/total/parking_cpp_t8_bundle` (ROS package `parking_cpp`) — the current behavior/planning stack: costmap, hybrid A* planner, behavior supervisor, controller. Apache-2.0. Its `waypoint_tools/` subfolder is currently empty; `course.yaml` and its authoring scripts live under `src/waypoint` below, and `config/parking_params.yaml` / `launch/parking_system_cpp.launch.py` already default `course_yaml` there — no `course_yaml:=` override needed unless you're pointing at a different course file (e.g. sim vs. practice vs. competition).
+- `src/waypoint` — **not a ROS 2 package** (no `package.xml`), but the live location of `course.yaml` (the event/path data `parking_cpp`'s behavior supervisor reads at startup by default) plus the scripts used to author it (`waypoint_recorder.py`, `generate_arc_path.py`, `waypoint_view.py` — not `ros2 run` targets, run directly with `python3`). `behavior.py`/`controller.py` here are the old Python pipeline, superseded by `parking_cpp`'s C++ nodes — don't build on or edit those two unless explicitly asked.
 
 No test suite and no CI are set up in this repo yet.
 

@@ -25,6 +25,7 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 | 패키지 | 설명 |
 |--------|------|
 | `auto_vehicle` | 차량 제어(Ackermann/조이스틱), Gazebo 시뮬레이션, 차선 감지 및 시각화 |
+| `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
 
 ### `auto_vehicle` 구성 요소
 
@@ -41,22 +42,51 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 ```
 HYPER/
+├── deps.repos                      # vcstool 매니페스트 (ublox, ntrip_client 소스 임포트)
+├── run_all.sh                      # 전체 스택 4터미널 실행/종료
 ├── src/
-│   └── auto_vehicle/
-│       ├── config/                 # 파라미터 및 ROS↔Gazebo 브리지 설정 (YAML)
-│       │   ├── gz_ros2_control.yaml
-│       │   ├── parameters.yaml
-│       │   └── ros_gz_bridge.yaml
-│       ├── include/auto_vehicle/   # 헤더 파일
-│       ├── launch/                 # ROS 2 launch 파일
-│       │   ├── joystick.launch.py
-│       │   ├── perception.launch.py
-│       │   └── vehicle.launch.py
-│       ├── src/                    # 노드 소스 코드 (위 표 참고)
-│       ├── urdf/                   # 로봇 모델 (URDF/xacro)
-│       ├── worlds/                 # Gazebo 월드(SDF) 및 모델
-│       ├── CMakeLists.txt
-│       └── package.xml
+│   ├── auto_vehicle/                # 차량 제어 + 인지 (핵심 패키지, MIT)
+│   │   ├── config/                  # 파라미터 (YAML)
+│   │   │   ├── dual_ekf_navsat.yaml
+│   │   │   ├── gz_ros2_control.yaml
+│   │   │   └── parameters.yaml
+│   │   ├── include/auto_vehicle/    # 헤더 파일
+│   │   ├── launch/                  # ROS 2 launch 파일
+│   │   │   ├── joystick.launch.py
+│   │   │   ├── odometry.launch.py
+│   │   │   └── perception.launch.py
+│   │   ├── models/                  # YOLO 가중치 (best.pt)
+│   │   ├── scripts/                 # object_detection.py 등 Python 노드
+│   │   ├── src/                     # 노드 소스 코드 (위 표 참고)
+│   │   ├── urdf/                    # 로봇 모델 (URDF/xacro)
+│   │   ├── CMakeLists.txt
+│   │   └── package.xml
+│   ├── auto_vehicle_gazebo/         # Gazebo 시뮬레이션 전용, auto_vehicle에 의존
+│   │   ├── config/ros_gz_bridge.yaml
+│   │   ├── gz_plugins/              # TrafficLightPlugin.cc
+│   │   ├── launch/vehicle.launch.py
+│   │   ├── worlds/                  # track.world + 모델
+│   │   └── package.xml
+│   ├── sensing/hyper_rtk/             # u-blox GPS + NTRIP 클라이언트 (RTK)
+│   │   ├── config/ntrip_params.yaml  # 로그인 정보 포함, gitignore 대상
+│   │   ├── launch/rtk.launch.py
+│   │   └── package.xml
+│   ├── interface/                    # 센서 드라이버 launch 래핑 (RPLiDAR 등)
+│   │   ├── config/rplidar_params.yaml
+│   │   └── launch/rplidar.launch.py
+│   ├── total/parking_cpp_t8_bundle/  # 행동/계획 스택 (ROS 패키지 parking_cpp, Apache-2.0)
+│   │   ├── config/parking_params.yaml
+│   │   ├── include/parking_cpp/
+│   │   ├── launch/parking_system_cpp.launch.py
+│   │   ├── src/                      # behavior_supervisor_with_parking.cpp, controller_with_parking.cpp
+│   │   └── CMakeLists.txt
+│   ├── waypoint/                     # course.yaml(경로/이벤트 데이터) 및 작성 도구
+│   │   ├── course.yaml               # behavior_supervisor가 참조하는 실주행 코스 데이터
+│   │   ├── waypoint_recorder.py      # 코스 좌표 기록 (ros2 run 아님, python3로 직접 실행)
+│   │   ├── generate_arc_path.py
+│   │   ├── waypoint_view.py
+│   ├── ublox/                        # vcstool로 받는 소스 (deps.repos), gitignore 대상
+│   └── ntrip_client/                 # vcstool로 받는 소스 (deps.repos), gitignore 대상
 └── README.md
 ```
 
@@ -97,6 +127,81 @@ source ~/HYPER/install/setup.bash
 echo "source ~/HYPER/install/setup.bash" >> ~/.bashrc
 source ~/.bashrc
 ```
+
+---
+
+## GPS(RTK) 설치
+
+`hyper_rtk`(`src/sensing/hyper_rtk`) 패키지가 u-blox GPS 드라이버(`ublox_gps`)와 NTRIP 클라이언트(`ntrip_client`)를 함께 실행해 RTK 보정 위치를 퍼블리시합니다. 두 드라이버는 rosdep으로 설치되지 않는 소스 패키지라 vcstool로 따로 받아야 합니다.
+
+### 1. 드라이버 소스 받기
+
+```bash
+cd ~/HYPER
+vcs import src < deps.repos
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+`src/ublox`, `src/ntrip_client`가 새로 생깁니다 (`.gitignore` 대상 — vcstool로만 관리, 저장소에는 커밋되지 않음).
+
+### 2. GPS 장치 권한 / udev 규칙
+
+```bash
+sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
+```
+
+launch 파일(`rtk.launch.py`)이 장치를 고정 이름 `/dev/tty_Ardusimple`로 찾으므로, USB 포트 번호가 바뀌어도 안 흔들리도록 udev 규칙을 등록합니다. `/etc/udev/rules.d/99-ardusimple.rules` 생성:
+
+```
+KERNEL=="ttyACM[0-9]*", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK="tty_Ardusimple", GROUP="dialout", MODE="0666"
+```
+
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+다른 Ardusimple 보드/케이블을 쓴다면 `idVendor`/`idProduct`가 다를 수 있으니, 장치를 연결한 상태에서 아래로 직접 확인 후 값을 맞춰주세요:
+
+```bash
+udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct" | head -2
+```
+
+### 3. NTRIP 계정 설정
+
+`src/sensing/hyper_rtk/config/ntrip_params.yaml`은 NTRIP 캐스터 로그인 정보가 들어있어 `.gitignore` 대상입니다(저장소에는 없음). 없다면 새로 만듭니다:
+
+```yaml
+ntrip_client:
+  ros__parameters:
+    host: "<NTRIP 서버 주소>"       # 예: www.gnssdata.or.kr
+    port: 2101
+    mountpoint: "<마운트포인트>"     # 예: SOUL-RTCM32
+    ntrip_version: "None"
+    authenticate: true
+    username: "<계정>"
+    password: "<비밀번호>"
+    ssl: false
+    cert: "None"
+    key: "None"
+    ca_cert: "None"
+    rtcm_frame_id: "odom"
+    nmea_max_length: 128
+    nmea_min_length: 3
+    rtcm_message_package: "rtcm_msgs"
+    reconnect_attempt_max: 10
+    reconnect_attempt_wait_seconds: 5
+    rtcm_timeout_seconds: 4
+```
+
+### 4. 빌드 & 실행
+
+```bash
+colcon build --packages-select ublox_gps ublox_msgs ublox_serialization ntrip_client hyper_rtk
+source ~/HYPER/install/setup.bash
+ros2 launch hyper_rtk rtk.launch.py
+```
+
+정상 동작하면 `ublox_gps_node`가 `/ublox_gps_node/fix`(GPS 위치)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다.
 
 ---
 
@@ -154,14 +259,3 @@ ros2 launch auto_vehicle perception.launch.py
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS | 오도메트리 |
 | `/imu` | `sensor_msgs/Imu` | Gazebo → ROS | IMU |
 
----
-
-## 브랜치 구조
-
-```
-main          ← 안정 버전. 직접 push 금지, PR로만 머지.
-  ├── perception   ← 인지 스택 (현재 브랜치)
-  ├── control      ← 차량 제어
-  ├── planning     ← 경로 계획
-  └── dev          ← 통합 테스트
-```
