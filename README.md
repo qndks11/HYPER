@@ -6,31 +6,39 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 
 ## Command to run
 
-### 한 번에 실행 — `run_all.sh`
+### 한 번에 실행 — `hyper_launch`
 
 ```bash
-./run_all.sh
+ros2 launch hyper_launch simulation.launch.py
 ```
 
-터미널 창 4개(gnome-terminal)를 자동으로 열어 스택 전체를 순서대로 띄웁니다: `1-sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → `2-odometry`(dual EKF + navsat_transform) → `3-perception`(차선/정지선 감지 + 신호등 감지) → `4-behavior`(`parking_cpp` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전).
+한 프로세스 트리 안에서 스택 전체를 순서대로 띄웁니다: `sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → 5초 뒤 `odometry`(dual EKF + navsat_transform) → 7초 뒤 `perception`(차선/정지선 감지 + 신호등 감지) → 9초 뒤 `behavior`(`hyper_planner` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전).
 
-스택을 끄려면(터미널 창은 닫지 않고 프로세스만 종료):
+스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
+
+각 단계는 `src/launcher/hyper_launch/launch/`에 개별 launch 파일(`sim.launch.py`, `odometry.launch.py`, `perception.launch.py`, `behavior.launch.py`)로도 있어 단독 실행이 가능합니다:
 
 ```bash
-./run_all.sh stop
+ros2 launch hyper_launch sim.launch.py
+ros2 launch hyper_launch odometry.launch.py
+ros2 launch hyper_launch perception.launch.py
+ros2 launch hyper_launch behavior.launch.py
 ```
 
 ## 패키지 구성
 
 | 패키지 | 설명 |
 |--------|------|
-| `auto_vehicle` | 차량 제어(Ackermann/조이스틱 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
+| `hyper_launch` | 전체 스택 launch 오케스트레이션 (단계별 launch 파일 + 마스터 `simulation.launch.py`) |
+| `hyper_control` | 차량 제어(Ackermann/조이스틱 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
+| `hyper_gazebo` | Gazebo 시뮬레이션 전용 (월드, gz 플러그인), `hyper_control`에 의존 |
+| `hyper_planner` | 행동/계획 스택 (costmap, hybrid A* 플래너, behavior supervisor, controller) |
 | `hyper_localization` | dual EKF + navsat_transform (robot_localization 래핑, GPS 융합 오도메트리) |
 | `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
 
-### `auto_vehicle` 구성 요소
+### `hyper_control` 구성 요소
 
 | 실행 파일 (노드) | 소스 | 설명 |
 |------------------|------|------|
@@ -51,20 +59,28 @@ HL FMA 2026 1/5 — ROS 2 기반 자율주행 차량 플랫폼
 ```
 HYPER/
 ├── deps.repos                      # vcstool 매니페스트 (ublox, ntrip_client 소스 임포트)
-├── run_all.sh                      # 전체 스택 4터미널 실행/종료
 ├── src/
-│   ├── auto_vehicle/                # 차량 제어 (핵심 패키지, MIT)
+│   ├── launcher/hyper_launch/       # 전체 스택 launch 오케스트레이션
+│   │   ├── launch/
+│   │   │   ├── simulation.launch.py # 마스터: sim → odometry → perception → behavior 순서로 실행
+│   │   │   ├── sim.launch.py        # hyper_gazebo/vehicle.launch.py 래핑
+│   │   │   ├── odometry.launch.py   # hyper_localization/odometry.launch.py 래핑
+│   │   │   ├── perception.launch.py # hyper_object_detection/perception.launch.py 래핑
+│   │   │   └── behavior.launch.py   # hyper_planner/parking_system_cpp.launch.py 래핑
+│   │   ├── CMakeLists.txt
+│   │   └── package.xml
+│   ├── control/hyper_control/       # 차량 제어 (핵심 패키지, MIT)
 │   │   ├── config/                  # 파라미터 (YAML)
 │   │   │   ├── gz_ros2_control.yaml
 │   │   │   └── parameters.yaml
-│   │   ├── include/auto_vehicle/    # 헤더 파일
+│   │   ├── include/hyper_control/   # 헤더 파일
 │   │   ├── launch/                  # ROS 2 launch 파일
 │   │   │   └── joystick.launch.py
 │   │   ├── src/                     # 노드 소스 코드 (위 표 참고)
 │   │   ├── urdf/                    # 로봇 모델 (URDF/xacro)
 │   │   ├── CMakeLists.txt
 │   │   └── package.xml
-│   ├── auto_vehicle_gazebo/         # Gazebo 시뮬레이션 전용, auto_vehicle에 의존
+│   ├── simulator/hyper_gazebo/      # Gazebo 시뮬레이션 전용, hyper_control에 의존
 │   │   ├── config/ros_gz_bridge.yaml
 │   │   ├── gz_plugins/              # TrafficLightPlugin.cc
 │   │   ├── launch/vehicle.launch.py
@@ -94,9 +110,9 @@ HYPER/
 │   ├── sensing/hyper_lidar/           # 센서 드라이버 launch 래핑 (RPLiDAR 등)
 │   │   ├── config/rplidar_params.yaml
 │   │   └── launch/rplidar.launch.py
-│   ├── total/parking_cpp_t8_bundle/  # 행동/계획 스택 (ROS 패키지 parking_cpp, Apache-2.0)
+│   ├── planning/hyper_planner/       # 행동/계획 스택 (ROS 패키지 hyper_planner, Apache-2.0)
 │   │   ├── config/parking_params.yaml
-│   │   ├── include/parking_cpp/
+│   │   ├── include/hyper_planner/
 │   │   ├── launch/parking_system_cpp.launch.py
 │   │   ├── src/                      # behavior_supervisor_with_parking_node.cpp, controller_with_parking_node.cpp
 │   │   └── CMakeLists.txt
@@ -130,7 +146,7 @@ colcon build
 특정 패키지만 빌드하려면:
 
 ```bash
-colcon build --packages-select auto_vehicle
+colcon build --packages-select hyper_control
 ```
 
 ### 3. 환경 소싱 (source)
@@ -230,7 +246,9 @@ ros2 launch hyper_rtk rtk.launch.py
 ### Gazebo 시뮬레이션 + 차량 제어 실행
 
 ```bash
-ros2 launch auto_vehicle vehicle.launch.py
+ros2 launch hyper_gazebo vehicle.launch.py
+# 또는 동일한 인자를 받는 hyper_launch 래퍼:
+ros2 launch hyper_launch sim.launch.py
 ```
 
 Gazebo 월드, 로봇 스폰, `robot_state_publisher`, `vehicle_controller_node`, `ros_gz_bridge`가 실행되고, 로봇 스폰이 끝나면 `ros2_control` 컨트롤러들이 순서대로 활성화됩니다.
@@ -248,11 +266,13 @@ Gazebo 월드, 로봇 스폰, `robot_state_publisher`, `vehicle_controller_node`
 
 ```bash
 # 월드 파일 변경
-ros2 launch auto_vehicle vehicle.launch.py world:=/path/to/custom.sdf
+ros2 launch hyper_gazebo vehicle.launch.py world:=/path/to/custom.sdf
 
 # 로봇 초기 위치/자세 지정 (x, y, z, roll(R), pitch(P), yaw(Y))
-ros2 launch auto_vehicle vehicle.launch.py x:=2.0 y:=1.0 z:=0.1 R:=0.0 P:=0.0 Y:=0.0
+ros2 launch hyper_gazebo vehicle.launch.py x:=2.0 y:=1.0 z:=0.1 R:=0.0 P:=0.0 Y:=0.0
 ```
+
+같은 인자를 `ros2 launch hyper_launch sim.launch.py world:=... x:=...` 형태로도 그대로 넘길 수 있습니다.
 
 ---
 
@@ -264,6 +284,7 @@ ros2 launch auto_vehicle vehicle.launch.py x:=2.0 y:=1.0 z:=0.1 R:=0.0 P:=0.0 Y:
 # 차선 감지(hyper_lane_detection, /lane/center 퍼블리시) + 객체 감지(hyper_object_detection, YOLO)
 # 각각 OpenCV 디버그 대시보드 표시
 ros2 launch hyper_object_detection perception.launch.py
+# 또는: ros2 launch hyper_launch perception.launch.py
 ```
 
 시뮬레이션과 함께 사용하려면 `vehicle.launch.py`를 먼저 실행한 뒤, 별도 터미널에서 위 명령을 실행하면 됩니다.

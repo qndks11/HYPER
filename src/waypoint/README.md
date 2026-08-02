@@ -2,7 +2,7 @@
 
 `course.yaml` in this folder defines the course events (intersections, hill stops, the
 accel/obstacle zone) that the behavior supervisor reacts to. It's read at startup via the
-`event_path_yaml` param in `src/total/parking_cpp_t8_bundle/config/parking_params.yaml`
+`event_path_yaml` param in `src/planning/hyper_planner/config/parking_params.yaml`
 (currently pointed at `~/HYPER/src/waypoint/course.yaml`) — this folder is legacy/not a built ROS 2
 package, but this file is still the live data source for the current C++ pipeline.
 
