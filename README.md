@@ -29,103 +29,14 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 패키지 | 설명 |
 |--------|------|
-| `hyper_launch` | 전체 스택 launch 오케스트레이션 (단계별 launch 파일 + 마스터 `simulation.launch.py`) |
+| `hyper_launch` | 전체 스택 launch (단계별 launch 파일 + 마스터 `simulation.launch.py`) |
 | `hyper_control` | 차량 제어(Ackermann/조이스틱 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
 | `hyper_gazebo` | Gazebo 시뮬레이션 전용 (월드, gz 플러그인), `hyper_control`에 의존 |
-| `hyper_planner` | 행동/계획 스택 (costmap, hybrid A* 플래너, behavior supervisor, controller) |
+| `hyper_planner` | 행동/계획 스택 (behavior supervisor, controller) |
 | `hyper_localization` | dual EKF + navsat_transform (robot_localization 래핑, GPS 융합 오도메트리) |
 | `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
-
-### `hyper_control` 구성 요소
-
-| 실행 파일 (노드) | 소스 | 설명 |
-|------------------|------|------|
-| `vehicle_controller_node` | `src/vehicle_controller_node.cpp` | Ackermann 조향/속도 명령 처리 |
-| `joystick_controller_node` | `src/joystick_controller_node.cpp` | 조이스틱 입력 → `/cmd_vel` 변환 |
-
-### `hyper_lane_detection` / `hyper_object_detection` 구성 요소 (perception)
-
-| 패키지 | 실행 파일 (노드) | 소스 | 설명 |
-|--------|------------------|------|------|
-| `hyper_lane_detection` | `lane_detection_node` | `src/lane_detection_node.cpp` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
-| `hyper_object_detection` | `object_detection_node` | `hyper_object_detection/object_detection_node.py` | YOLO 기반 객체/신호등 탐지 + OpenCV 디버그 대시보드 |
-
----
-
-## 프로젝트 파일 구조
-
-```
-HYPER/
-├── deps.repos                      # vcstool 매니페스트 (ublox, ntrip_client 소스 임포트)
-├── src/
-│   ├── launcher/hyper_launch/       # 전체 스택 launch 오케스트레이션
-│   │   ├── launch/
-│   │   │   ├── simulation.launch.py # 마스터: sim → odometry → perception → behavior 순서로 실행
-│   │   │   ├── sim.launch.py        # hyper_gazebo/vehicle.launch.py 래핑
-│   │   │   ├── odometry.launch.py   # hyper_localization/odometry.launch.py 래핑
-│   │   │   ├── perception.launch.py # hyper_object_detection/perception.launch.py 래핑
-│   │   │   └── behavior.launch.py   # hyper_planner/parking_system_cpp.launch.py 래핑
-│   │   ├── CMakeLists.txt
-│   │   └── package.xml
-│   ├── control/hyper_control/       # 차량 제어 (핵심 패키지, MIT)
-│   │   ├── config/                  # 파라미터 (YAML)
-│   │   │   ├── gz_ros2_control.yaml
-│   │   │   └── parameters.yaml
-│   │   ├── include/hyper_control/   # 헤더 파일
-│   │   ├── launch/                  # ROS 2 launch 파일
-│   │   │   └── joystick.launch.py
-│   │   ├── src/                     # 노드 소스 코드 (위 표 참고)
-│   │   ├── urdf/                    # 로봇 모델 (URDF/xacro)
-│   │   ├── CMakeLists.txt
-│   │   └── package.xml
-│   ├── simulator/hyper_gazebo/      # Gazebo 시뮬레이션 전용, hyper_control에 의존
-│   │   ├── config/ros_gz_bridge.yaml
-│   │   ├── gz_plugins/              # TrafficLightPlugin.cc
-│   │   ├── launch/vehicle.launch.py
-│   │   ├── worlds/                  # track.world + 모델
-│   │   └── package.xml
-│   ├── localization/hyper_localization/  # dual EKF + navsat_transform (robot_localization 래핑)
-│   │   ├── config/dual_ekf_navsat.yaml
-│   │   ├── launch/odometry.launch.py
-│   │   ├── CMakeLists.txt
-│   │   └── package.xml
-│   ├── perception/                   # 차선/객체 감지 패키지 모음
-│   │   ├── hyper_lane_detection/     # 차선/정지선 감지 (C++, MIT)
-│   │   │   ├── include/hyper_lane_detection/
-│   │   │   ├── src/lane_detection_node.cpp
-│   │   │   ├── CMakeLists.txt
-│   │   │   └── package.xml
-│   │   └── hyper_object_detection/   # YOLO 객체/신호등 감지 (Python, MIT)
-│   │       ├── hyper_object_detection/object_detection_node.py
-│   │       ├── launch/perception.launch.py  # lane_detection_node + object_detection_node 동시 실행
-│   │       ├── models/               # YOLO 가중치 (best.pt)
-│   │       ├── setup.py
-│   │       └── package.xml
-│   ├── sensing/hyper_rtk/             # u-blox GPS + NTRIP 클라이언트 (RTK)
-│   │   ├── config/ntrip_params.yaml  # 로그인 정보 포함, gitignore 대상
-│   │   ├── launch/rtk.launch.py
-│   │   └── package.xml
-│   ├── sensing/hyper_lidar/           # 센서 드라이버 launch 래핑 (RPLiDAR 등)
-│   │   ├── config/rplidar_params.yaml
-│   │   └── launch/rplidar.launch.py
-│   ├── planning/hyper_planner/       # 행동/계획 스택 (ROS 패키지 hyper_planner, Apache-2.0)
-│   │   ├── config/parking_params.yaml
-│   │   ├── include/hyper_planner/
-│   │   ├── launch/parking_system_cpp.launch.py
-│   │   ├── src/                      # behavior_supervisor_with_parking_node.cpp, controller_with_parking_node.cpp
-│   │   └── CMakeLists.txt
-│   ├── waypoint/                     # course.yaml(경로/이벤트 데이터) 및 작성 도구
-│   │   ├── course.yaml               # behavior_supervisor가 참조하는 실주행 코스 데이터
-│   │   ├── waypoint_recorder_node.py # 코스 좌표 기록 (ros2 run 아님, python3로 직접 실행)
-│   │   ├── generate_arc_path.py
-│   │   ├── waypoint_view_node.py
-│   ├── ublox/                        # vcstool로 받는 소스 (deps.repos), gitignore 대상
-│   └── ntrip_client/                 # vcstool로 받는 소스 (deps.repos), gitignore 대상
-└── README.md
-```
-
 ---
 
 ## 빌드 방법 (colcon)
@@ -246,8 +157,6 @@ ros2 launch hyper_rtk rtk.launch.py
 ### Gazebo 시뮬레이션 + 차량 제어 실행
 
 ```bash
-ros2 launch hyper_gazebo vehicle.launch.py
-# 또는 동일한 인자를 받는 hyper_launch 래퍼:
 ros2 launch hyper_launch sim.launch.py
 ```
 
