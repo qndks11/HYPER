@@ -37,6 +37,7 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
+| `hyper_camera` | 실차 USB 카메라 구동 + rectify (`usb_cam` + `image_proc` 컴포저블 파이프라인) |
 ---
 
 ## 빌드 방법 (colcon)
@@ -152,11 +153,52 @@ ros2 launch hyper_rtk rtk.launch.py
 
 ---
 
+## 카메라 설치
+
+`hyper_camera`(`src/sensing/hyper_camera`) 패키지가 실차 USB 카메라(ELP-USBGS1200P01-KL170, global shutter)를 `usb_cam` 드라이버로 구동하고, 같은 컴포넌트 컨테이너 안에서 `image_proc`으로 rectify까지 처리합니다. `usb_cam`도 rosdep으로 설치되지 않는 소스 패키지라 GPS(RTK) 절의 `vcs import` 단계에서 `src/sensing/usb_cam`(우리 fork, `hyper-fixes` 브랜치)으로 함께 받아집니다.
+
+### 1. 장치 udev 규칙
+
+`video_device`가 `/dev/videoN` 고정 번호를 참조하는데, 다른 UVC 장치(내장/외장 웹캠 등)가 함께 연결되어 있으면 부팅·재연결 시 번호가 바뀔 수 있고, 최악의 경우 엉뚱한 카메라를 열어 ELP 캘리브레이션이 잘못된 영상에 적용됩니다. GPS와 동일하게 idVendor/idProduct 기준 udev 심볼릭 링크로 고정합니다. `/etc/udev/rules.d/99-elp-camera.rules` 생성:
+
+```
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="32e4", ATTRS{idProduct}=="0234", ATTR{index}=="0", SYMLINK+="video_elp"
+```
+
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+다른 카메라 모듈을 쓴다면 idVendor/idProduct가 다를 수 있으니, 장치를 연결한 상태에서 아래로 직접 확인 후 값을 맞춰주세요:
+
+```bash
+udevadm info -a -n /dev/video2 | grep -E "idVendor|idProduct" | head -2
+```
+
+UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(`ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, RTK의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
+
+규칙 적용 후 `hyper_camera`의 `config/params_1.yaml`은 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
+
+### 2. 빌드 & 실행
+
+```bash
+colcon build --packages-select usb_cam hyper_camera
+source ~/HYPER/install/setup.bash
+ros2 launch hyper_camera camera.launch.py
+```
+
+정상 동작하면 `/image_raw`(원본 영상), `/image_rect`(rectify된 영상), `/camera_info`(ELP-USBGS1200P01-KL170 캘리브레이션)가 퍼블리시됩니다.
+
+---
+
 ## 주요 토픽
 
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 카메라 영상 |
+| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 카메라 영상 (시뮬레이션) |
+| `/image_raw` | `sensor_msgs/Image` | hyper_camera → | 실차 USB 카메라 원본 영상 (`usb_cam`) |
+| `/image_rect` | `sensor_msgs/Image` | hyper_camera → | rectify된 영상 (`image_proc`) |
+| `/camera_info` | `sensor_msgs/CameraInfo` | hyper_camera → | ELP-USBGS1200P01-KL170 캘리브레이션 |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
 | `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |

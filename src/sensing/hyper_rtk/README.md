@@ -1,6 +1,11 @@
 # hyper_rtk
 
-u-blox GNSS 수신기와 NTRIP 클라이언트를 함께 실행해 RTK 보정 위치를 제공하는 패키지입니다. `ublox_gps`가 GNSS 위치를 읽고, `ntrip_client`가 RTCM 보정 데이터를 수신합니다.
+u-blox **ZED-F9P-01B GNSS RTK 보드**와 NTRIP 클라이언트를 함께 실행해 RTK 보정 위치를 제공하는 패키지입니다. `ublox_gps`가 ZED-F9P-01B에서 GNSS 위치를 읽고, `ntrip_client`가 RTCM 보정 데이터를 수신해 보정 정보를 전달합니다.
+
+## 사용 하드웨어
+
+- GNSS RTK 보드: u-blox ZED-F9P-01B
+- 연결 장치: `/dev/tty_Ardusimple` (launch 기본값)
 
 ## 실행
 

@@ -9,3 +9,5 @@ ros2 launch hyper_camera camera.launch.py
 ```
 
 카메라 장치와 해상도·픽셀 포맷은 `config/ELP-USBGS1200P01-KL170.yaml` 또는 `config/params_1.yaml`에서 장비에 맞게 조정합니다.
+
+`params_1.yaml`의 `video_device`는 `/dev/video_elp`(udev 심볼릭 링크)를 기본값으로 사용합니다. 설치 방법은 저장소 루트 README의 카메라 절을 참고하세요.
