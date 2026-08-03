@@ -89,7 +89,7 @@ vcs import src < deps.repos
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-`src/ublox`, `src/ntrip_client`가 새로 생깁니다 (`.gitignore` 대상 — vcstool로만 관리, 저장소에는 커밋되지 않음).
+`src/sensing/ublox`, `src/sensing/ntrip_client`가 새로 생깁니다 (`.gitignore` 대상 — vcstool로만 관리, 저장소에는 커밋되지 않음).
 
 ### 2. GPS 장치 권한 / udev 규칙
 
