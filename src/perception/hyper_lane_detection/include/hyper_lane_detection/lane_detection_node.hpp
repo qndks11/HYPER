@@ -1,14 +1,19 @@
 #ifndef HYPER_LANE_DETECTION__LANE_DETECTION_NODE_HPP_
 #define HYPER_LANE_DETECTION__LANE_DETECTION_NODE_HPP_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
 
+#include "image_transport/image_transport.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
+
+#include "hyper_lane_detection/elp_camera_capture.hpp"
+#include "hyper_lane_detection/input_backend.hpp"
 
 class LaneDetection : public rclcpp::Node
 {
@@ -17,6 +22,11 @@ public:
 
 private:
   enum class LaneSide { kLeft, kRight };
+
+  /// Which physical camera a frame came from -- selects the publishers/window/fit parameters
+  /// process_frame() runs it through. Orthogonal to InputBackend: the backend decides how a frame
+  /// arrives (topic vs. direct device), CameraSide decides whose lane it is.
+  enum class CameraSide { kFront, kRear };
 
   struct LaneFitResult
   {
@@ -35,73 +45,63 @@ private:
   };
 
   /**
-   * @brief Callback invoked for every incoming camera frame.
+   * @brief input_backend:=ros_compressed callback for the front camera (image_transport
+   * "compressed" transport). Decodes via cv_bridge and hands off to process_frame().
    *
-   * @details Warps the frame to a bird's-eye view via bird_eye(), then runs lane and stop-line
-   * detection against that single warp. Lane side: masks yellow paint, extracts it as a bare
-   * (x, y) point cloud, and walks a chain from each side (left and right of the vehicle's assumed
-   * centerline) via walk_lane_chain(), dropping any chain that crosses to the other side without
-   * getting farther from the vehicle -- see walk_lane_chain()'s doc for why that indicates both
-   * sides latched onto the same physical lane line. Each surviving chain is fit to a straight
-   * line via fit_lane() and published independently -- see kLaneCenterOffsetBiasM for how each
-   * side's offset is biased toward an estimated lane-center. Stop-line side: masks white paint
-   * and hands it to find_stopline() to pick out the stop-line bar by shape. Publishes each side's
-   * offset/steering angle/validity on `/lane/center` and stop-line validity/distance on
-   * `/stopline/detection`, and shows one combined BEV debug view (both masks, walked chains,
-   * fitted lines, stop-line box, and both sets of stats).
-   *
-   * Lane and stop-line detection used to live in separate nodes trading a shared bird's-eye image
-   * over topics (plus a third node just producing that image); folding all three into one node
-   * running against one in-memory frame skips the per-frame image (re)serialization and copies
-   * that cross-process publishing cost, and collapses what used to be duplicated constants
-   * (lane width, meters-per-pixel scale, window size) into one definition each.
-   *
-   * @param msg Incoming camera image.
+   * @param msg Incoming compressed-transport camera image.
    */
-  void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+  void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
+
+  /// input_backend:=ros_compressed callback for the rear camera -- see image_callback().
+  void rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
 
   /**
-   * @brief Same processing as image_callback(), for the rear camera -- used while backing into a
-   * parking spot to track the T-zone/parallel bay's side lines (yellow_mask + walk_lane_chain +
-   * fit_lane, same as the front) and the bay's back wall as a stop-line (white_mask +
-   * find_stopline). Publishes to /lane/rear_center and /stopline/rear_detection instead of the
-   * front topics, and draws its own debug window rather than sharing the front's.
+   * @brief input_backend:=ros_raw callback for the front camera: a plain sensor_msgs/Image
+   * subscription (no image_transport, no compressed transport). Gazebo's bridged camera image is
+   * already the expected simulation input, so this does not rectify -- it decodes via cv_bridge
+   * and hands off to process_frame() directly.
    *
-   * @param msg Incoming rear camera image.
+   * @param msg Incoming raw camera image.
    */
-  void rear_image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
+  void raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
+
+  /// input_backend:=ros_raw callback for the rear camera -- see raw_image_callback().
+  void raw_rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
 
   /**
-   * @brief The full per-frame pipeline shared by image_callback() and rear_image_callback():
-   * bird's-eye warp, lane and stop-line detection, message publish, and debug view. Factored out
-   * so both cameras run the identical algorithm against whichever publishers/window belong to
-   * them, rather than duplicating this body per camera.
+   * @brief input_backend:=direct_usb setup: opens the physical ELP camera via ElpCameraCapture
+   * (device, resolution, framerate, and calibration file all read from ROS parameters) and starts
+   * capture_timer_ polling it at the configured framerate. Front camera only -- direct_usb has no
+   * rear-camera equivalent, so nothing here waits on or fails without one.
    *
-   * @param image Raw camera frame (BGR8).
-   * @param lane_publisher Where to publish this camera's lane/center result.
-   * @param stopline_publisher Where to publish this camera's stop-line result.
-   * @param window_name Debug window title for this camera's view.
-   * @param lane_center_bias_m Distance from a single detected line to the target the offset is
-   * measured against -- see fit_lane()'s `center_bias_m`. The front camera passes
-   * kLaneCenterOffsetBiasM (mid-lane, assuming a same-width paired line); the rear camera passes
-   * kRearParkingLineStandoffM (a fixed standoff from the parking bay's one side line, not a
-   * lane-center assumption).
-   * @param use_curve_fit False (front camera): fit each side with fit_lane() (straight line). True
-   * (rear camera): fit each side with fit_lane_curve() (quadratic) instead, since the rear camera
-   * tracks a genuinely curved parking-bay line that a straight fit mis-estimates away from the
-   * near point.
-   * @param use_rear_roi False (front camera): warp using the front's road-lane ROI/BEV scale
-   * (kRoi* /kBevHeightScale). True (rear camera): use the rear-specific, farther-reaching,
-   * higher-resolution ROI/BEV scale (kRearRoi* /kRearBevHeightScale) instead -- see bird_eye().
+   * @throws std::runtime_error if the camera device can't be opened or its calibration can't be
+   * loaded; this is a startup failure and must not be swallowed into a degraded-but-running node.
    */
-  void process_and_publish(
-    const cv::Mat & image,
-    const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & lane_publisher,
-    const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & stopline_publisher,
-    const std::string & window_name,
-    double lane_center_bias_m,
-    bool use_curve_fit,
-    bool use_rear_roi);
+  void setup_direct_usb_capture();
+
+  /// capture_timer_'s callback: pulls one rectified frame from elp_capture_ and, on success, hands
+  /// it to process_frame(). A read failure is already logged inside ElpCameraCapture::read(), so
+  /// this just skips the tick rather than treating a transient glitch as fatal.
+  void capture_timer_callback();
+
+  /**
+   * @brief The full per-frame pipeline shared by every input backend and both cameras: bird's-eye
+   * warp, lane and stop-line detection, message publish, and debug view. Factored out so the
+   * algorithm itself never depends on how the frame arrived (ROS topic vs. direct device) or which
+   * camera it's from -- `side` alone selects the publishers/window/fit parameters below.
+   *
+   * @param image Camera frame (BGR8) -- already rectified for the front camera under
+   * input_backend:=direct_usb; passed through as-is for every other backend/camera combination
+   * (ros_compressed's front/rear were already rectified upstream by hyper_camera's RectifyNode
+   * before this refactor; ros_raw's simulated frames need no rectification at all).
+   * @param stamp Capture timestamp of `image`. Threaded through for future header-stamped outputs
+   * and latency logging; the current output messages (std_msgs/Float64MultiArray) carry no header
+   * of their own to stamp.
+   * @param side Which camera `image` is from -- selects between the front's kLaneCenterOffsetBiasM
+   * / fit_lane() / front ROI and the rear's kRearParkingLineStandoffM / fit_lane_curve() / rear
+   * ROI (see bird_eye()).
+   */
+  void process_frame(const cv::Mat & image, const rclcpp::Time & stamp, CameraSide side);
 
   /**
    * @brief Builds the perspective transform mapping the trapezoidal ROI (sampled from the
@@ -258,11 +258,22 @@ private:
   StoplineResult find_stopline(
     const cv::Mat & mask, const cv::Point2d & origin, double meters_per_pixel) const;
 
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber_;
+  hyper_lane_detection::InputBackend input_backend_{hyper_lane_detection::InputBackend::kRosCompressed};
+
+  // input_backend:=ros_compressed only.
+  image_transport::Subscriber image_subscriber_;
+  image_transport::Subscriber rear_image_subscriber_;
+
+  // input_backend:=ros_raw only.
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_image_subscriber_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_rear_image_subscriber_;
+
+  // input_backend:=direct_usb only -- front camera exclusively, see setup_direct_usb_capture().
+  std::unique_ptr<hyper_lane_detection::ElpCameraCapture> elp_capture_;
+  rclcpp::TimerBase::SharedPtr capture_timer_;
+
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_publisher_;
-
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr rear_image_subscriber_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_lane_center_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_stopline_publisher_;
 

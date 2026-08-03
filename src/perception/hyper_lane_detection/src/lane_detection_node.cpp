@@ -1,11 +1,19 @@
 #include "hyper_lane_detection/lane_detection_node.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.hpp>
+
+using hyper_lane_detection::ElpCameraCapture;
+using hyper_lane_detection::InputBackend;
+using hyper_lane_detection::parse_input_backend;
+using hyper_lane_detection::to_string;
 
 namespace
 {
@@ -142,16 +150,21 @@ bool is_spurious_cross_lane(const std::vector<cv::Point> & chain, const cv::Poin
 
 LaneDetection::LaneDetection() : Node{"lane_detection"}
 {
-  image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-    "/image_raw", 10, std::bind(&LaneDetection::image_callback, this, std::placeholders::_1));
+  const std::string backend_param =
+    declare_parameter<std::string>("input_backend", "ros_compressed");
+  const auto backend = parse_input_backend(backend_param);
+  if (!backend) {
+    RCLCPP_FATAL(
+      get_logger(),
+      "Invalid input_backend '%s' -- expected one of: direct_usb, ros_raw, ros_compressed",
+      backend_param.c_str());
+    throw std::invalid_argument("lane_detection_node: invalid input_backend '" + backend_param + "'");
+  }
+  input_backend_ = *backend;
 
   lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
   stopline_publisher_ =
     create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/detection", 10);
-
-  rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-    "/rear_image_raw", 10,
-    std::bind(&LaneDetection::rear_image_callback, this, std::placeholders::_1));
   rear_lane_center_publisher_ =
     create_publisher<std_msgs::msg::Float64MultiArray>("/lane/rear_center", 10);
   rear_stopline_publisher_ =
@@ -161,12 +174,88 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   cv::resizeWindow(
     "LaneDetection", kWindowWidth,
     static_cast<int>(kWindowHeight * kBevHeightScale) + kTextPanelHeight);
-  cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
-  cv::resizeWindow(
-    "LaneDetectionRear", kWindowWidth,
-    static_cast<int>(kWindowHeight * kRearBevHeightScale) + kTextPanelHeight);
 
-  RCLCPP_INFO(get_logger(), "LaneDetection started (front + rear)");
+  switch (input_backend_) {
+    case InputBackend::kRosCompressed:
+      // Both cameras arrive over the "compressed" transport (JPEG) rather than raw -- the
+      // vehicle's link to wherever these frames are encoded/decoded is bandwidth-constrained.
+      // image_transport negotiates the matching .../compressed topic and hands the callback an
+      // already-decoded Image, same as a plain subscription would. Kept only for A/B comparison
+      // and rollback against input_backend:=direct_usb.
+      image_subscriber_ = image_transport::create_subscription(
+        this, "/image_raw",
+        std::bind(&LaneDetection::image_callback, this, std::placeholders::_1), "compressed");
+      rear_image_subscriber_ = image_transport::create_subscription(
+        this, "/rear_image_raw",
+        std::bind(&LaneDetection::rear_image_callback, this, std::placeholders::_1),
+        "compressed");
+      break;
+
+    case InputBackend::kRosRaw:
+      // Gazebo simulation: ros_gz_bridge already publishes plain sensor_msgs/Image, so no
+      // image_transport/compressed subscription is needed here at all.
+      raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
+        "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
+      raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
+        "/rear_image_raw", 10,
+        std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
+      break;
+
+    case InputBackend::kDirectUsb:
+      // Real vehicle: this node owns the physical ELP camera directly (see
+      // setup_direct_usb_capture()) -- no ROS image topic involved for the front camera, and no
+      // rear-camera equivalent.
+      setup_direct_usb_capture();
+      break;
+  }
+
+  // The rear window only ever receives frames under ros_compressed/ros_raw -- direct_usb has no
+  // rear-camera path, so skip creating a window that would otherwise just sit blank.
+  if (input_backend_ != InputBackend::kDirectUsb) {
+    cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
+    cv::resizeWindow(
+      "LaneDetectionRear", kWindowWidth,
+      static_cast<int>(kWindowHeight * kRearBevHeightScale) + kTextPanelHeight);
+  }
+
+  RCLCPP_INFO(
+    get_logger(), "LaneDetection started (input_backend=%s)", to_string(input_backend_).c_str());
+}
+
+void LaneDetection::setup_direct_usb_capture()
+{
+  ElpCameraCapture::Config config;
+  config.device = declare_parameter<std::string>("video_device", "/dev/video_elp");
+  config.width = declare_parameter<int>("image_width", 1280);
+  config.height = declare_parameter<int>("image_height", 720);
+  config.framerate = declare_parameter<double>("framerate", 30.0);
+  config.calibration_file = declare_parameter<std::string>(
+    "calibration_file",
+    ament_index_cpp::get_package_share_directory("hyper_camera") +
+      "/config/ELP-USBGS1200P01-KL170.yaml");
+
+  elp_capture_ = std::make_unique<ElpCameraCapture>(get_logger());
+  if (!elp_capture_->open(config)) {
+    // ElpCameraCapture::open() has already logged the specific failure; a node that "starts" with
+    // no working camera would otherwise spin forever silently doing nothing.
+    throw std::runtime_error("lane_detection_node: direct_usb camera setup failed");
+  }
+
+  const auto period_s = std::chrono::duration<double>(1.0 / config.framerate);
+  capture_timer_ = create_wall_timer(
+    std::chrono::duration_cast<std::chrono::milliseconds>(period_s),
+    std::bind(&LaneDetection::capture_timer_callback, this));
+}
+
+void LaneDetection::capture_timer_callback()
+{
+  cv::Mat rectified;
+  if (!elp_capture_->read(rectified)) {
+    // Read failure is already logged inside ElpCameraCapture::read(); skip this tick rather than
+    // aborting the node over what may be a transient USB glitch.
+    return;
+  }
+  process_frame(rectified, now(), CameraSide::kFront);
 }
 
 cv::Mat LaneDetection::build_transform(
@@ -560,7 +649,7 @@ LaneDetection::StoplineResult LaneDetection::find_stopline(
   return result;
 }
 
-void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+void LaneDetection::image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
 {
   cv_bridge::CvImageConstPtr cv_ptr;
   try {
@@ -569,12 +658,10 @@ void LaneDetection::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
     RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
     return;
   }
-  process_and_publish(
-    cv_ptr->image, lane_center_publisher_, stopline_publisher_, "LaneDetection",
-    kLaneCenterOffsetBiasM, false, false);
+  process_frame(cv_ptr->image, msg->header.stamp, CameraSide::kFront);
 }
 
-void LaneDetection::rear_image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+void LaneDetection::rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
 {
   cv_bridge::CvImageConstPtr cv_ptr;
   try {
@@ -583,20 +670,48 @@ void LaneDetection::rear_image_callback(const sensor_msgs::msg::Image::SharedPtr
     RCLCPP_ERROR(get_logger(), "cv_bridge exception (rear): %s", e.what());
     return;
   }
-  process_and_publish(
-    cv_ptr->image, rear_lane_center_publisher_, rear_stopline_publisher_, "LaneDetectionRear",
-    kRearParkingLineStandoffM, false, true);
+  process_frame(cv_ptr->image, msg->header.stamp, CameraSide::kRear);
 }
 
-void LaneDetection::process_and_publish(
-  const cv::Mat & image,
-  const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & lane_publisher,
-  const rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr & stopline_publisher,
-  const std::string & window_name,
-  double lane_center_bias_m,
-  bool use_curve_fit,
-  bool use_rear_roi)
+void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
 {
+  cv_bridge::CvImageConstPtr cv_ptr;
+  try {
+    cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
+  } catch (const cv_bridge::Exception & e) {
+    RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
+    return;
+  }
+  process_frame(cv_ptr->image, msg->header.stamp, CameraSide::kFront);
+}
+
+void LaneDetection::raw_rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
+{
+  cv_bridge::CvImageConstPtr cv_ptr;
+  try {
+    cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
+  } catch (const cv_bridge::Exception & e) {
+    RCLCPP_ERROR(get_logger(), "cv_bridge exception (rear): %s", e.what());
+    return;
+  }
+  process_frame(cv_ptr->image, msg->header.stamp, CameraSide::kRear);
+}
+
+void LaneDetection::process_frame(
+  const cv::Mat & image, const rclcpp::Time & stamp, CameraSide side)
+{
+  // Reserved for future header-stamped outputs / latency logging -- the current output messages
+  // (std_msgs/Float64MultiArray) carry no header of their own to stamp.
+  (void)stamp;
+
+  const bool is_rear = side == CameraSide::kRear;
+  const auto & lane_publisher = is_rear ? rear_lane_center_publisher_ : lane_center_publisher_;
+  const auto & stopline_publisher = is_rear ? rear_stopline_publisher_ : stopline_publisher_;
+  const std::string window_name = is_rear ? "LaneDetectionRear" : "LaneDetection";
+  const double lane_center_bias_m = is_rear ? kRearParkingLineStandoffM : kLaneCenterOffsetBiasM;
+  const bool use_curve_fit = is_rear;
+  const bool use_rear_roi = is_rear;
+
   const cv::Mat warped = bird_eye(image, use_rear_roi);
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0 + kOriginBelowFrameMarginPx);
   // Shared by the lane-width plausibility check and stop-line distance below; fit_lane() also
@@ -772,7 +887,16 @@ void LaneDetection::process_and_publish(
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<LaneDetection>());
+  try {
+    rclcpp::spin(std::make_shared<LaneDetection>());
+  } catch (const std::exception & e) {
+    // Startup failures (bad input_backend, direct_usb camera/calibration failure) throw rather
+    // than leaving a half-initialized node spinning; surface them clearly instead of an opaque
+    // uncaught-exception crash.
+    RCLCPP_FATAL(rclcpp::get_logger("lane_detection"), "Startup failed: %s", e.what());
+    rclcpp::shutdown();
+    return 1;
+  }
   rclcpp::shutdown();
   return 0;
 }

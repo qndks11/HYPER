@@ -13,7 +13,20 @@
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>camera_calibration_parsers</depend>
   <depend>libopencv-dev</depend>
+
+  <!-- Pluginlib-loaded at runtime by image_transport for input_backend:=ros_compressed, not
+       linked against directly, so it's exec-only rather than a build depend. Kept only for that
+       backend's A/B comparison and rollback path. -->
+  <exec_depend>compressed_image_transport</exec_depend>
+
+  <!-- input_backend:=direct_usb loads its ELP calibration file from this package's share
+       directory at runtime (ament_index_cpp::get_package_share_directory), not a build/link
+       dependency. -->
+  <exec_depend>hyper_camera</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

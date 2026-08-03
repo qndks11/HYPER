@@ -143,7 +143,7 @@ ntrip_client:
 ros2 launch hyper_rtk rtk.launch.py
 ```
 
-정상 동작하면 `ublox_gps_node`가 `/ublox_gps_node/fix`(GPS 위치)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다.
+정상 동작하면 `ublox_gps_node`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다.
 
 ### LiDAR
 
@@ -157,7 +157,9 @@ ros2 launch hyper_lidar rplidar.launch.py
 
 ### USB 카메라
 
-`hyper_camera`(`src/sensing/hyper_camera`) 패키지가 실차 USB 카메라(ELP-USBGS1200P01-KL170, global shutter)를 `usb_cam` 드라이버로 구동하고, 같은 컴포넌트 컨테이너 안에서 `image_proc`으로 rectify까지 처리합니다.
+전방 ELP USB 카메라(ELP-USBGS1200P01-KL170, global shutter)는 `hyper_lane_detection`이 `input_backend:=direct_usb`일 때 `/dev/video_elp`를 직접 열어 MJPEG을 캡처·디코드하고 자체적으로 rectify까지 처리합니다 (중간 ROS 이미지 토픽 없음) — 실차 전체/단계별 launch(`real.launch.py` → `sensors.launch.py` + `perception.launch.py`)는 기본적으로 이 경로를 씁니다.
+
+`hyper_camera`(`src/sensing/hyper_camera`) 패키지는 이 카메라의 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`, `direct_usb`가 런타임에 참조)의 배포처로 남아 있고, `usb_cam` 드라이버 + `image_proc` rectify를 ROS 토픽으로 띄우는 독립 실행(아래) 및 롤백용 `input_backend:=ros_compressed` 경로에 계속 쓸 수 있습니다.
 
 #### 1. 장치 udev 규칙
 
@@ -179,15 +181,23 @@ udevadm info -a -n /dev/video2 | grep -E "idVendor|idProduct" | head -2
 
 UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(`ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, RTK의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
 
-규칙 적용 후 `hyper_camera`의 `config/params_1.yaml`은 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
+규칙 적용 후 `hyper_camera`의 `config/params_1.yaml`과 `hyper_lane_detection`의 `input_backend:=direct_usb`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
 
-#### 2. 실행
+#### 2. 독립 실행 (선택 — 기본 실차 경로에는 필요 없음)
 
 ```bash
 ros2 launch hyper_camera camera.launch.py
 ```
 
-정상 동작하면 `/image_raw`(원본 영상), `/image_rect`(rectify된 영상), `/camera_info`(ELP-USBGS1200P01-KL170 캘리브레이션)가 퍼블리시됩니다.
+정상 동작하면 `/image_raw`(원본 영상), `/image_rect`(rectify된 영상), `/camera_info`(ELP-USBGS1200P01-KL170 캘리브레이션)가 퍼블리시됩니다. 롤백용 `input_backend:=ros_compressed` 경로를 테스트하거나, 카메라 영상을 다른 용도로 ROS 토픽으로 띄워야 할 때만 이렇게 독립 실행하면 됩니다.
+
+### RealSense D435i
+
+`realsense2_camera`(rosdep으로 설치되는 apt 패키지, `sudo apt install ros-humble-realsense2-camera`)가 D435i를 구동합니다. 이 저장소에는 전용 패키지가 없고, `hyper_launch`의 `sensors.launch.py`가 `realsense2_camera`의 `rs_launch.py`를 직접 include해서 `camera_name:=camera_object`로 띄우고 객체 인식용 `/camera_object/image_raw`와 EKF용 `/imu`(`unite_imu_method:=1`로 합성된 gyro+accel)로 리매핑합니다.
+
+```bash
+ros2 launch realsense2_camera rs_launch.py camera_name:=camera_object camera_namespace:='' enable_gyro:=true enable_accel:=true unite_imu_method:=1
+```
 
 ---
 
@@ -195,28 +205,53 @@ ros2 launch hyper_camera camera.launch.py
 
 ### 한 번에 실행 — `hyper_launch`
 
+시뮬레이션:
+
 ```bash
 ros2 launch hyper_launch simulation.launch.py
 ```
 
 한 프로세스 트리 안에서 스택 전체를 순서대로 띄웁니다: `sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → 5초 뒤 `odometry`(dual EKF + navsat_transform) → 7초 뒤 `perception`(차선/정지선 감지 + 신호등 감지) → 9초 뒤 `behavior`(`hyper_planner` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전).
 
-스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
-
-각 단계는 `src/launcher/hyper_launch/launch/`에 개별 launch 파일(`sim.launch.py`, `odometry.launch.py`, `perception.launch.py`, `behavior.launch.py`)로도 있어 단독 실행이 가능합니다:
+실차 (Gazebo 대신 실제 센서로 동일한 파이프라인):
 
 ```bash
-ros2 launch hyper_launch sim.launch.py
+ros2 launch hyper_launch real.launch.py
+```
+
+`sim` 대신 `sensors`(D435i + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 전방 ELP 카메라는 `sensors`가 아니라 `perception` 단계에서 `hyper_lane_detection`이 `input_backend:=direct_usb`로 직접 열므로, `sensors.launch.py`에는 더 이상 포함되지 않습니다.
+
+스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
+
+각 단계는 `src/launcher/hyper_launch/launch/`에 개별 launch 파일로도 있어 단독 실행이 가능합니다:
+
+```bash
+ros2 launch hyper_launch sim.launch.py          # 시뮬레이션만 (실차: sensors.launch.py)
+ros2 launch hyper_launch sensors.launch.py      # 실차 센서만
 ros2 launch hyper_launch odometry.launch.py
 ros2 launch hyper_launch perception.launch.py
 ros2 launch hyper_launch behavior.launch.py
 ```
 
+#### 실차 센서 한 번에 실행 — `sensors.launch.py`
+
+물리 센서 3개를 각각 `hyper_localization`이 기대하는 토픽 역할로 리매핑해서 묶어 띄웁니다:
+
+| 센서 | 패키지 | 최종 토픽 |
+|------|--------|-----------|
+| RealSense D435i | `realsense2_camera` | `/camera_object/image_raw` (객체 인식), `/imu` (EKF) |
+| RPLidar | `hyper_lidar` | `/scan` |
+| u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
+
+전방 ELP usb_cam은 여기 포함되지 않습니다 — `perception.launch.py`가 `hyper_lane_detection`을 `input_backend:=direct_usb`로 실행하면서 `/dev/video_elp`를 직접 열고 자체 rectify까지 수행하므로, 이 카메라를 위한 별도 ROS 이미지 토픽/노드가 없습니다.
+
+후방 카메라(`/camera_rear/image_raw`)는 아직 실물이 없고, `direct_usb`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
+
 ## 패키지 구성
 
 | 패키지 | 설명 |
 |--------|------|
-| `hyper_launch` | 전체 스택 launch (단계별 launch 파일 + 마스터 `simulation.launch.py`) |
+| `hyper_launch` | 전체 스택 launch (단계별 launch 파일 + 마스터 `simulation.launch.py`/`real.launch.py`) |
 | `hyper_control` | 차량 제어(Ackermann/조이스틱 텔레옵), Gazebo 시뮬레이션용 로봇 모델 |
 | `hyper_gazebo` | Gazebo 시뮬레이션 전용 (월드, gz 플러그인), `hyper_control`에 의존 |
 | `hyper_planner` | 행동/계획 스택 (behavior supervisor, controller) |
@@ -225,21 +260,24 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
 | `hyper_lidar` | 실차 RPLidar 등 2D LiDAR 드라이버 실행 (시뮬레이션에서는 미사용) |
-| `hyper_camera` | 실차 USB 카메라 구동 + rectify (`usb_cam` + `image_proc` 컴포저블 파이프라인) |
+| `hyper_camera` | 실차 ELP USB 카메라 보정 파일 배포처 + 독립 실행용 `usb_cam`/`image_proc` 파이프라인 (기본 `direct_usb` 경로에서는 실행되지 않음, 롤백/단독 실행용) |
 ---
 
 ## 주요 토픽
 
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 카메라 영상 (시뮬레이션) |
-| `/image_raw` | `sensor_msgs/Image` | hyper_camera → | 실차 USB 카메라 원본 영상 (`usb_cam`) |
-| `/image_rect` | `sensor_msgs/Image` | hyper_camera → | rectify된 영상 (`image_proc`) |
-| `/camera_info` | `sensor_msgs/CameraInfo` | hyper_camera → | ELP-USBGS1200P01-KL170 캘리브레이션 |
+| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션만) | 전방 카메라 영상 (차선 인식, `input_backend:=ros_raw`가 구독). 실차 기본 경로(`direct_usb`)에서는 이 토픽 자체가 존재하지 않음 — `hyper_lane_detection`이 카메라를 직접 열고 끝까지 인메모리로 처리 |
+| `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / realsense2_camera → ROS (실차, D435i) | 객체 인식용 카메라 영상 |
+| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `direct_usb`는 후방 경로 자체가 없음) |
+| `/image_raw` | `sensor_msgs/Image` | hyper_camera → | `hyper_camera camera.launch.py` 단독 실행(롤백/테스트용) 시 실차 USB 카메라 원본 영상 (`usb_cam`, 리매핑 전) — 기본 `direct_usb` 경로에서는 발행되지 않음 |
+| `/image_rect` | `sensor_msgs/Image` | hyper_camera → | rectify된 영상 (`image_proc`, 위와 동일하게 단독 실행 시에만) |
+| `/camera_info` | `sensor_msgs/CameraInfo` | hyper_camera → | ELP-USBGS1200P01-KL170 캘리브레이션 (단독 실행 시에만; `direct_usb`는 같은 yaml을 `lane_detection_node`가 직접 읽음) |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
+| `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
 | `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |
 | `/cmd_vel` | `geometry_msgs/Twist` | ROS → Gazebo | 속도 명령 |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS | IMU |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / realsense2_camera → ROS (실차, D435i 내장 IMU) | IMU |

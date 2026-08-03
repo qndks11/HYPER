@@ -19,6 +19,10 @@ def generate_launch_description():
         executable='ublox_gps_node',
         name='ublox_gps_node',
         output='screen',
+        remappings=[
+            # hyper_localization의 navsat_transform_node가 구독하는 /gps/fix로 직접 발행
+            ('~/fix', 'gps/fix'),
+        ],
         parameters=[{
             'debug': 4,
             'device': '/dev/tty_Ardusimple',
@@ -50,7 +54,7 @@ def generate_launch_description():
         parameters=[ntrip_config],
         remappings=[
             # NTRIP caster에 보낼 현재 위치(NMEA/GGA) 소스
-            ('/fix', '/ublox_gps_node/fix'),
+            ('/fix', '/gps/fix'),
         ],
     )
 

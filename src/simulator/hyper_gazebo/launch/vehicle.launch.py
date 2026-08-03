@@ -287,7 +287,7 @@ def generate_launch_description():
         spawn_model_gazebo_node,
         robot_state_publisher_node,
         vehicle_controller_node,
-        gz_bridge_node
+        gz_bridge_node,
     ])
 
     return launch_description

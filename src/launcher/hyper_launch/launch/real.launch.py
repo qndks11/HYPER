@@ -5,9 +5,9 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
-# Stages are staggered to give Gazebo time to come up before the nodes that
-# depend on it attach -- mirrors run_all.sh's sleep 5 / sleep 2 / sleep 2 gaps
-# between terminals.
+# Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
+# same staggered stage delays apply so odometry/perception/behavior attach
+# once sensor drivers (RTK fix lock, D435i firmware init, etc.) are up.
 ODOMETRY_DELAY_S = 5.0
 PERCEPTION_DELAY_S = 7.0
 BEHAVIOR_DELAY_S = 9.0
@@ -23,12 +23,11 @@ def generate_launch_description():
             launch_arguments=launch_arguments.items())
 
     return LaunchDescription([
-        stage('sim.launch.py'),
+        stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
-        # Gazebo bridges plain sensor_msgs/Image already (see ros_gz_bridge.yaml), so
-        # lane_detection_node runs input_backend ros_raw here -- no rectification, no
-        # image_transport/compressed subscription.
+        # Real vehicle: lane_detection_node owns the ELP camera directly (input_backend
+        # direct_usb) -- hyper_camera is no longer started for it, see sensors.launch.py.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
-            stage('perception.launch.py', lane_input_backend='ros_raw')]),
+            stage('perception.launch.py', lane_input_backend='direct_usb')]),
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[stage('behavior.launch.py')]),
     ])
