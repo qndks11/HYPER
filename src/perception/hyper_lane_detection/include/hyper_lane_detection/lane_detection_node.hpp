@@ -111,23 +111,30 @@ private:
    * @param src_width Source image width [px], used only to locate the ROI corners.
    * @param dst_height Output (bird's-eye) image height [px].
    * @param dst_width Output (bird's-eye) image width [px].
-   * @param use_rear_roi False: the front camera's ROI (kRoi*). True: the rear camera's ROI
-   * (kRearRoi*), which reaches farther toward the horizon so the rear camera can pick up the
-   * parking bay's side line earlier while backing in.
+   * @param use_rear_roi Which camera side's ROI shape (front vs. rear) -- see bird_eye().
+   * @param use_sim_roi Which camera *model*'s ROI (real ELP vs. Gazebo sim) -- see bird_eye().
    * @return The 3x3 perspective transform matrix.
    */
   cv::Mat build_transform(
-    int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi) const;
+    int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi,
+    bool use_sim_roi) const;
 
   /**
    * @brief Warps the input image to a bird's-eye view using build_transform().
    *
-   * @param use_rear_roi False: the front camera's ROI/BEV height scale (kRoi* /kBevHeightScale).
-   * True: the rear camera's (kRearRoi* /kRearBevHeightScale) -- farther-reaching and stretched
-   * across more output pixels, for a clearer view of the (comparatively slow, close-range) parking
-   * maneuver than the front's ordinary-road-speed settings need.
+   * @param use_rear_roi False: front camera. True: rear camera -- reaches farther toward the
+   * horizon and stretched across more output rows, for a clearer view of the (comparatively slow,
+   * close-range) parking maneuver than the front's ordinary-road-speed settings need.
+   * @param use_sim_roi False: the real ELP camera, rectified from a ~170 deg fisheye lens down to
+   * a much narrower rectilinear projection (see ELP-USBGS1200P01-KL170.yaml's P vs. K). True: the
+   * Gazebo sim camera, a plain rectilinear model at its own, differently proportioned FOV and
+   * resolution (153 deg HFOV, 640x400 16:10 vs. the real camera's 1280x720 16:9). A homography
+   * tuned for one camera's FOV/geometry does not transfer to the other, so each combination of
+   * `use_rear_roi`/`use_sim_roi` gets its own ROI/BEV-height-scale constants (see the anonymous
+   * namespace in the .cpp) rather than sharing one set across cameras that don't actually see the
+   * same ground-plane geometry.
    */
-  cv::Mat bird_eye(const cv::Mat & image, bool use_rear_roi) const;
+  cv::Mat bird_eye(const cv::Mat & image, bool use_rear_roi, bool use_sim_roi) const;
 
   /**
    * @brief Produces a binary mask isolating yellow lane paint in HSV space.

@@ -17,34 +17,63 @@ using hyper_lane_detection::to_string;
 
 namespace
 {
-// ROI trapezoid corners as (row_ratio, col_ratio) of the source image. Bottom corner ratios
-// outside [0, 1] flare past the frame's own edges to capture more near-field width than the
-// frame alone shows at that row -- but warpPerspective can only sample pixels that actually exist
-// in the source frame, so the wider that flare, the more of bird_eye()'s output is unavoidably
-// black (see its corner triangles). Tune against the actual camera feed.
-constexpr double kRoiTopLeftRow = 0.48,  kRoiTopLeftCol = 0.35;
-constexpr double kRoiTopRightRow = 0.48, kRoiTopRightCol = 0.65;
-constexpr double kRoiBottomLeftRow = 1,  kRoiBottomLeftCol = -2;
-constexpr double kRoiBottomRightRow = 1, kRoiBottomRightCol = 3;
+// One camera's IPM (inverse perspective mapping) setup: a trapezoidal ROI, as (row_ratio,
+// col_ratio) of the source image, warped via getPerspectiveTransform() to a bird's-eye view whose
+// output height is `bev_height_scale` times the source frame height (width left unscaled). Bottom
+// corner ratios outside [0, 1] flare past the frame's own edges to capture more near-field width
+// than the frame alone shows at that row -- but warpPerspective can only sample pixels that
+// actually exist in the source frame, so the wider that flare, the more of bird_eye()'s output is
+// unavoidably black (see its corner triangles).
+//
+// A homography like this implicitly assumes a specific camera FOV/lens-distortion/mounting
+// geometry -- it's tuned by picking corners that happen to trace a flat rectangle on the ground
+// for *one particular camera*, not derived from first principles. That assumption does not carry
+// over between cameras with different geometry, so every distinct camera the node can see through
+// gets its own RoiConfig instead of sharing one: front vs. rear (mounting position/pitch differ)
+// *and* real vs. sim (the real ELP is a ~170 deg fisheye rectified down to a much narrower
+// rectilinear projection -- see ELP-USBGS1200P01-KL170.yaml's P vs. K -- while Gazebo's camera is
+// a plain rectilinear model at its own 153 deg HFOV and 640x400 16:10 resolution, vs. the real
+// camera's 1280x720 16:9). Reusing one camera's numbers for another only coincidentally lines up.
+struct RoiConfig
+{
+  double top_left_row, top_left_col;
+  double top_right_row, top_right_col;
+  double bottom_left_row, bottom_left_col;
+  double bottom_right_row, bottom_right_col;
+  double bev_height_scale;
+};
 
-// Bird's-eye output height as a multiple of the source frame height, i.e. how much farther
-// down the road the BEV view looks. Width is left unscaled.
-constexpr double kBevHeightScale = 0.5;
+// Real ELP front camera (input_backend direct_usb/ros_compressed). Tune against actual ELP
+// footage.
+constexpr RoiConfig kRealFrontRoi{0.48, 0.35, 0.48, 0.65, 1, -2, 1, 3, 0.5};
 
-// Rear-camera-only ROI/BEV equivalents of the two constant groups above -- the rear camera needs
-// to see farther and more clearly than the front's road-lane ROI, to pick up the parking bay's
-// side line earlier while backing in. Top row ratio lowered (0.48 -> 0.30) to pull in ground
-// closer to the horizon than the front ROI reaches; height scale raised (0.5 -> 0.8) so that
-// captured range is stretched across more output pixels, giving walk_lane_chain()/fit_lane() finer
-// pixel resolution to work with instead of the same detail compressed into fewer rows. Top col
-// ratios and the bottom flare are left matching the front's, since the concern here is depth, not
-// width. Front camera (kRoi* /kBevHeightScale above) is untouched. Tune against the actual rear
-// camera feed, same as the front ROI's own comment says.
-constexpr double kRearRoiTopLeftRow = 0.48,  kRearRoiTopLeftCol = 0.35;
-constexpr double kRearRoiTopRightRow = 0.48, kRearRoiTopRightCol = 0.65;
-constexpr double kRearRoiBottomLeftRow = 1,  kRearRoiBottomLeftCol = -2;
-constexpr double kRearRoiBottomRightRow = 1, kRearRoiBottomRightCol = 3;
-constexpr double kRearBevHeightScale = 0.8;
+// Real rear camera equivalent -- no physical rear camera exists yet, kept for when one is added.
+// Reaches farther/closer to the horizon than the front (top row 0.48 -> 0.30, pulling in ground
+// closer to the vehicle) and is stretched across more output rows (height scale 0.5 -> 0.8) for
+// finer pixel resolution during the (comparatively slow, close-range) parking maneuver than the
+// front's ordinary-road-speed settings need. Top col ratios and the bottom flare are left matching
+// the front's, since the concern here is depth, not width. Tune against actual rear footage.
+constexpr RoiConfig kRealRearRoi{0.30, 0.35, 0.30, 0.65, 1, -2, 1, 3, 0.8};
+
+// Gazebo sim front camera (input_backend ros_raw). Copied from kRealFrontRoi as a starting point
+// only -- the real ELP and the sim camera do not share a lens model, FOV, or resolution (see this
+// struct's own doc comment above), so a homography tuned for one has no reason to fit the other.
+// TUNE against actual Gazebo footage before trusting this for anything but "doesn't crash".
+constexpr RoiConfig kSimFrontRoi{0.48, 0.35, 0.48, 0.65, 1, -2, 1, 3, 0.5};
+
+// Gazebo sim rear camera (input_backend ros_raw) -- same caveat as kSimFrontRoi, copied from
+// kRealRearRoi as an untuned starting point.
+constexpr RoiConfig kSimRearRoi{0.30, 0.35, 0.30, 0.65, 1, -2, 1, 3, 0.8};
+
+/// Picks the RoiConfig matching this frame's camera side and camera model. See RoiConfig's own
+/// doc comment for why these four aren't just one shared set of constants.
+const RoiConfig & select_roi_config(bool use_rear_roi, bool use_sim_roi)
+{
+  if (use_rear_roi) {
+    return use_sim_roi ? kSimRearRoi : kRealRearRoi;
+  }
+  return use_sim_roi ? kSimFrontRoi : kRealFrontRoi;
+}
 
 // Neighborhood radius for each step of the lane chain walk [px]. Also sets the rough spacing
 // between consecutive chain points, since each step prefers the farthest qualifying pixel within
@@ -115,8 +144,8 @@ constexpr int kWindowHeight = 300;
 // Height [px] of the black strip appended below the BEV image to hold the overlay text. Fixed
 // regardless of the incoming frame size so the 8 possible lines (6 top-anchored, 2 bottom-
 // anchored) always have enough pitch between them -- the overlap this fixes came from anchoring
-// text directly onto the BEV image, whose height shrinks with kBevHeightScale and the source
-// frame size and can end up shorter than the text block itself.
+// text directly onto the BEV image, whose height shrinks with the active RoiConfig's
+// bev_height_scale and the source frame size, and can end up shorter than the text block itself.
 constexpr int kTextPanelHeight = 360;
 constexpr int kTextLinePitch = 36;
 
@@ -170,10 +199,16 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   rear_stopline_publisher_ =
     create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/rear_detection", 10);
 
+  // Only ros_raw is ever the Gazebo sim; direct_usb/ros_compressed are always the real ELP
+  // camera. Selects which of the four RoiConfig instances (see the anonymous namespace above)
+  // bird_eye() warps against for each side.
+  const bool is_sim = input_backend_ == InputBackend::kRosRaw;
+
   cv::namedWindow("LaneDetection", cv::WINDOW_NORMAL);
   cv::resizeWindow(
     "LaneDetection", kWindowWidth,
-    static_cast<int>(kWindowHeight * kBevHeightScale) + kTextPanelHeight);
+    static_cast<int>(kWindowHeight * select_roi_config(false, is_sim).bev_height_scale) +
+      kTextPanelHeight);
 
   switch (input_backend_) {
     case InputBackend::kRosCompressed:
@@ -215,7 +250,8 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
     cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
     cv::resizeWindow(
       "LaneDetectionRear", kWindowWidth,
-      static_cast<int>(kWindowHeight * kRearBevHeightScale) + kTextPanelHeight);
+      static_cast<int>(kWindowHeight * select_roi_config(true, is_sim).bev_height_scale) +
+        kTextPanelHeight);
   }
 
   RCLCPP_INFO(
@@ -259,22 +295,20 @@ void LaneDetection::capture_timer_callback()
 }
 
 cv::Mat LaneDetection::build_transform(
-  int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi) const
+  int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi,
+  bool use_sim_roi) const
 {
-  const double top_left_row = use_rear_roi ? kRearRoiTopLeftRow : kRoiTopLeftRow;
-  const double top_left_col = use_rear_roi ? kRearRoiTopLeftCol : kRoiTopLeftCol;
-  const double top_right_row = use_rear_roi ? kRearRoiTopRightRow : kRoiTopRightRow;
-  const double top_right_col = use_rear_roi ? kRearRoiTopRightCol : kRoiTopRightCol;
-  const double bottom_left_row = use_rear_roi ? kRearRoiBottomLeftRow : kRoiBottomLeftRow;
-  const double bottom_left_col = use_rear_roi ? kRearRoiBottomLeftCol : kRoiBottomLeftCol;
-  const double bottom_right_row = use_rear_roi ? kRearRoiBottomRightRow : kRoiBottomRightRow;
-  const double bottom_right_col = use_rear_roi ? kRearRoiBottomRightCol : kRoiBottomRightCol;
+  const RoiConfig & roi = select_roi_config(use_rear_roi, use_sim_roi);
 
   const std::vector<cv::Point2f> src{
-    {static_cast<float>(src_width * top_left_col), static_cast<float>(src_height * top_left_row)},
-    {static_cast<float>(src_width * top_right_col), static_cast<float>(src_height * top_right_row)},
-    {static_cast<float>(src_width * bottom_right_col), static_cast<float>(src_height * bottom_right_row)},
-    {static_cast<float>(src_width * bottom_left_col), static_cast<float>(src_height * bottom_left_row)}};
+    {static_cast<float>(src_width * roi.top_left_col),
+     static_cast<float>(src_height * roi.top_left_row)},
+    {static_cast<float>(src_width * roi.top_right_col),
+     static_cast<float>(src_height * roi.top_right_row)},
+    {static_cast<float>(src_width * roi.bottom_right_col),
+     static_cast<float>(src_height * roi.bottom_right_row)},
+    {static_cast<float>(src_width * roi.bottom_left_col),
+     static_cast<float>(src_height * roi.bottom_left_row)}};
 
   const std::vector<cv::Point2f> dst{
     {0.0f, 0.0f},
@@ -285,12 +319,12 @@ cv::Mat LaneDetection::build_transform(
   return cv::getPerspectiveTransform(src, dst);
 }
 
-cv::Mat LaneDetection::bird_eye(const cv::Mat & image, bool use_rear_roi) const
+cv::Mat LaneDetection::bird_eye(const cv::Mat & image, bool use_rear_roi, bool use_sim_roi) const
 {
-  const double height_scale = use_rear_roi ? kRearBevHeightScale : kBevHeightScale;
+  const double height_scale = select_roi_config(use_rear_roi, use_sim_roi).bev_height_scale;
   const cv::Size dst_size(image.cols, static_cast<int>(image.rows * height_scale));
-  const cv::Mat transform =
-    build_transform(image.rows, image.cols, dst_size.height, dst_size.width, use_rear_roi);
+  const cv::Mat transform = build_transform(
+    image.rows, image.cols, dst_size.height, dst_size.width, use_rear_roi, use_sim_roi);
   cv::Mat warped;
   cv::warpPerspective(image, warped, transform, dst_size);
   return warped;
@@ -705,6 +739,9 @@ void LaneDetection::process_frame(
   (void)stamp;
 
   const bool is_rear = side == CameraSide::kRear;
+  // Only ros_raw is ever the Gazebo sim; direct_usb/ros_compressed are always the real ELP
+  // camera -- see RoiConfig's doc comment for why the two need separate ROI/BEV-scale constants.
+  const bool is_sim = input_backend_ == InputBackend::kRosRaw;
   const auto & lane_publisher = is_rear ? rear_lane_center_publisher_ : lane_center_publisher_;
   const auto & stopline_publisher = is_rear ? rear_stopline_publisher_ : stopline_publisher_;
   const std::string window_name = is_rear ? "LaneDetectionRear" : "LaneDetection";
@@ -712,7 +749,7 @@ void LaneDetection::process_frame(
   const bool use_curve_fit = is_rear;
   const bool use_rear_roi = is_rear;
 
-  const cv::Mat warped = bird_eye(image, use_rear_roi);
+  const cv::Mat warped = bird_eye(image, use_rear_roi, is_sim);
   const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0 + kOriginBelowFrameMarginPx);
   // Shared by the lane-width plausibility check and stop-line distance below; fit_lane() also
   // derives this internally per side, since it only receives `width` rather than this node's
