@@ -1,9 +1,13 @@
 repositories:
-  src/sensing/ublox:
+  sensing/ublox:
     type: git
     url: https://github.com/KumarRobotics/ublox.git
     version: ros2
-  src/sensing/ntrip_client:
+  sensing/ntrip_client:
     type: git
     url: https://github.com/LORD-MicroStrain/ntrip_client.git
     version: ros2
+  sensing/usb_cam:
+    type: git
+    url: https://github.com/qndks11/usb_cam.git
+    version: hyper-fixes

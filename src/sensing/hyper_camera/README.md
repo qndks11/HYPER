@@ -1,0 +1,1 @@
+ros2 launch hyper_camera camera.launch.py

@@ -152,54 +152,6 @@ ros2 launch hyper_rtk rtk.launch.py
 
 ---
 
-## 시뮬레이션 실행
-
-### Gazebo 시뮬레이션 + 차량 제어 실행
-
-```bash
-ros2 launch hyper_launch sim.launch.py
-```
-
-Gazebo 월드, 로봇 스폰, `robot_state_publisher`, `vehicle_controller_node`, `ros_gz_bridge`가 실행되고, 로봇 스폰이 끝나면 `ros2_control` 컨트롤러들이 순서대로 활성화됩니다.
-
-### 실행 순서 (이벤트 기반으로 자동 처리)
-
-| 순서 | 실행되는 것 |
-|------|------------|
-| 1 | Gazebo 월드 (`track.world`) 시작 + `robot_state_publisher`, `vehicle_controller_node`, `ros_gz_bridge` 동시 실행 |
-| 2 | 로봇 엔티티 스폰 (`ackermann_steering_vehicle`) |
-| 3 | 스폰 완료 → `joint_state_broadcaster` 활성화 |
-| 4 | 활성화 완료 → `forward_velocity_controller`, `forward_position_controller` 활성화 |
-
-### 실행 옵션
-
-```bash
-# 월드 파일 변경
-ros2 launch hyper_gazebo vehicle.launch.py world:=/path/to/custom.sdf
-
-# 로봇 초기 위치/자세 지정 (x, y, z, roll(R), pitch(P), yaw(Y))
-ros2 launch hyper_gazebo vehicle.launch.py x:=2.0 y:=1.0 z:=0.1 R:=0.0 P:=0.0 Y:=0.0
-```
-
-같은 인자를 `ros2 launch hyper_launch sim.launch.py world:=... x:=...` 형태로도 그대로 넘길 수 있습니다.
-
----
-
-## 인지(perception) 노드 실행
-
-`vehicle.launch.py`는 차선/객체 감지 노드를 포함하지 않으므로, 별도로 실행해야 합니다. 시뮬레이션 카메라(`/camera/image_raw`)와 실제 카메라/rosbag 모두 동일하게 사용할 수 있습니다. 차선 감지(`hyper_lane_detection`)와 객체 감지(`hyper_object_detection`)는 `src/perception/` 아래 별도 패키지이며, `perception.launch.py`가 둘을 함께 실행합니다.
-
-```bash
-# 차선 감지(hyper_lane_detection, /lane/center 퍼블리시) + 객체 감지(hyper_object_detection, YOLO)
-# 각각 OpenCV 디버그 대시보드 표시
-ros2 launch hyper_object_detection perception.launch.py
-# 또는: ros2 launch hyper_launch perception.launch.py
-```
-
-시뮬레이션과 함께 사용하려면 `vehicle.launch.py`를 먼저 실행한 뒤, 별도 터미널에서 위 명령을 실행하면 됩니다.
-
----
-
 ## 주요 토픽
 
 | 토픽 | 타입 | 방향 | 설명 |
