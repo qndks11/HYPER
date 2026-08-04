@@ -1,0 +1,10 @@
+witmotion_ble_node:
+  ros__parameters:
+    device_name: "WT901BLE67"
+    device_address: ""
+    service_uuid: "0000ffe5-0000-1000-8000-00805f9a34fb"
+    notify_uuid: "0000ffe4-0000-1000-8000-00805f9a34fb"
+    frame_id: "imu_link"
+    topic: "imu/data"
+    scan_timeout: 10.0
+    reconnect_wait_seconds: 5.0

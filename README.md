@@ -53,7 +53,19 @@ rosdep install --from-paths src --ignore-src -r -y
 
 `src/sensing/ublox`, `src/sensing/ntrip_client`이 새로 생깁니다 (`.gitignore` 대상 — vcstool로만 관리, 저장소에는 커밋되지 않음).
 
-### 5. 빌드 & 환경 소싱
+### 5. pip 의존성 설치
+
+`ultralytics`(YOLO, `hyper_object_detection`)와 `bleak`(BLE, `hyper_imu`)는 rosdep으로 해석되지 않는 순수 pip 패키지라 별도로 설치해야 합니다. 저장소 루트의 `requirements.txt`에 정리되어 있습니다:
+
+```bash
+pip install -r ~/HYPER/requirements.txt
+```
+
+(`cv2`는 `cv_bridge`를 통해 rosdep이 이미 설치하므로 여기 포함되지 않습니다.)
+
+`requirements.txt`는 `numpy<2`도 함께 고정합니다 — `ultralytics`를 제약 없이 설치하면 numpy 2.x로 끌어올릴 수 있는데, Humble의 `cv_bridge`는 apt `python3-numpy`(1.21.x) 기준 ABI로 빌드되어 있어 numpy 2.x가 깔리면 `cv2`/`cv_bridge` 임포트가 깨집니다. 이미 numpy 2.x가 설치되어 있다면 `pip install -r requirements.txt`로 다시 1.x대로 내려주세요.
+
+### 6. 빌드 & 환경 소싱
 
 ```bash
 colcon build
