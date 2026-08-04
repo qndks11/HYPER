@@ -113,6 +113,20 @@ def generate_launch_description():
         ]
     )
 
+    # WSL2의 가상 GPU(D3D12 변환) OpenGL 드라이버는 OGRE-Next GL3Plus 백엔드가 밉맵 생성에
+    # 쓰는 glCopyImageSubData 일부 경로를 구현하지 않아 "GL3PlusTextureGpu::copyTo
+    # UnimplementedException"으로 ign gazebo가 죽는다. llvmpipe 소프트웨어 렌더러로 강제 전환하면
+    # 해당 경로가 완전히 구현되어 있어 크래시가 사라진다.
+    gz_render_software = SetEnvironmentVariable(
+        name='LIBGL_ALWAYS_SOFTWARE',
+        value='1'
+    )
+
+    gz_gallium_driver = SetEnvironmentVariable(
+        name='GALLIUM_DRIVER',
+        value='llvmpipe'
+    )
+
     world_arg = DeclareLaunchArgument(
         'world',
         default_value=default_world_path,
@@ -254,6 +268,8 @@ def generate_launch_description():
     )
 
     launch_description = LaunchDescription([
+        gz_render_software,
+        gz_gallium_driver,
         gz_resource_path,
         gz_plugin_path,
 
