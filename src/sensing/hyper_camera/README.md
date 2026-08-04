@@ -7,12 +7,14 @@
 - `hyper_lane_detection`의 `input_backend:=direct_usb`가 런타임에 참조하는 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`)의 배포처
 - 롤백용 `input_backend:=ros_compressed` 경로를 테스트할 때, 또는 이 카메라 영상을 다른 용도로 ROS 토픽으로 띄워야 할 때 독립 실행
 
+**객체 인식용 Logitech C920은 `sensors.launch.py`에서 이 패키지의 `config/params_logitech.yaml`을 참조해 `usb_cam_node_exe`를 직접 띄웁니다** (rectify 없음, `object_detection_node`가 원본 이미지를 그대로 사용). `video_device` 기본값은 `/dev/video_logitech`(udev 심볼릭 링크)이며, 설치 방법은 저장소 루트 README의 "Logitech C920 (객체 인식용)" 절을 참고하세요.
+
 ## 실행
 
 ```bash
 ros2 launch hyper_camera camera.launch.py
 ```
 
-카메라 장치와 해상도·픽셀 포맷은 `config/ELP-USBGS1200P01-KL170.yaml` 또는 `config/params_1.yaml`에서 장비에 맞게 조정합니다.
+카메라 장치와 해상도·픽셀 포맷은 `config/ELP-USBGS1200P01-KL170.yaml` 또는 `config/params_elp.yaml`에서 장비에 맞게 조정합니다.
 
-`params_1.yaml`의 `video_device`는 `/dev/video_elp`(udev 심볼릭 링크)를 기본값으로 사용합니다. 설치 방법은 저장소 루트 README의 카메라 절을 참고하세요.
+`params_elp.yaml`의 `video_device`는 `/dev/video_elp`(udev 심볼릭 링크)를 기본값으로 사용합니다. 설치 방법은 저장소 루트 README의 카메라 절을 참고하세요.

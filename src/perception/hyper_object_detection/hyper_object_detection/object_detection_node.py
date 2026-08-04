@@ -6,6 +6,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from ultralytics import YOLO
@@ -86,7 +87,7 @@ class ObjectDetection(Node):
             Image,
             '/image_raw',
             self.image_callback,
-            10
+            qos_profile_sensor_data
         )
 
         # behavior_supervisor가 구독하는 토픽

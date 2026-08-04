@@ -181,7 +181,7 @@ udevadm info -a -n /dev/video2 | grep -E "idVendor|idProduct" | head -2
 
 UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(`ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, RTK의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
 
-규칙 적용 후 `hyper_camera`의 `config/params_1.yaml`과 `hyper_lane_detection`의 `input_backend:=direct_usb`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
+규칙 적용 후 `hyper_camera`의 `config/params_elp.yaml`과 `hyper_lane_detection`의 `input_backend:=direct_usb`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
 
 #### 2. 독립 실행 (선택 — 기본 실차 경로에는 필요 없음)
 
@@ -191,12 +191,30 @@ ros2 launch hyper_camera camera.launch.py
 
 정상 동작하면 `/image_raw`(원본 영상), `/image_rect`(rectify된 영상), `/camera_info`(ELP-USBGS1200P01-KL170 캘리브레이션)가 퍼블리시됩니다. 롤백용 `input_backend:=ros_compressed` 경로를 테스트하거나, 카메라 영상을 다른 용도로 ROS 토픽으로 띄워야 할 때만 이렇게 독립 실행하면 됩니다.
 
-### RealSense D435i
+### Logitech C920 (객체 인식용)
 
-`realsense2_camera`(rosdep으로 설치되는 apt 패키지, `sudo apt install ros-humble-realsense2-camera`)가 D435i를 구동합니다. 이 저장소에는 전용 패키지가 없고, `hyper_launch`의 `sensors.launch.py`가 `realsense2_camera`의 `rs_launch.py`를 직접 include해서 `camera_name:=camera_object`로 띄우고 객체 인식용 `/camera_object/image_raw`와 EKF용 `/imu`(`unite_imu_method:=1`로 합성된 gyro+accel)로 리매핑합니다.
+객체 인식(YOLO)용 카메라로, `object_detection_node`가 rectify 없이 원본 `sensor_msgs/Image`를 그대로 사용하므로 별도 캘리브레이션 파일이 없습니다. `hyper_launch`의 `sensors.launch.py`가 `hyper_camera`의 `config/params_logitech.yaml`로 `usb_cam_node_exe`를 직접 띄우고 `/camera_object/image_raw`로 리매핑합니다.
+
+#### 1. 장치 udev 규칙
+
+ELP/GPS와 동일하게 idVendor/idProduct 기준 udev 심볼릭 링크로 고정합니다. `/etc/udev/rules.d/99-logitech-camera.rules` 생성:
+
+```
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="08e5", ATTR{index}=="0", SYMLINK+="video_logitech"
+```
 
 ```bash
-ros2 launch realsense2_camera rs_launch.py camera_name:=camera_object camera_namespace:='' enable_gyro:=true enable_accel:=true unite_imu_method:=1
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+다른 Logitech 모델을 쓴다면 idVendor/idProduct가 다를 수 있으니 `lsusb`와 `udevadm info -a -n /dev/videoN | grep -E "idVendor|idProduct"`로 직접 확인 후 값을 맞춰주세요. 규칙 적용 후 `hyper_camera`의 `config/params_logitech.yaml`이 기본값으로 `/dev/video_logitech`를 사용하므로 USB 포트가 바뀌어도 흔들리지 않습니다.
+
+### RealSense D435i
+
+`realsense2_camera`(rosdep으로 설치되는 apt 패키지, `sudo apt install ros-humble-realsense2-camera`)가 D435i를 구동합니다. 이 저장소에는 전용 패키지가 없고, `hyper_launch`의 `sensors.launch.py`가 `realsense2_camera`의 `rs_launch.py`를 직접 include해서 EKF용 `/imu`(`unite_imu_method:=1`로 합성된 gyro+accel)로만 사용합니다 — 객체 인식 카메라 역할은 위 Logitech C920으로 옮겨갔으므로 `enable_color:=false`, `enable_depth:=false`로 컬러/뎁스 스트림은 꺼둡니다.
+
+```bash
+ros2 launch realsense2_camera rs_launch.py camera_name:=camera_object camera_namespace:='' enable_gyro:=true enable_accel:=true unite_imu_method:=1 enable_color:=false enable_depth:=false
 ```
 
 ---

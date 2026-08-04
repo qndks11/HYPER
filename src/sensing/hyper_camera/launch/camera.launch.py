@@ -10,7 +10,7 @@ def generate_launch_description():
     camera_params = os.path.join(
         get_package_share_directory('hyper_camera'),
         'config',
-        'params_1.yaml'
+        'params_elp.yaml'
     )
 
     camera_container = ComposableNodeContainer(
