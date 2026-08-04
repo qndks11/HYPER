@@ -39,14 +39,14 @@ class WitmotionBleImuNode(Node):
     def __init__(self):
         super().__init__('witmotion_ble_node')
 
-        self.declare_parameter('device_name', 'WT901BLE68')
+        self.declare_parameter('device_name', 'WT901BLE67')
         self.declare_parameter('device_address', '')
         self.declare_parameter(
             'service_uuid', '0000ffe5-0000-1000-8000-00805f9a34fb')
         self.declare_parameter(
             'notify_uuid', '0000ffe4-0000-1000-8000-00805f9a34fb')
         self.declare_parameter('frame_id', 'imu_link')
-        self.declare_parameter('topic', 'imu/data')
+        self.declare_parameter('topic', 'imu')
         self.declare_parameter('scan_timeout', 10.0)
         self.declare_parameter('reconnect_wait_seconds', 5.0)
 
