@@ -1,20 +1,13 @@
 # hyper_camera
 
-실차 USB 카메라를 ROS 2 영상 토픽으로 제공하는 패키지입니다. `usb_cam` 드라이버와 이미지 처리 컴포넌트를 같은 컨테이너에서 실행해 카메라 영상을 토픽으로 전달합니다.
+실차 USB 카메라 설정 파일의 배포처입니다. 더 이상 노드나 launch 파일을 갖지 않습니다 — `usb_cam`은 이 저장소에서 완전히 제거되었고, 두 카메라 모두 이를 소비하는 노드가 `/dev/videoN`을 직접 엽니다.
 
-**차선 인식 경로에서는 더 이상 기본으로 쓰이지 않습니다.** `hyper_lane_detection`이 `input_backend:=direct_usb`일 때 `/dev/video_elp`를 직접 열고 이 패키지의 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`)로 자체 rectify까지 수행하므로, 실차 launch(`hyper_launch real.launch.py` → `sensors.launch.py`)는 전방 카메라용으로 이 패키지를 더 이상 띄우지 않습니다. 이 패키지는 다음 용도로 계속 남아 있습니다.
+- 전방 ELP: `hyper_lane_detection`이 `input_backend:=direct_usb`일 때 `/dev/video_elp`를 직접 열고, 이 패키지의 `config/ELP-USBGS1200P01-KL170.yaml`을 보정 파일로 참조해 자체 rectify까지 수행합니다.
+- 객체 인식용 Logitech C920: `object_detection_node`가 `object_input_backend:=direct_usb`일 때 `/dev/video_logitech`를 직접 열어 원본 프레임을 그대로 YOLO에 넣습니다 (rectify 없음, 이 카메라는 애초에 캘리브레이션 파일이 없음). 카메라 파라미터(`video_device`, `image_width`, `image_height`, `framerate`)는 `object_detection_node` 자체가 선언하며, 기본값은 이 패키지의 `config/params_logitech.yaml`과 동일합니다.
 
-- `hyper_lane_detection`의 `input_backend:=direct_usb`가 런타임에 참조하는 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`)의 배포처
-- 롤백용 `input_backend:=ros_compressed` 경로를 테스트할 때, 또는 이 카메라 영상을 다른 용도로 ROS 토픽으로 띄워야 할 때 독립 실행
+이 패키지는 다음 파일들의 배포처로만 남아 있습니다.
 
-**객체 인식용 Logitech C920은 `sensors.launch.py`에서 이 패키지의 `config/params_logitech.yaml`을 참조해 `usb_cam_node_exe`를 직접 띄웁니다** (rectify 없음, `object_detection_node`가 원본 이미지를 그대로 사용). `video_device` 기본값은 `/dev/video_logitech`(udev 심볼릭 링크)이며, 설치 방법은 저장소 루트 README의 "Logitech C920 (객체 인식용)" 절을 참고하세요.
+- `config/ELP-USBGS1200P01-KL170.yaml` — `hyper_lane_detection`의 `input_backend:=direct_usb`가 런타임에 참조하는 ELP 카메라 보정 파일
+- `config/params_elp.yaml`, `config/params_logitech.yaml` — 각 카메라의 기본 장치 경로·해상도·프레임레이트를 문서화한 참고용 yaml (직접 로드되지는 않음 — `lane_detection_node`/`object_detection_node`가 같은 값을 자체 파라미터 기본값으로 선언)
 
-## 실행
-
-```bash
-ros2 launch hyper_camera camera.launch.py
-```
-
-카메라 장치와 해상도·픽셀 포맷은 `config/ELP-USBGS1200P01-KL170.yaml` 또는 `config/params_elp.yaml`에서 장비에 맞게 조정합니다.
-
-`params_elp.yaml`의 `video_device`는 `/dev/video_elp`(udev 심볼릭 링크)를 기본값으로 사용합니다. 설치 방법은 저장소 루트 README의 카메라 절을 참고하세요.
+설치 방법(udev 심볼릭 링크 등)은 저장소 루트 README의 카메라 절을 참고하세요.

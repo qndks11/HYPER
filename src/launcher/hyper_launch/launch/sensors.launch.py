@@ -4,14 +4,15 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import GroupAction, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node, SetRemap
+from launch_ros.actions import SetRemap
 
 # Real-car sensor bring-up: assigns each physical sensor to the topic role
 # hyper_localization / hyper_object_detection already expect from simulation
 # (see hyper_gazebo's ros_gz_bridge.yaml for the sim-side equivalents).
 #   ELP usb_cam                         -> owned directly by lane_detection_node itself
 #                                          (input_backend:=direct_usb, see perception.launch.py)
-#   Logitech C920 (hyper_camera)        -> /camera_object/image_raw (YOLO object detection)
+#   Logitech C920                       -> owned directly by object_detection_node itself
+#                                          (no ROS topic, see perception.launch.py)
 #   RealSense D435i (realsense2_camera) -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
@@ -19,24 +20,12 @@ from launch_ros.actions import Node, SetRemap
 # rear-camera path at all -- lane_detection_node simply never receives rear frames on the real
 # vehicle until a rear camera and its own backend wiring are added.
 #
-# hyper_camera's rectify pipeline (image_proc, used for the ELP camera) is not needed for the
-# Logitech camera: object_detection_node consumes raw sensor_msgs/Image with no rectification, and
-# there's no intrinsic calibration for this unit yet.
+# Neither camera goes through usb_cam here anymore -- usb_cam has been removed from this
+# workspace entirely (see deps.repos), and hyper_camera is now just the config file
+# distribution point for both cameras; see hyper_camera's README.
 
 
 def generate_launch_description():
-    object_camera = Node(
-        package='usb_cam',
-        executable='usb_cam_node_exe',
-        name='camera_object',
-        parameters=[os.path.join(
-            get_package_share_directory('hyper_camera'), 'config', 'params_logitech.yaml')],
-        remappings=[
-            ('image_raw', 'camera_object/image_raw'),
-            ('image_raw/compressed', 'camera_object/image_raw/compressed'),
-        ],
-    )
-
     realsense_launch = os.path.join(
         get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
 
@@ -68,4 +57,4 @@ def generate_launch_description():
             'launch', 'rtk.launch.py')),
     )
 
-    return LaunchDescription([object_camera, realsense_camera, lidar, rtk])
+    return LaunchDescription([realsense_camera, lidar, rtk])

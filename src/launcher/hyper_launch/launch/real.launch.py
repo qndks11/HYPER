@@ -25,9 +25,13 @@ def generate_launch_description():
     return LaunchDescription([
         stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
-        # Real vehicle: lane_detection_node owns the ELP camera directly (input_backend
-        # direct_usb) -- hyper_camera is no longer started for it, see sensors.launch.py.
+        # Real vehicle: lane_detection_node and object_detection_node each own their camera
+        # directly (input_backend direct_usb) -- hyper_camera is no longer started for either,
+        # see sensors.launch.py.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
-            stage('perception.launch.py', lane_input_backend='direct_usb')]),
+            stage(
+                'perception.launch.py',
+                lane_input_backend='direct_usb',
+                object_input_backend='direct_usb')]),
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[stage('behavior.launch.py')]),
     ])
