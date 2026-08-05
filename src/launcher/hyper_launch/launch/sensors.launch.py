@@ -2,9 +2,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import GroupAction, IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import SetRemap
 
 # Real-car sensor bring-up: assigns each physical sensor to the topic role
 # hyper_localization / hyper_object_detection already expect from simulation
@@ -13,7 +12,7 @@ from launch_ros.actions import SetRemap
 #                                          (input_backend:=direct_usb, see perception.launch.py)
 #   Logitech C920                       -> owned directly by object_detection_node itself
 #                                          (no ROS topic, see perception.launch.py)
-#   RealSense D435i (realsense2_camera) -> /imu                    (EKF)
+#   WitMotion WT901BLE (witmotion_ros2) -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
 # /camera_rear/image_raw has no physical source yet, and input_backend:=direct_usb has no
@@ -26,24 +25,11 @@ from launch_ros.actions import SetRemap
 
 
 def generate_launch_description():
-    realsense_launch = os.path.join(
-        get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
-
-    realsense_camera = GroupAction(actions=[
-        SetRemap('camera_object/imu', '/imu'),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(realsense_launch),
-            launch_arguments={
-                'camera_name': 'camera_object',
-                'camera_namespace': '',
-                'enable_gyro': 'true',
-                'enable_accel': 'true',
-                'unite_imu_method': '1',
-                'enable_color': 'false',
-                'enable_depth': 'false',
-            }.items(),
-        ),
-    ])
+    imu = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('witmotion_ros2'),
+            'launch', 'witmotion.launch.py')),
+    )
 
     lidar = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
@@ -57,4 +43,4 @@ def generate_launch_description():
             'launch', 'rtk.launch.py')),
     )
 
-    return LaunchDescription([realsense_camera, lidar, rtk])
+    return LaunchDescription([imu, lidar, rtk])
