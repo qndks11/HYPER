@@ -8,7 +8,6 @@
 
     # Wheel params (T8 Sport 대형 우레탄/고무 타이어 기준)
     wheel_radius: 0.2 # 실제 바퀴 지름 약 26cm -> 반지름 13cm [m]
-    wheel_radius: 0.2 # 실제 바퀴 지름 약 26cm -> 반지름 13cm [m]
     wheel_width: 0.09 # 바퀴 단면 폭 약 9cm [m]
     wheel_density: 950.0 # 발포 우레탄 및 고무 내외륜 밀도 [kg/m^3]
 

@@ -11,9 +11,6 @@ std::optional<InputBackend> parse_input_backend(const std::string & value)
   if (value == "ros_raw") {
     return InputBackend::kRosRaw;
   }
-  if (value == "ros_compressed") {
-    return InputBackend::kRosCompressed;
-  }
   return std::nullopt;
 }
 
@@ -24,8 +21,6 @@ std::string to_string(InputBackend backend)
       return "direct_usb";
     case InputBackend::kRosRaw:
       return "ros_raw";
-    case InputBackend::kRosCompressed:
-      return "ros_compressed";
   }
   return "unknown";
 }

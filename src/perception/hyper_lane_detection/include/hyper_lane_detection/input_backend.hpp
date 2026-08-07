@@ -20,9 +20,6 @@ enum class InputBackend
   /// image_transport, no rectification (the simulated camera output is already the expected
   /// input).
   kRosRaw,
-  /// Legacy real-car path, kept temporarily for A/B comparison and rollback: subscribes over
-  /// image_transport's "compressed" transport, same as before this refactor.
-  kRosCompressed,
 };
 
 /**

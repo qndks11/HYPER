@@ -22,7 +22,19 @@ def generate_launch_description():
                 os.path.join(hyper_launch_share, 'launch', name)),
             launch_arguments=launch_arguments.items())
 
+    # Publishes body_link -> camera_link/lidar_link/gps_link TF from vehicle.xacro, same as
+    # hyper_gazebo's vehicle.launch.py does for sim. Lives in hyper_control (not hyper_launch),
+    # since vehicle.xacro is owned there. Real vehicle has no ros2_control hardware interface,
+    # so wheel/steering joint transforms are not published (no /joint_states source yet) --
+    # only the fixed sensor-mount joints resolve.
+    robot_state_publisher = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_control'),
+            'launch', 'robot_state_publisher.launch.py')),
+    )
+
     return LaunchDescription([
+        robot_state_publisher,
         stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
         # Real vehicle: lane_detection_node and object_detection_node each own their camera

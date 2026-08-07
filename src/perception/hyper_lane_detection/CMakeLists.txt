@@ -14,7 +14,6 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
-find_package(image_transport REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(camera_calibration_parsers REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -23,11 +22,13 @@ include_directories(include)
 
 add_executable(lane_detection_node
   src/lane_detection_node.cpp
+  src/lane_detector.cpp
+  src/stopline_detector.cpp
   src/input_backend.cpp
   src/elp_camera_capture.cpp
 )
 ament_target_dependencies(lane_detection_node
-  rclcpp std_msgs sensor_msgs cv_bridge image_transport ament_index_cpp
+  rclcpp std_msgs sensor_msgs cv_bridge ament_index_cpp
   camera_calibration_parsers OpenCV)
 
 install(TARGETS
