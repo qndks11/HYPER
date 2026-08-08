@@ -1,23 +1,22 @@
-#ifndef HYPER_LANE_DETECTION__ELP_CAMERA_CAPTURE_HPP_
-#define HYPER_LANE_DETECTION__ELP_CAMERA_CAPTURE_HPP_
+#ifndef HYPER_CAMERA__ELP_CAMERA_CAPTURE_HPP_
+#define HYPER_CAMERA__ELP_CAMERA_CAPTURE_HPP_
 
 #include <string>
 
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 
-namespace hyper_lane_detection
+namespace hyper_camera
 {
 
 /**
- * @brief Owns the physical ELP USB camera device for input_backend:=direct_usb: opens the V4L2
- * device, captures+decodes MJPEG frames, and rectifies each one against a fisheye (equidistant)
- * calibration loaded once at startup.
+ * @brief Owns the physical ELP USB camera device: opens the V4L2 device, captures+decodes MJPEG
+ * frames, and rectifies each one against a fisheye (equidistant) calibration loaded once at
+ * startup.
  *
  * @details Deliberately has no knowledge of lane/stop-line detection -- callers only ever see the
- * rectified cv::Mat this class hands back, the same shape of image lane_detection_node previously
- * received from image_rect over ROS (hyper_camera's RectifyNode), just produced in-process now
- * instead of over an intermediate topic.
+ * rectified cv::Mat this class hands back. Used by ElpCameraPublisherNode to publish that frame
+ * as a plain sensor_msgs/Image instead of handing it to a detector in-process.
  */
 class ElpCameraCapture
 {
@@ -58,6 +57,6 @@ private:
   cv::Mat map2_;
 };
 
-}  // namespace hyper_lane_detection
+}  // namespace hyper_camera
 
-#endif  // HYPER_LANE_DETECTION__ELP_CAMERA_CAPTURE_HPP_
+#endif  // HYPER_CAMERA__ELP_CAMERA_CAPTURE_HPP_

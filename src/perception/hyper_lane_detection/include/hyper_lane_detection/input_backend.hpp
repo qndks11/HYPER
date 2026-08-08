@@ -13,12 +13,14 @@ namespace hyper_lane_detection
  */
 enum class InputBackend
 {
-  /// Real vehicle: lane_detection_node opens the physical ELP USB camera device itself
-  /// (see ElpCameraCapture) and never touches an intermediate ROS image topic.
-  kDirectUsb,
-  /// Gazebo simulation: plain sensor_msgs/Image subscription on the raw topic, no
-  /// image_transport, no rectification (the simulated camera output is already the expected
-  /// input).
+  /// Real vehicle: plain sensor_msgs/Image subscription, same as kRosRaw, but fed by
+  /// hyper_camera's ElpCameraPublisherNode component loaded into the same
+  /// ComposableNodeContainer as this node -- rclcpp's intra-process manager hands the frame
+  /// straight to the subscription callback instead of serializing it over the topic. Selects the
+  /// real-ELP RoiConfig (see lane_detection_node.cpp).
+  kIntraProcess,
+  /// Gazebo simulation: plain sensor_msgs/Image subscription on the raw topic, fed by
+  /// ros_gz_bridge. Selects the sim-camera RoiConfig.
   kRosRaw,
 };
 

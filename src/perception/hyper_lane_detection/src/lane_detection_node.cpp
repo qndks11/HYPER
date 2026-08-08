@@ -1,13 +1,11 @@
 #include "hyper_lane_detection/lane_detection_node.hpp"
 
-#include <chrono>
 #include <stdexcept>
 
-#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <cv_bridge/cv_bridge.h>
+#include <rclcpp_components/register_node_macro.hpp>
 #include <sensor_msgs/image_encodings.hpp>
 
-using hyper_lane_detection::ElpCameraCapture;
 using hyper_lane_detection::InputBackend;
 using hyper_lane_detection::parse_input_backend;
 using hyper_lane_detection::to_string;
@@ -40,7 +38,7 @@ struct RoiConfig
   double bev_height_scale;
 };
 
-// Real ELP front camera (input_backend direct_usb). Tune against actual ELP footage.
+// Real ELP front camera (input_backend intra_process). Tune against actual ELP footage.
 constexpr RoiConfig kRealFrontRoi{0.48, 0.35, 0.48, 0.65, 1, -2, 1, 3, 0.5};
 
 // Real rear camera equivalent -- no physical rear camera exists yet, kept for when one is added.
@@ -90,15 +88,16 @@ constexpr double kOriginBelowFrameMarginPx = 0.0;
 
 }  // namespace
 
-LaneDetection::LaneDetection() : Node{"lane_detection"}
+LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
+: Node{"lane_detection", options}
 {
   const std::string backend_param =
-    declare_parameter<std::string>("input_backend", "direct_usb");
+    declare_parameter<std::string>("input_backend", "intra_process");
   const auto backend = parse_input_backend(backend_param);
   if (!backend) {
     RCLCPP_FATAL(
       get_logger(),
-      "Invalid input_backend '%s' -- expected one of: direct_usb, ros_raw",
+      "Invalid input_backend '%s' -- expected one of: intra_process, ros_raw",
       backend_param.c_str());
     throw std::invalid_argument("lane_detection_node: invalid input_backend '" + backend_param + "'");
   }
@@ -112,9 +111,9 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
   rear_stopline_publisher_ =
     create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/rear_detection", 10);
 
-  // Only ros_raw is ever the Gazebo sim; direct_usb is always the real ELP camera. Selects which
-  // of the four RoiConfig instances (see the anonymous namespace above) bird_eye() warps against
-  // for each side.
+  // Only ros_raw is ever the Gazebo sim; intra_process is always the real ELP camera. Selects
+  // which of the four RoiConfig instances (see the anonymous namespace above) bird_eye() warps
+  // against for each side.
   const bool is_sim = input_backend_ == InputBackend::kRosRaw;
 
   cv::namedWindow("LaneDetection", cv::WINDOW_NORMAL);
@@ -123,28 +122,21 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
     static_cast<int>(kWindowHeight * select_roi_config(false, is_sim).bev_height_scale) +
       kTextPanelHeight);
 
-  switch (input_backend_) {
-    case InputBackend::kRosRaw:
-      // Gazebo simulation: ros_gz_bridge already publishes plain sensor_msgs/Image, so no
-      // image_transport/compressed subscription is needed here at all.
-      raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-        "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
-      raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-        "/rear_image_raw", 10,
-        std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
-      break;
+  // Front camera: a plain sensor_msgs/Image subscription either way -- under ros_raw this is
+  // Gazebo's bridged sim frame; under intra_process it's hyper_camera's ElpCameraPublisherNode
+  // component, loaded into the same ComposableNodeContainer as this node (see
+  // hyper_object_detection's perception.launch.py), so the frame arrives by pointer instead of
+  // over a serialized topic. Same callback either way.
+  raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
+    "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
 
-    case InputBackend::kDirectUsb:
-      // Real vehicle: this node owns the physical ELP camera directly (see
-      // setup_direct_usb_capture()) -- no ROS image topic involved for the front camera, and no
-      // rear-camera equivalent.
-      setup_direct_usb_capture();
-      break;
-  }
+  // Rear camera: only ros_raw ever has one -- intra_process (real vehicle) has no rear camera
+  // yet, so skip both the subscription and the window that would otherwise just sit blank.
+  if (input_backend_ == InputBackend::kRosRaw) {
+    raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
+      "/rear_image_raw", 10,
+      std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
 
-  // The rear window only ever receives frames under ros_raw -- direct_usb has no rear-camera
-  // path, so skip creating a window that would otherwise just sit blank.
-  if (input_backend_ != InputBackend::kDirectUsb) {
     cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
     cv::resizeWindow(
       "LaneDetectionRear", kWindowWidth,
@@ -154,42 +146,6 @@ LaneDetection::LaneDetection() : Node{"lane_detection"}
 
   RCLCPP_INFO(
     get_logger(), "LaneDetection started (input_backend=%s)", to_string(input_backend_).c_str());
-}
-
-void LaneDetection::setup_direct_usb_capture()
-{
-  ElpCameraCapture::Config config;
-  config.device = declare_parameter<std::string>("video_device", "/dev/video_elp");
-  config.width = declare_parameter<int>("image_width", 1280);
-  config.height = declare_parameter<int>("image_height", 720);
-  config.framerate = declare_parameter<double>("framerate", 30.0);
-  config.calibration_file = declare_parameter<std::string>(
-    "calibration_file",
-    ament_index_cpp::get_package_share_directory("hyper_camera") +
-      "/config/ELP-USBGS1200P01-KL170.yaml");
-
-  elp_capture_ = std::make_unique<ElpCameraCapture>(get_logger());
-  if (!elp_capture_->open(config)) {
-    // ElpCameraCapture::open() has already logged the specific failure; a node that "starts" with
-    // no working camera would otherwise spin forever silently doing nothing.
-    throw std::runtime_error("lane_detection_node: direct_usb camera setup failed");
-  }
-
-  const auto period_s = std::chrono::duration<double>(1.0 / config.framerate);
-  capture_timer_ = create_wall_timer(
-    std::chrono::duration_cast<std::chrono::milliseconds>(period_s),
-    std::bind(&LaneDetection::capture_timer_callback, this));
-}
-
-void LaneDetection::capture_timer_callback()
-{
-  cv::Mat rectified;
-  if (!elp_capture_->read(rectified)) {
-    // Read failure is already logged inside ElpCameraCapture::read(); skip this tick rather than
-    // aborting the node over what may be a transient USB glitch.
-    return;
-  }
-  process_frame(rectified, now(), CameraSide::kFront);
 }
 
 cv::Mat LaneDetection::build_transform(
@@ -260,7 +216,7 @@ void LaneDetection::process_frame(
   (void)stamp;
 
   const bool is_rear = side == CameraSide::kRear;
-  // Only ros_raw is ever the Gazebo sim; direct_usb is always the real ELP camera -- see
+  // Only ros_raw is ever the Gazebo sim; intra_process is always the real ELP camera -- see
   // RoiConfig's doc comment for why the two need separate ROI/BEV-scale constants.
   const bool is_sim = input_backend_ == InputBackend::kRosRaw;
   const auto & lane_publisher = is_rear ? rear_lane_center_publisher_ : lane_center_publisher_;
@@ -307,19 +263,8 @@ void LaneDetection::process_frame(
   cv::waitKey(1);
 }
 
-int main(int argc, char ** argv)
-{
-  rclcpp::init(argc, argv);
-  try {
-    rclcpp::spin(std::make_shared<LaneDetection>());
-  } catch (const std::exception & e) {
-    // Startup failures (bad input_backend, direct_usb camera/calibration failure) throw rather
-    // than leaving a half-initialized node spinning; surface them clearly instead of an opaque
-    // uncaught-exception crash.
-    RCLCPP_FATAL(rclcpp::get_logger("lane_detection"), "Startup failed: %s", e.what());
-    rclcpp::shutdown();
-    return 1;
-  }
-  rclcpp::shutdown();
-  return 0;
-}
+// Registers LaneDetection as a loadable rclcpp component (see CMakeLists.txt's
+// rclcpp_components_register_node) -- this also generates the standalone `lane_detection_node`
+// executable used for input_backend:=ros_raw, alongside the ComposableNodeContainer path used for
+// input_backend:=intra_process (see hyper_object_detection's perception.launch.py).
+RCLCPP_COMPONENTS_REGISTER_NODE(LaneDetection)

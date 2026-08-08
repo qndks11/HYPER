@@ -1,11 +1,11 @@
-#include "hyper_lane_detection/elp_camera_capture.hpp"
+#include "hyper_camera/elp_camera_capture.hpp"
 
 #include <algorithm>
 
 #include <camera_calibration_parsers/parse.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 
-namespace hyper_lane_detection
+namespace hyper_camera
 {
 
 ElpCameraCapture::ElpCameraCapture(rclcpp::Logger logger) : logger_(logger) {}
@@ -15,7 +15,7 @@ bool ElpCameraCapture::open(const Config & config)
   capture_.open(config.device, cv::CAP_V4L2);
   if (!capture_.isOpened()) {
     RCLCPP_FATAL(
-      logger_, "direct_usb: failed to open camera device '%s'", config.device.c_str());
+      logger_, "elp_camera_publisher: failed to open camera device '%s'", config.device.c_str());
     return false;
   }
 
@@ -31,7 +31,7 @@ bool ElpCameraCapture::open(const Config & config)
   if (!camera_calibration_parsers::readCalibration(
       config.calibration_file, camera_name, cam_info)) {
     RCLCPP_FATAL(
-      logger_, "direct_usb: failed to read calibration file '%s'",
+      logger_, "elp_camera_publisher: failed to read calibration file '%s'",
       config.calibration_file.c_str());
     return false;
   }
@@ -55,7 +55,7 @@ bool ElpCameraCapture::open(const Config & config)
   cv::fisheye::initUndistortRectifyMap(k, d, r, new_k, image_size, CV_16SC2, map1_, map2_);
 
   RCLCPP_INFO(
-    logger_, "direct_usb: opened '%s' (%dx%d @ %.0f fps), calibration '%s' loaded",
+    logger_, "elp_camera_publisher: opened '%s' (%dx%d @ %.0f fps), calibration '%s' loaded",
     config.device.c_str(), config.width, config.height, config.framerate,
     config.calibration_file.c_str());
   return true;
@@ -65,11 +65,11 @@ bool ElpCameraCapture::read(cv::Mat & rectified_out)
 {
   cv::Mat frame;
   if (!capture_.read(frame) || frame.empty()) {
-    RCLCPP_ERROR(logger_, "direct_usb: camera stream read failed (device disconnected?)");
+    RCLCPP_ERROR(logger_, "elp_camera_publisher: camera stream read failed (device disconnected?)");
     return false;
   }
   cv::remap(frame, rectified_out, map1_, map2_, cv::INTER_LINEAR);
   return true;
 }
 
-}  // namespace hyper_lane_detection
+}  // namespace hyper_camera

@@ -10,16 +10,15 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
-  <depend>ament_index_cpp</depend>
-  <depend>camera_calibration_parsers</depend>
   <depend>libopencv-dev</depend>
 
-  <!-- input_backend:=direct_usb loads its ELP calibration file from this package's share
-       directory at runtime (ament_index_cpp::get_package_share_directory), not a build/link
-       dependency. -->
+  <!-- input_backend:=intra_process is fed by hyper_camera's ElpCameraPublisherNode component,
+       loaded into the same ComposableNodeContainer; see hyper_object_detection's
+       perception.launch.py. -->
   <exec_depend>hyper_camera</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>

@@ -12,7 +12,7 @@ def generate_launch_description():
         # Forwarded to hyper_lane_detection's input_backend parameter -- real.launch.py and
         # simulation.launch.py each override this with their own default when including this
         # stage; see stage()'s launch_arguments in both.
-        DeclareLaunchArgument('lane_input_backend', default_value='direct_usb'),
+        DeclareLaunchArgument('lane_input_backend', default_value='intra_process'),
 
         # Forwarded to object_detection_node's input_backend parameter -- real.launch.py
         # overrides this with its own default when including this stage; see stage()'s

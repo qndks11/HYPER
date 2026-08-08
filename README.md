@@ -43,7 +43,7 @@ cd ~/HYPER
 
 ### 4. 의존성 설치 (vcstool + rosdep)
 
-`hyper_rtk`(u-blox, NTRIP)가 쓰는 드라이버는 rosdep으로 설치되지 않는 소스 패키지라 `deps.repos`로 따로 받아야 합니다. RTK를 쓰지 않더라도 먼저 받아두면 이후 센서 설치 절을 그대로 따라갈 수 있습니다. (카메라 두 대는 모두 `direct_usb`로 각 노드가 직접 여므로 `usb_cam` 드라이버가 더 이상 필요 없습니다 — 이 저장소에서 완전히 제거되었습니다.)
+`hyper_rtk`(u-blox, NTRIP)가 쓰는 드라이버는 rosdep으로 설치되지 않는 소스 패키지라 `deps.repos`로 따로 받아야 합니다. RTK를 쓰지 않더라도 먼저 받아두면 이후 센서 설치 절을 그대로 따라갈 수 있습니다. (카메라 두 대는 모두 `hyper_camera`의 전용 드라이버 노드가 직접 여므로 `usb_cam` 드라이버가 더 이상 필요 없습니다 — 이 저장소에서 완전히 제거되었습니다.)
 
 ```bash
 cd ~/HYPER
@@ -169,9 +169,9 @@ ros2 launch hyper_lidar rplidar.launch.py
 
 ### USB 카메라
 
-전방 ELP USB 카메라(ELP-USBGS1200P01-KL170, global shutter)는 `hyper_lane_detection`이 `input_backend:=direct_usb`일 때 `/dev/video_elp`를 직접 열어 MJPEG을 캡처·디코드하고 자체적으로 rectify까지 처리합니다 (중간 ROS 이미지 토픽 없음) — 실차 전체/단계별 launch(`real.launch.py` → `sensors.launch.py` + `perception.launch.py`)는 기본적으로 이 경로를 씁니다.
+전방 ELP USB 카메라(ELP-USBGS1200P01-KL170, global shutter)는 `hyper_camera`의 `ElpCameraPublisherNode` 컴포넌트(실행 파일 `elp_camera_publisher_node`)가 `/dev/video_elp`를 열어 MJPEG을 캡처·디코드하고 자체적으로 rectify까지 처리한 뒤 `image_raw`로 발행합니다. `hyper_lane_detection`이 `input_backend:=intra_process`일 때 이 컴포넌트를 `lane_detection` 컴포넌트와 같은 `ComposableNodeContainer` 프로세스에 함께 로드해서, 프레임이 직렬화 없이 포인터로 바로 넘어갑니다(zero-copy intra-process) — 실차 전체/단계별 launch(`real.launch.py` → `sensors.launch.py` + `perception.launch.py`)는 기본적으로 이 경로를 씁니다.
 
-`hyper_camera`(`src/sensing/hyper_camera`) 패키지는 이 카메라의 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`, `direct_usb`가 런타임에 참조)의 배포처로만 남아 있습니다 — 노드나 launch 파일은 없습니다. `usb_cam`은 이 저장소에서 완전히 제거되었습니다.
+`hyper_camera`(`src/sensing/hyper_camera`) 패키지는 이 노드와 그 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`)의 배포처입니다. `usb_cam`은 이 저장소에서 완전히 제거되었습니다.
 
 #### 1. 장치 udev 규칙
 
@@ -193,11 +193,11 @@ udevadm info -a -n /dev/video2 | grep -E "idVendor|idProduct" | head -2
 
 UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(`ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, RTK의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
 
-규칙 적용 후 `hyper_camera`의 `config/params_elp.yaml`과 `hyper_lane_detection`의 `input_backend:=direct_usb`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
+규칙 적용 후 `hyper_camera`의 `config/params_elp.yaml`과 `ElpCameraPublisherNode`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
 
 ### Logitech C920 (객체 인식용)
 
-객체 인식(YOLO)용 카메라로, `object_detection_node`가 `object_input_backend:=direct_usb`일 때 `/dev/video_logitech`를 직접 열어(MJPEG 캡처, 중간 ROS 이미지 토픽 없음) rectify 없이 원본 프레임을 그대로 사용합니다 — 별도 캘리브레이션 파일이 없습니다. ELP와 마찬가지로 `usb_cam`을 거치지 않습니다. 실차 전체 launch(`real.launch.py`)는 기본적으로 이 경로를 씁니다; 노드 자체의 기본값은 `ros_raw`(ROS 이미지 토픽 구독, 시뮬레이션/롤백용)입니다.
+객체 인식(YOLO)용 카메라로, `hyper_camera`의 `logitech_camera_publisher_node`가 `/dev/video_logitech`를 직접 열어(MJPEG 캡처) rectify 없이 원본 프레임을 그대로 `image_raw`로 발행합니다 — 별도 캘리브레이션 파일이 없습니다. ELP와 마찬가지로 `usb_cam`을 거치지 않지만, rclpy에는 rclcpp의 intra-process 통신에 해당하는 zero-copy 경로가 없으므로 이 쪽은 일반 ROS 토픽으로 `object_detection_node`에 연결됩니다 (`object_input_backend:=usb_camera`). 실차 전체 launch(`real.launch.py`)는 기본적으로 이 경로를 씁니다; `perception.launch.py` 자체의 기본값은 `ros_raw`(ros_gz_bridge 구독, 시뮬레이션/롤백용)입니다.
 
 #### 1. 장치 udev 규칙
 
@@ -265,9 +265,9 @@ ros2 launch hyper_launch behavior.launch.py
 | RPLidar | `hyper_lidar` | `/scan` |
 | u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
 
-전방 ELP와 객체 인식용 Logitech C920은 둘 다 여기 포함되지 않습니다 — `perception.launch.py`가 `hyper_lane_detection`(`input_backend:=direct_usb`, `/dev/video_elp`, 자체 rectify까지 수행)과 `object_detection_node`(`/dev/video_logitech`, rectify 없음)에서 각각 카메라를 직접 열므로, 이 두 카메라를 위한 별도 ROS 이미지 토픽/노드가 없습니다.
+전방 ELP와 객체 인식용 Logitech C920은 둘 다 여기 포함되지 않습니다 — 대신 `perception.launch.py`가 `hyper_camera`의 드라이버 노드로 각각 엽니다: `ElpCameraPublisherNode`(`/dev/video_elp`, 자체 rectify까지 수행)는 `lane_detection_node`와 같은 `ComposableNodeContainer`에 로드되어 intra-process로 넘어가고, `logitech_camera_publisher_node`(`/dev/video_logitech`, rectify 없음)는 별도 프로세스로 떠서 일반 토픽으로 `object_detection_node`에 연결됩니다.
 
-후방 카메라(`/camera_rear/image_raw`)는 아직 실물이 없고, `direct_usb`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
+후방 카메라(`/camera_rear/image_raw`)는 아직 실물이 없고, `intra_process`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
 
 ## 패키지 구성
 
@@ -282,21 +282,24 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
 | `hyper_lidar` | 실차 RPLidar 등 2D LiDAR 드라이버 실행 (시뮬레이션에서는 미사용) |
-| `hyper_camera` | 실차 ELP/Logitech USB 카메라 설정 파일(보정 파일 + 참고용 파라미터 yaml) 배포처. 노드/launch 파일 없음 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
+| `hyper_camera` | 실차 ELP/Logitech USB 카메라 드라이버 노드(`ElpCameraPublisherNode` C++ 컴포넌트, `logitech_camera_publisher_node` rclpy 노드) + 설정 파일(보정 파일 + 참고용 파라미터 yaml) 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
 ---
 
 ## 주요 토픽
 
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션만) | 전방 카메라 영상 (차선 인식, `lane_input_backend:=ros_raw`가 구독). 실차 기본 경로(`lane_input_backend:=direct_usb`)에서는 이 토픽 자체가 존재하지 않음 — `hyper_lane_detection`이 카메라를 직접 열고 끝까지 인메모리로 처리 |
-| `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션만) | 객체 인식용 카메라 영상 (`object_detection_node`가 `object_input_backend:=ros_raw`일 때 구독). 실차 기본 경로(`object_input_backend:=direct_usb`)에서는 이 토픽 자체가 존재하지 않음 — `object_detection_node`가 Logitech C920을 직접 열고 끝까지 인메모리로 처리 |
-| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `direct_usb`는 후방 경로 자체가 없음) |
+| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → hyper_lane_detection (실차) | 전방 카메라 영상 (차선 인식이 구독). 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `ElpCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서는 같은 `ComposableNodeContainer` 안에서 zero-copy로 전달되므로 이 토픽이 DDS까지 나가지 않음 |
+| `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → object_detection_node (실차) | 객체 인식용 카메라 영상 (`object_detection_node`가 항상 구독). 시뮬레이션은 ros_gz_bridge, 실차 기본 경로(`object_input_backend:=usb_camera`)는 `hyper_camera`의 `logitech_camera_publisher_node`가 일반 토픽으로 발행 |
+| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `intra_process`는 후방 경로 자체가 없음) |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
 | `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |
-| `/cmd_vel` | `geometry_msgs/Twist` | ROS → Gazebo | 속도 명령 |
+| `/steering_angle` | `std_msgs/Float64` | → vehicle_controller_node | 목표 조향각 [rad] (teleop / planner / waypoint_tracker가 발행) |
+| `/velocity` | `std_msgs/Float64` | → vehicle_controller_node | 목표 속도 [m/s] (teleop / planner / waypoint_tracker가 발행) |
+| `/forward_position_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 앞바퀴 조향각 (Ackermann 변환) |
+| `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환) |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS | 오도메트리 |
 | `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / realsense2_camera → ROS (실차, D435i 내장 IMU) | IMU |

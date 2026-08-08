@@ -13,7 +13,6 @@ from ultralytics import YOLO
 
 
 WINDOW_NAME = 'Object Detection'
-VALID_INPUT_BACKENDS = {'direct_usb', 'ros_raw'}
 
 
 class ObjectDetection(Node):
@@ -69,23 +68,9 @@ class ObjectDetection(Node):
 
         os.makedirs(self.save_dir, exist_ok=True)
 
-        # direct_usb (real vehicle -- opens the Logitech C920 itself, no ROS image topic) or
-        # ros_raw (Gazebo simulation, also selectable on the real car for A/B/rollback: a plain
-        # sensor_msgs/Image topic already exists). Defaults to ros_raw so a bare `ros2 run`
-        # never reaches for real hardware unless a launch file opts in explicitly -- see
-        # hyper_launch's real.launch.py / simulation.launch.py for which value each entrypoint
-        # passes.
-        self.declare_parameter('input_backend', 'ros_raw')
-        input_backend = self.get_parameter('input_backend').value
-        if input_backend not in VALID_INPUT_BACKENDS:
-            raise ValueError(
-                f"object_detection: invalid input_backend '{input_backend}' -- expected one of: "
-                f'{sorted(VALID_INPUT_BACKENDS)}'
-            )
-
         # -------------------- YOLO 및 OpenCV --------------------
         self.model = YOLO(model_path)
-        self.bridge = CvBridge() if input_backend == 'ros_raw' else None
+        self.bridge = CvBridge()
 
         self.n_frames = 0
         self.saved_count = 0
@@ -105,62 +90,22 @@ class ObjectDetection(Node):
             10
         )
 
-        self.image_subscriber = None
-        self.capture = None
-        self.capture_timer = None
-
-        if input_backend == 'ros_raw':
-            self.image_subscriber = self.create_subscription(
-                Image,
-                '/image_raw',
-                self.image_callback,
-                qos_profile_sensor_data
-            )
-        else:
-            self._setup_direct_usb_capture()
+        # /image_raw is fed by ros_gz_bridge in Gazebo sim, or by hyper_camera's
+        # logitech_camera_publisher_node on the real vehicle -- see hyper_object_detection's
+        # perception.launch.py for the remap/node selection either way. rclpy has no
+        # use_intra_process_comms equivalent to rclcpp's, so unlike hyper_lane_detection this is
+        # always a plain topic subscription, never a same-process zero-copy path.
+        self.image_subscriber = self.create_subscription(
+            Image,
+            '/image_raw',
+            self.image_callback,
+            qos_profile_sensor_data
+        )
 
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
 
         self.get_logger().info(
-            f'ObjectDetection started (input_backend={input_backend}): '
-            'publishing /perception/sign'
-        )
-
-    def _setup_direct_usb_capture(self):
-        # Owns the Logitech C920 directly -- mirrors hyper_lane_detection's ElpCameraCapture for
-        # the ELP camera, minus rectification: object_detection_node has always consumed the raw
-        # frame as-is, and this camera has no intrinsic calibration.
-        self.declare_parameter('video_device', '/dev/video_logitech')
-        self.declare_parameter('image_width', 1280)
-        self.declare_parameter('image_height', 720)
-        self.declare_parameter('framerate', 30.0)
-
-        video_device = self.get_parameter('video_device').value
-        image_width = int(self.get_parameter('image_width').value)
-        image_height = int(self.get_parameter('image_height').value)
-        framerate = float(self.get_parameter('framerate').value)
-
-        self.capture = cv2.VideoCapture(video_device, cv2.CAP_V4L2)
-        if not self.capture.isOpened():
-            raise RuntimeError(
-                f"object_detection: direct_usb failed to open camera device '{video_device}'"
-            )
-
-        # MJPEG in, decoded to BGR8 out -- OpenCV's V4L2 backend does the JPEG decode internally
-        # on read() (CAP_PROP_CONVERT_RGB stays at its default True).
-        self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, image_width)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, image_height)
-        self.capture.set(cv2.CAP_PROP_FPS, framerate)
-
-        self.get_logger().info(
-            f"direct_usb: opened '{video_device}' "
-            f'({image_width}x{image_height} @ {framerate:.0f} fps)'
-        )
-
-        self.capture_timer = self.create_timer(
-            1.0 / framerate,
-            self.capture_timer_callback
+            'ObjectDetection started: publishing /perception/sign'
         )
 
     def publish_sign(self, sign_name, force_log=False):
@@ -205,18 +150,6 @@ class ObjectDetection(Node):
         except Exception as e:
             self.get_logger().error(
                 f'cv_bridge exception: {e}'
-            )
-            return
-
-        self.process_frame(frame)
-
-    def capture_timer_callback(self):
-        ok, frame = self.capture.read()
-        if not ok or frame is None:
-            # Skip this tick rather than aborting the node over what may be a transient USB
-            # glitch -- same treatment as ElpCameraCapture::read() on the lane detection side.
-            self.get_logger().error(
-                'direct_usb: camera stream read failed (device disconnected?)'
             )
             return
 
@@ -342,8 +275,6 @@ class ObjectDetection(Node):
         )
 
     def destroy_node(self):
-        if self.capture is not None:
-            self.capture.release()
         cv2.destroyAllWindows()
         super().destroy_node()
 

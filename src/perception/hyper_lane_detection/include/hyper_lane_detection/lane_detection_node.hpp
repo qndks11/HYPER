@@ -11,7 +11,6 @@
 #include "sensor_msgs/msg/image.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
-#include "hyper_lane_detection/elp_camera_capture.hpp"
 #include "hyper_lane_detection/input_backend.hpp"
 #include "hyper_lane_detection/lane_detector.hpp"
 #include "hyper_lane_detection/stopline_detector.hpp"
@@ -19,7 +18,7 @@
 class LaneDetection : public rclcpp::Node
 {
 public:
-  LaneDetection();
+  explicit LaneDetection(const rclcpp::NodeOptions & options);
 
 private:
   /// Which physical camera a frame came from -- selects the publishers/window/fit parameters
@@ -28,43 +27,32 @@ private:
   enum class CameraSide { kFront, kRear };
 
   /**
-   * @brief input_backend:=ros_raw callback for the front camera: a plain sensor_msgs/Image
-   * subscription. Gazebo's bridged camera image is already the expected simulation input, so this
-   * does not rectify -- it decodes via cv_bridge and hands off to process_frame() directly.
+   * @brief Front-camera callback: a plain sensor_msgs/Image subscription, shared by both
+   * backends. Under ros_raw this is Gazebo's bridged (already-rectified-equivalent) sim frame;
+   * under intra_process it's hyper_camera's ElpCameraPublisherNode component, loaded into the
+   * same container as this node so the frame arrives by pointer rather than over a serialized
+   * topic -- either way this callback just decodes via cv_bridge and hands off to
+   * process_frame().
    *
    * @param msg Incoming raw camera image.
    */
   void raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
 
-  /// input_backend:=ros_raw callback for the rear camera -- see raw_image_callback().
+  /// input_backend:=ros_raw callback for the rear camera -- see raw_image_callback(). No
+  /// intra_process equivalent: there is no physical rear camera yet.
   void raw_rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
-
-  /**
-   * @brief input_backend:=direct_usb setup: opens the physical ELP camera via ElpCameraCapture
-   * (device, resolution, framerate, and calibration file all read from ROS parameters) and starts
-   * capture_timer_ polling it at the configured framerate. Front camera only -- direct_usb has no
-   * rear-camera equivalent, so nothing here waits on or fails without one.
-   *
-   * @throws std::runtime_error if the camera device can't be opened or its calibration can't be
-   * loaded; this is a startup failure and must not be swallowed into a degraded-but-running node.
-   */
-  void setup_direct_usb_capture();
-
-  /// capture_timer_'s callback: pulls one rectified frame from elp_capture_ and, on success, hands
-  /// it to process_frame(). A read failure is already logged inside ElpCameraCapture::read(), so
-  /// this just skips the tick rather than treating a transient glitch as fatal.
-  void capture_timer_callback();
 
   /**
    * @brief The full per-frame pipeline shared by every input backend and both cameras: bird's-eye
    * warp, lane and stop-line detection (delegated to lane_detector_/stopline_detector_), message
-   * publish, and debug view. Factored out so the algorithm itself never depends on how the frame
-   * arrived (ROS topic vs. direct device) or which camera it's from -- `side` alone selects the
-   * publishers/window/fit parameters below.
+   * publish, and debug view. Factored out so the algorithm itself never depends on which backend
+   * fed the topic this frame arrived on -- `side` alone selects the publishers/window/fit
+   * parameters below.
    *
    * @param image Camera frame (BGR8) -- already rectified for the front camera under
-   * input_backend:=direct_usb; passed through as-is for every other backend/camera combination
-   * (ros_raw's simulated frames need no rectification at all).
+   * input_backend:=intra_process (rectified upstream by hyper_camera's ElpCameraPublisherNode);
+   * passed through as-is for every other backend/camera combination (ros_raw's simulated frames
+   * need no rectification at all).
    * @param stamp Capture timestamp of `image`. Threaded through for future header-stamped outputs
    * and latency logging; the current output messages (std_msgs/Float64MultiArray) carry no header
    * of their own to stamp.
@@ -107,18 +95,16 @@ private:
    */
   cv::Mat bird_eye(const cv::Mat & image, bool use_rear_roi, bool use_sim_roi) const;
 
-  hyper_lane_detection::InputBackend input_backend_{hyper_lane_detection::InputBackend::kDirectUsb};
+  hyper_lane_detection::InputBackend input_backend_{
+    hyper_lane_detection::InputBackend::kIntraProcess};
 
   hyper_lane_detection::LaneDetector lane_detector_;
   hyper_lane_detection::StoplineDetector stopline_detector_;
 
-  // input_backend:=ros_raw only.
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_image_subscriber_;
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_rear_image_subscriber_;
 
-  // input_backend:=direct_usb only -- front camera exclusively, see setup_direct_usb_capture().
-  std::unique_ptr<hyper_lane_detection::ElpCameraCapture> elp_capture_;
-  rclcpp::TimerBase::SharedPtr capture_timer_;
+  // input_backend:=ros_raw only -- no physical rear camera exists yet.
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_rear_image_subscriber_;
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_publisher_;

@@ -5,8 +5,8 @@ namespace hyper_lane_detection
 
 std::optional<InputBackend> parse_input_backend(const std::string & value)
 {
-  if (value == "direct_usb") {
-    return InputBackend::kDirectUsb;
+  if (value == "intra_process") {
+    return InputBackend::kIntraProcess;
   }
   if (value == "ros_raw") {
     return InputBackend::kRosRaw;
@@ -17,8 +17,8 @@ std::optional<InputBackend> parse_input_backend(const std::string & value)
 std::string to_string(InputBackend backend)
 {
   switch (backend) {
-    case InputBackend::kDirectUsb:
-      return "direct_usb";
+    case InputBackend::kIntraProcess:
+      return "intra_process";
     case InputBackend::kRosRaw:
       return "ros_raw";
   }

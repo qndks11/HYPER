@@ -37,13 +37,15 @@ def generate_launch_description():
         robot_state_publisher,
         stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
-        # Real vehicle: lane_detection_node and object_detection_node each own their camera
-        # directly (input_backend direct_usb) -- hyper_camera is no longer started for either,
-        # see sensors.launch.py.
+        # Real vehicle: hyper_camera owns both physical cameras and publishes plain image
+        # topics -- the ELP publisher loads into the same component container as
+        # lane_detection_node for zero-copy intra-process delivery (lane_input_backend
+        # intra_process); the Logitech publisher just feeds object_detection_node's ordinary
+        # subscription (object_input_backend usb_camera). See perception.launch.py.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage(
                 'perception.launch.py',
-                lane_input_backend='direct_usb',
-                object_input_backend='direct_usb')]),
+                lane_input_backend='intra_process',
+                object_input_backend='usb_camera')]),
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[stage('behavior.launch.py')]),
     ])
