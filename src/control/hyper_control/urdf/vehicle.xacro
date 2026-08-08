@@ -3,6 +3,9 @@
 <robot name="ackermann_steering_vehicle" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
   <!-- Arguments -->
+  <xacro:arg name="use_sim" default="true" />
+  <xacro:arg name="serial_port" default="/dev/ttyUSB0" />
+  <xacro:arg name="baud_rate" default="115200" />
   <xacro:arg name="body_length" default="2.0" />
   <xacro:arg name="body_width" default="1.0" />
   <xacro:arg name="body_height" default="0.5" />
@@ -496,55 +499,86 @@
   </gazebo>
 
   <!-- Gazebo Control -->
-  <ros2_control name="control" type="system">
-    <hardware>
-      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
-    </hardware>
-          
-    <joint name="front_left_steering_joint">
-      <command_interface name="position">
-        <param name="min">${-max_steering_angle}</param>
-        <param name="max">${max_steering_angle}</param>
-      </command_interface>
+  <xacro:if value="$(arg use_sim)">
+    <ros2_control name="control" type="system">
+      <hardware>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
 
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
+      <joint name="front_left_steering_joint">
+        <command_interface name="position">
+          <param name="min">${-max_steering_angle}</param>
+          <param name="max">${max_steering_angle}</param>
+        </command_interface>
 
-    <joint name="front_right_steering_joint">
-      <command_interface name="position">
-        <param name="min">${-max_steering_angle}</param>
-        <param name="max">${max_steering_angle}</param>
-      </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
 
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
+      <joint name="front_right_steering_joint">
+        <command_interface name="position">
+          <param name="min">${-max_steering_angle}</param>
+          <param name="max">${max_steering_angle}</param>
+        </command_interface>
 
-    <joint name="rear_left_wheel_joint">
-      <command_interface name="velocity">
-        <param name="min">${-max_wheel_angular_velocity}</param>
-        <param name="max">${max_wheel_angular_velocity}</param>
-      </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
 
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
+      <joint name="rear_left_wheel_joint">
+        <command_interface name="velocity">
+          <param name="min">${-max_wheel_angular_velocity}</param>
+          <param name="max">${max_wheel_angular_velocity}</param>
+        </command_interface>
 
-    <joint name="rear_right_wheel_joint">
-      <command_interface name="velocity">
-        <param name="min">${-max_wheel_angular_velocity}</param>
-        <param name="max">${max_wheel_angular_velocity}</param>
-      </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
 
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-      <state_interface name="effort"/>
-    </joint>
-  </ros2_control>
+      <joint name="rear_right_wheel_joint">
+        <command_interface name="velocity">
+          <param name="min">${-max_wheel_angular_velocity}</param>
+          <param name="max">${max_wheel_angular_velocity}</param>
+        </command_interface>
+
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </ros2_control>
+  </xacro:if>
+
+  <!-- Real Vehicle Control (STM32) -->
+  <xacro:unless value="$(arg use_sim)">
+    <ros2_control name="control" type="system">
+      <hardware>
+        <plugin>hyper_control/Stm32SystemInterface</plugin>
+        <param name="serial_port">$(arg serial_port)</param>
+        <param name="baud_rate">$(arg baud_rate)</param>
+      </hardware>
+
+      <joint name="steering_joint">
+        <command_interface name="position">
+          <param name="min">${-max_steering_angle}</param>
+          <param name="max">${max_steering_angle}</param>
+        </command_interface>
+
+        <state_interface name="position"/>
+      </joint>
+
+      <joint name="rear_axle_joint">
+        <command_interface name="velocity">
+          <param name="min">${-max_wheel_angular_velocity}</param>
+          <param name="max">${max_wheel_angular_velocity}</param>
+        </command_interface>
+
+        <state_interface name="velocity"/>
+      </joint>
+    </ros2_control>
+  </xacro:unless>
 
   <!-- Gazebo Plugins -->
   <gazebo>
