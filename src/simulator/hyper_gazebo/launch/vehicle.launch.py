@@ -267,6 +267,21 @@ def generate_launch_description():
         output='screen'
     )
 
+    # ros_gz_bridge's parameter_bridge publishes camera/image_raw with a plain rclcpp
+    # publisher, not image_transport, so no camera/image_raw/compressed topic exists
+    # unless something republishes it explicitly.
+    camera_compressed_republisher_node = Node(
+        package='image_transport',
+        executable='republish',
+        name='camera_compressed_republisher',
+        arguments=['raw', 'compressed'],
+        remappings=[
+            ('in', 'camera/image_raw'),
+            ('out/compressed', 'camera/image_raw/compressed'),
+        ],
+        output='screen'
+    )
+
     launch_description = LaunchDescription([
         gz_render_software,
         gz_gallium_driver,
@@ -304,6 +319,7 @@ def generate_launch_description():
         robot_state_publisher_node,
         vehicle_controller_node,
         gz_bridge_node,
+        camera_compressed_republisher_node,
     ])
 
     return launch_description
