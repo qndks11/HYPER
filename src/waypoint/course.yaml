@@ -67,13 +67,6 @@ events:
     paths: {}
     latitude: 37.56662524741978
     longitude: 126.9782374658231
-  lane_change_3:
-    event_type: lane_change
-    approach_radius_m: 4
-    signal_required: true
-    paths: {}
-    latitude: 37.56613518462459
-    longitude: 126.97797308297751
   lane_change_4:
     event_type: lane_change
     approach_radius_m: 4
@@ -95,6 +88,31 @@ events:
     paths: {}
     latitude: 37.56607512662259
     longitude: 126.97821101903581
+  parking_t1:
+    event_type: t_zone_parking
+    latitude: 37.56630765775142
+    longitude: 126.97771100726304
+    approach_radius_m: 2.5
+    signal_required: false
+    hold_duration_s: 3.0
+    paths: {}
+    spot_trigger_offset:
+      dx: 0.0
+      dy: 0.0
+      dyaw: 0.0
+    spot_path: parking_t1_spot
+  avoid_obstacle_1:
+    event_type: avoid_obstacle
+    start:
+      latitude: 37.56656328797218
+      longitude: 126.97772561912937
+    start_radius_m: 2.5
+    end_radius_m: 2.5
+    signal_required: false
+    paths: {}
+    end:
+      latitude: 37.56682921351927
+      longitude: 126.97793624759383
 paths:
   intersection_A_straight:
   - x: 0.0
@@ -1356,3 +1374,676 @@ paths:
   - x: 13.05
     y: 8.0
     yaw: 1.5708
+  parking_t1_spot:
+  - x: 0.0
+    y: 0.0
+    yaw: 0.0
+    gear: reverse
+  - x: -0.15
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -0.3
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -0.45
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -0.6
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -0.75
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -0.9
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.05
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.2
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.35
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.5
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.65
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.8
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -1.95
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -2.1
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -2.25
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -2.4
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -2.55
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -2.7
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -2.85
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.0
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.15
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.3
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.45
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.6
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.75
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -3.9
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -4.05
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -4.2
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -4.35
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -4.5
+    y: 0.0
+    yaw: 3.14159
+    gear: reverse
+  - x: -4.65
+    y: 0.0
+    yaw: -3.14156
+    gear: reverse
+  - x: -4.8
+    y: -0.0
+    yaw: -3.14138
+    gear: reverse
+  - x: -4.95
+    y: -0.0001
+    yaw: -3.14003
+    gear: reverse
+  - x: -5.1
+    y: -0.0005
+    yaw: -3.13585
+    gear: reverse
+  - x: -5.25
+    y: -0.0018
+    yaw: -3.12779
+    gear: reverse
+  - x: -5.4
+    y: -0.0046
+    yaw: -3.11136
+    gear: reverse
+  - x: -5.5498
+    y: -0.0109
+    yaw: -3.09136
+    gear: reverse
+  - x: -5.6996
+    y: -0.0197
+    yaw: -3.07966
+    gear: reverse
+  - x: -5.8493
+    y: -0.0294
+    yaw: -3.08274
+    gear: reverse
+  - x: -5.999
+    y: -0.0373
+    yaw: -3.10443
+    gear: reverse
+  - x: -6.149
+    y: -0.0406
+    yaw: 3.1341
+    gear: reverse
+  - x: -6.2987
+    y: -0.0351
+    yaw: 3.06863
+    gear: reverse
+  - x: -6.4477
+    y: -0.0187
+    yaw: 2.99423
+    gear: reverse
+  - x: -6.595
+    y: 0.0089
+    yaw: 2.91652
+    gear: reverse
+  - x: -6.7398
+    y: 0.0481
+    yaw: 2.83337
+    gear: reverse
+  - x: -6.8806
+    y: 0.0998
+    yaw: 2.74643
+    gear: reverse
+  - x: -7.0163
+    y: 0.1635
+    yaw: 2.67207
+    gear: reverse
+  - x: -7.1479
+    y: 0.2354
+    yaw: 2.61995
+    gear: reverse
+  - x: -7.2763
+    y: 0.3129
+    yaw: 2.58428
+    gear: reverse
+  - x: -7.4024
+    y: 0.3941
+    yaw: 2.55836
+    gear: reverse
+  - x: -7.5266
+    y: 0.4781
+    yaw: 2.53232
+    gear: reverse
+  - x: -7.6484
+    y: 0.5657
+    yaw: 2.51194
+    gear: reverse
+  - x: -7.7691
+    y: 0.6547
+    yaw: 2.5015
+    gear: reverse
+  - x: -7.889
+    y: 0.7449
+    yaw: 2.49195
+    gear: reverse
+  - x: -8.008
+    y: 0.8362
+    yaw: 2.48327
+    gear: reverse
+  - x: -8.1263
+    y: 0.9284
+    yaw: 2.47641
+    gear: reverse
+  - x: -8.244
+    y: 1.0214
+    yaw: 2.4698
+    gear: reverse
+  - x: -8.3611
+    y: 1.1151
+    yaw: 2.46156
+    gear: reverse
+  - x: -8.4773
+    y: 1.21
+    yaw: 2.4516
+    gear: reverse
+  - x: -8.5925
+    y: 1.3061
+    yaw: 2.44348
+    gear: reverse
+  - x: -8.7071
+    y: 1.4028
+    yaw: 2.44033
+    gear: reverse
+  - x: -8.8217
+    y: 1.4996
+    yaw: 2.43359
+    gear: reverse
+  - x: -8.935
+    y: 1.5979
+    yaw: 2.41839
+    gear: reverse
+  - x: -9.0466
+    y: 1.6982
+    yaw: 2.40592
+    gear: reverse
+  - x: -9.1574
+    y: 1.7993
+    yaw: 2.40152
+    gear: reverse
+  - x: -9.2681
+    y: 1.9005
+    yaw: 2.39657
+    gear: reverse
+  - x: -9.3779
+    y: 2.0026
+    yaw: 2.39308
+    gear: reverse
+  - x: -9.4879
+    y: 2.1046
+    yaw: 2.3897
+    gear: reverse
+  - x: -9.597
+    y: 2.2075
+    yaw: 2.36723
+    gear: reverse
+  - x: -9.7023
+    y: 2.3143
+    yaw: 2.31976
+    gear: reverse
+  - x: -9.8011
+    y: 2.4271
+    yaw: 2.26268
+    gear: reverse
+  - x: -9.8935
+    y: 2.5452
+    yaw: 2.21004
+    gear: reverse
+  - x: -9.98
+    y: 2.6677
+    yaw: 2.15303
+    gear: reverse
+  - x: -10.0583
+    y: 2.7955
+    yaw: 2.08858
+    gear: reverse
+  - x: -10.1283
+    y: 2.9281
+    yaw: 2.03854
+    gear: reverse
+  - x: -10.1936
+    y: 3.0632
+    yaw: 2.00008
+    gear: reverse
+  - x: -10.2532
+    y: 3.2008
+    yaw: 1.93558
+    gear: reverse
+  - x: -10.3005
+    y: 3.3432
+    yaw: 1.85533
+    gear: reverse
+  - x: -10.3373
+    y: 3.4886
+    yaw: 1.76971
+    gear: reverse
+  - x: -10.3597
+    y: 3.6368
+    yaw: 1.65965
+    gear: reverse
+  - x: -10.3639
+    y: 3.7867
+    yaw: 1.54881
+    gear: reverse
+  - x: -10.3531
+    y: 3.9362
+    yaw: 1.45542
+    gear: reverse
+  - x: -10.3294
+    y: 4.0842
+    yaw: 1.367
+    gear: reverse
+  - x: -10.2925
+    y: 4.2295
+    yaw: 1.29422
+    gear: reverse
+  - x: -10.2476
+    y: 4.3726
+    yaw: 1.25335
+    gear: reverse
+  - x: -10.1989
+    y: 4.5144
+    yaw: 1.23527
+    gear: reverse
+  - x: -10.1488
+    y: 4.6558
+    yaw: 1.2318
+    gear: reverse
+  - x: -10.0991
+    y: 4.7973
+    yaw: 1.24318
+    gear: reverse
+  - x: -10.0523
+    y: 4.9398
+    yaw: 1.2678
+    gear: reverse
+  - x: -10.0096
+    y: 5.0836
+    yaw: 1.29563
+    gear: reverse
+  - x: -9.9708
+    y: 5.2285
+    yaw: 1.31636
+    gear: reverse
+  - x: -9.9341
+    y: 5.3739
+    yaw: 1.32826
+    gear: reverse
+  - x: -9.8987
+    y: 5.5197
+    yaw: 1.3331
+    gear: reverse
+  - x: -9.8635
+    y: 5.6655
+    yaw: 1.33945
+    gear: reverse
+  - x: -9.8299
+    y: 5.8117
+    yaw: 1.34584
+    gear: reverse
+  - x: -9.7965
+    y: 5.9579
+    yaw: 1.3388
+    gear: reverse
+  - x: -9.7609
+    y: 6.1037
+    yaw: 1.32703
+    gear: reverse
+  - x: -9.7241
+    y: 6.2491
+    yaw: 1.32047
+    gear: reverse
+  - x: -9.6866
+    y: 6.3943
+    yaw: 1.31581
+    gear: reverse
+  - x: -9.6485
+    y: 6.5394
+    yaw: 1.31181
+    gear: reverse
+  - x: -9.6098
+    y: 6.6843
+    yaw: 1.30685
+    gear: reverse
+  - x: -9.5702
+    y: 6.829
+    yaw: 1.3097
+    gear: reverse
+  - x: -9.5324
+    y: 6.9741
+    yaw: 1.30684
+    gear: reverse
+  - x: -9.4919
+    y: 7.1186
+    yaw: 1.2907
+    gear: reverse
+  - x: -9.4494
+    y: 7.2624
+    yaw: 1.27943
+    gear: reverse
+  - x: -9.4058
+    y: 7.4059
+    yaw: 1.27345
+    gear: reverse
+  - x: -9.3615
+    y: 7.5492
+    yaw: 1.26759
+    gear: reverse
+  - x: -9.3162
+    y: 7.6922
+    yaw: 1.25717
+    gear: reverse
+  - x: -9.269
+    y: 7.8346
+    yaw: 1.26117
+    gear: reverse
+  - x: -9.2248
+    y: 7.9779
+    yaw: 1.28092
+    gear: reverse
+  - x: -9.1832
+    y: 8.1221
+    yaw: 1.29922
+    gear: reverse
+  - x: -9.1443
+    y: 8.2669
+    yaw: 1.31557
+    gear: reverse
+  - x: -9.1075
+    y: 8.4123
+    yaw: 1.34393
+    gear: reverse
+  - x: -9.0769
+    y: 8.5592
+    yaw: 1.37721
+    gear: reverse
+  - x: -9.0498
+    y: 8.7067
+    yaw: 1.39643
+    gear: reverse
+  - x: -9.0248
+    y: 8.8546
+    yaw: 1.40633
+    gear: reverse
+  - x: -9.0007
+    y: 9.0026
+    yaw: 1.41109
+    gear: reverse
+  - x: -8.9771
+    y: 9.1508
+    yaw: 1.41117
+    gear: reverse
+  - x: -8.953
+    y: 9.2988
+    yaw: 1.4032
+    gear: reverse
+  - x: -8.9271
+    y: 9.4466
+    yaw: 1.39268
+    gear: reverse
+  - x: -8.8998
+    y: 9.5941
+    yaw: 1.38381
+    gear: reverse
+  - x: -8.8713
+    y: 9.7413
+    yaw: 1.37651
+    gear: reverse
+  - x: -8.8419
+    y: 9.8884
+    yaw: 1.37093
+    gear: reverse
+  - x: -8.8117
+    y: 10.0353
+    yaw: 1.36851
+    gear: reverse
+  - x: -8.7817
+    y: 10.1823
+    yaw: 1.37204
+    gear: reverse
+  - x: -8.7525
+    y: 10.3294
+    yaw: 1.37797
+    gear: reverse
+  - x: -8.7242
+    y: 10.4767
+    yaw: 1.38092
+    gear: reverse
+  - x: -8.6959
+    y: 10.624
+    yaw: 1.36653
+    gear: reverse
+  - x: -8.6651
+    y: 10.7617
+    yaw: 0.17526
+    gear: reverse
+  - x: -8.5691
+    y: 10.6465
+    yaw: -0.87602
+    gear: reverse
+  - x: -8.4731
+    y: 10.5313
+    yaw: -0.87602
+    gear: reverse
+  - x: -8.377
+    y: 10.416
+    yaw: -0.87602
+    gear: reverse
+  - x: -8.281
+    y: 10.3008
+    yaw: -0.87602
+    gear: reverse
+  - x: -8.185
+    y: 10.1856
+    yaw: -0.87602
+    gear: reverse
+  - x: -8.0889
+    y: 10.0703
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.9929
+    y: 9.9551
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.8969
+    y: 9.8399
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.8008
+    y: 9.7247
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.7048
+    y: 9.6094
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.6088
+    y: 9.4942
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.5127
+    y: 9.379
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.4167
+    y: 9.2637
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.3207
+    y: 9.1485
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.2247
+    y: 9.0333
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.1286
+    y: 8.9181
+    yaw: -0.87602
+    gear: reverse
+  - x: -7.0326
+    y: 8.8028
+    yaw: -0.87602
+    gear: reverse
+  - x: -6.9366
+    y: 8.6876
+    yaw: -0.69585
+    gear: reverse
+  - x: -7.0008
+    y: 8.7762
+    yaw: 2.20376
+    gear: reverse
+  - x: -7.09
+    y: 8.8968
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.1793
+    y: 9.0173
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.2686
+    y: 9.1379
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.3578
+    y: 9.2584
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.4471
+    y: 9.379
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.5364
+    y: 9.4995
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.6257
+    y: 9.62
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.7149
+    y: 9.7406
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.8042
+    y: 9.8611
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.8935
+    y: 9.9817
+    yaw: 2.20824
+    gear: reverse
+  - x: -7.9827
+    y: 10.1022
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.072
+    y: 10.2228
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.1613
+    y: 10.3433
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.2506
+    y: 10.4638
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.3398
+    y: 10.5844
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.4291
+    y: 10.7049
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.5184
+    y: 10.8255
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.6076
+    y: 10.946
+    yaw: 2.20824
+    gear: reverse
+  - x: -8.6287
+    y: 10.9744
+    yaw: 2.20824
+    gear: reverse

@@ -1,0 +1,11 @@
+<library path="stm32_system_interface">
+  <class
+    name="hyper_control/Stm32SystemInterface"
+    type="hyper_control::Stm32SystemInterface"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      SystemInterface that serializes front-wheel steering and rear-wheel velocity commands over
+      a serial link to an STM32 board.
+    </description>
+  </class>
+</library>

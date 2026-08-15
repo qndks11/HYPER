@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hyper_launch</name>
+  <version>0.0.0</version>
+  <description>Per-stage and master launch files bringing up the full HYPER stack (sim, odometry, perception, behavior) in one command.</description>
+  <maintainer email="qndks11@gmail.com">kim</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>hyper_camera</exec_depend>
+  <exec_depend>hyper_gazebo</exec_depend>
+  <exec_depend>hyper_localization</exec_depend>
+  <exec_depend>hyper_object_detection</exec_depend>
+  <exec_depend>hyper_planner</exec_depend>
+  <exec_depend>hyper_lidar</exec_depend>
+  <exec_depend>hyper_rtk</exec_depend>
+  <exec_depend>witmotion_ros2</exec_depend>
+  <exec_depend>rosbridge_server</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
