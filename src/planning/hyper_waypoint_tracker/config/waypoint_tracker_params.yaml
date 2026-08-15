@@ -1,0 +1,14 @@
+waypoint_tracker:
+  ros__parameters:
+    wheelbase: 1.005
+    control_hz: 40.0
+    lookahead: 1.0
+    cruise_speed: 2.0
+    max_steering_angle: 0.5235988
+    max_steering_angular_velocity: 2.0
+    max_velocity: 4.44
+    accel_limit: 2.0
+    decel_limit: 4.0
+    goal_radius_m: 0.5
+    calibration_window_s: 2.0
+    input_timeout: 0.30

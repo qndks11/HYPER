@@ -22,7 +22,7 @@ import math
 
 import yaml
 
-SPACING = 0.15  # matches waypoint_recorder.py's resample_ds default
+SPACING = 0.15  # matches waypoint_recorder_node.py's resample_ds default
 
 
 def build_path(radius: float, lead_in: float, spacing: float = SPACING):

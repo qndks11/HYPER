@@ -1,0 +1,72 @@
+cmake_minimum_required(VERSION 3.8)
+project(hyper_control)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(hardware_interface REQUIRED)
+find_package(pluginlib REQUIRED)
+
+include_directories(include)
+
+add_executable(vehicle_controller_node src/vehicle_controller_node.cpp)
+ament_target_dependencies(vehicle_controller_node rclcpp std_msgs)
+
+add_executable(joystick_controller_node src/joystick_controller_node.cpp)
+ament_target_dependencies(joystick_controller_node rclcpp std_msgs sensor_msgs)
+
+add_library(stm32_system_interface SHARED src/stm32_system_interface.cpp)
+target_include_directories(stm32_system_interface PRIVATE include)
+ament_target_dependencies(stm32_system_interface
+  rclcpp
+  rclcpp_lifecycle
+  hardware_interface
+  pluginlib
+)
+pluginlib_export_plugin_description_file(hardware_interface hyper_control_hardware_plugins.xml)
+
+install(
+  DIRECTORY launch urdf config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# TODO: restore once scripts/t8s_bringup.py exists (currently blocks the build)
+# install(PROGRAMS
+#   scripts/t8s_bringup.py
+#   DESTINATION lib/${PROJECT_NAME}
+# )
+
+install(TARGETS
+  vehicle_controller_node
+  joystick_controller_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS
+  stm32_system_interface
+  DESTINATION lib
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  # the following line skips the linter which checks for copyrights
+  # comment the line when a copyright and license is added to all source files
+  set(ament_cmake_copyright_FOUND TRUE)
+  # the following line skips cpplint (only works in a git repo)
+  # comment the line when this package is in a git repo and when
+  # a copyright and license is added to all source files
+  set(ament_cmake_cpplint_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_package()
