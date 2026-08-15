@@ -4,7 +4,7 @@
 
   <!-- Arguments -->
   <xacro:arg name="use_sim" default="true" />
-  <xacro:arg name="serial_port" default="/dev/ttyUSB0" />
+  <xacro:arg name="serial_port" default="/dev/stm32" />
   <xacro:arg name="baud_rate" default="115200" />
   <xacro:arg name="body_length" default="2.0" />
   <xacro:arg name="body_width" default="1.0" />

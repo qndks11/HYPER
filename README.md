@@ -221,6 +221,50 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ros2 launch realsense2_camera rs_launch.py camera_name:=camera_object camera_namespace:='' enable_gyro:=true enable_accel:=true unite_imu_method:=1 enable_color:=false enable_depth:=false
 ```
 
+## 차량 제어 보드 설치 (실차)
+
+`hyper_control`의 `Stm32SystemInterface`(ros2_control 하드웨어 인터페이스)가 시리얼로 STM32 보드에 조향/구동 명령을 보냅니다. STM32의 ST-Link 내장 VCP가 `/dev/ttyACM0` 등으로 잡히는데, 다른 USB 장치와 함께 꽂으면 포트 번호가 바뀔 수 있으므로 GPS/카메라와 동일하게 idVendor/idProduct(+serial) 기준 udev 심볼릭 링크로 고정합니다.
+
+### 1. 장치 udev 규칙
+
+```bash
+sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
+```
+
+`/etc/udev/rules.d/99-hyper-stm32.rules` 생성:
+
+```
+KERNEL=="ttyACM[0-9]*", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", ATTRS{serial}=="<보드의 시리얼 번호>", SYMLINK+="stm32", GROUP="dialout", MODE="0666"
+```
+
+`idVendor:idProduct`(`0483:374b`)는 ST-Link V2.1을 쓰는 모든 Nucleo/Discovery 보드가 공유하는 값이라, 다른 STM32 보드를 동시에 꽂으면(예: 별도 보드 펌웨어 플래싱) 충돌할 수 있습니다. `ATTRS{serial}`까지 넣어 이 차량의 보드 하나만 고정합니다.
+
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+보드를 연결한 상태에서 아래로 직접 값을 확인 후 규칙에 채워 넣습니다:
+
+```bash
+udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct|serial\}" | head -3
+```
+
+규칙 적용 후 `ls -la /dev/stm32`로 심볼릭 링크가 생겼는지 확인합니다. `hyper_control`의 `urdf/vehicle.xacro` (`serial_port` 인자)와 `Stm32SystemInterface`(`stm32_system_interface.cpp`) 둘 다 기본값으로 `/dev/stm32`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다. 다른 포트를 쓰려면 `ros2 launch ... serial_port:=/dev/ttyUSB0`처럼 launch 인자로 덮어씁니다.
+
+### 2. 실행
+
+`hyper_control/launch/real_control.launch.py`가 `use_sim:=false`로 로봇 설명을 다시 생성해 `Stm32SystemInterface`용 `controller_manager`(`ros2_control_node`)를 띄우고, `joint_state_broadcaster`/`forward_position_controller`/`forward_velocity_controller`를 스폰합니다 — `real.launch.py`가 기본으로 이걸 포함하므로 보통 따로 실행할 필요는 없습니다. 단독 실행/디버깅 시:
+
+```bash
+ros2 launch hyper_control real_control.launch.py
+```
+
+`joint_state_broadcaster` 패키지가 설치돼 있지 않으면(`ros-humble-joint-state-broadcaster`) 컨트롤러 로딩이 실패하니 미리 설치합니다:
+
+```bash
+sudo apt install ros-humble-joint-state-broadcaster
+```
+
 ---
 
 ## Command to run

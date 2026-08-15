@@ -49,7 +49,7 @@ hardware_interface::CallbackReturn Stm32SystemInterface::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  serial_port_ = get_hardware_parameter(info_, "serial_port", "/dev/ttyUSB0");
+  serial_port_ = get_hardware_parameter(info_, "serial_port", "/dev/stm32");
   baud_rate_ = std::stoi(get_hardware_parameter(info_, "baud_rate", "115200"));
 
   if (info_.joints.size() != 2) {

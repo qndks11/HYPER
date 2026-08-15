@@ -89,6 +89,12 @@ private:
   double steering_angle_;
   double velocity_;
 
+  // When true, skips per-wheel Ackermann geometry and publishes steering_angle_/velocity_
+  // directly as single-element commands -- for the real vehicle's STM32 interface, which
+  // exposes one virtual steering joint and one virtual rear-axle joint (single actuators), not
+  // four independently commandable wheels the way the sim's ros2_control interface does.
+  bool single_output_;
+
   std::vector<double> wheel_angular_velocity_;
   std::vector<double> wheel_steering_angle_;
 

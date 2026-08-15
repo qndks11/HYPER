@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "hyper_control/vehicle_controller_node.hpp"
 
 VehicleController::VehicleController(const double timer_period, const double timeout_duration) :
@@ -25,6 +27,7 @@ VehicleController::VehicleController(const double timer_period, const double tim
   declare_parameter<double>("wheel_width", 0.0);
   declare_parameter<double>("max_steering_angle", 0.0);
   declare_parameter<double>("max_velocity", 0.0);
+  declare_parameter<bool>("single_output", false);
 
   // Get parameters on startup
   get_parameter("body_width", body_width_);
@@ -33,10 +36,16 @@ VehicleController::VehicleController(const double timer_period, const double tim
   get_parameter("wheel_width", wheel_width_);
   get_parameter("max_steering_angle", max_steering_angle_);
   get_parameter("max_velocity", max_velocity_);
+  get_parameter("single_output", single_output_);
 
   // Set the track width and wheel base
   track_width_ = body_width_ + (2 * wheel_width_ / 2);
   wheel_base_ = body_length_ - (2 * wheel_radius_);
+
+  if (single_output_) {
+    wheel_angular_velocity_ = {0.0};
+    wheel_steering_angle_ = {0.0};
+  }
 
   // Subscribers
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
@@ -136,12 +145,12 @@ void VehicleController::timer_callback()
 
   // Reset velocity to zero if timeout
   if (velocity_elapsed_time > timeout_duration_) {
-    wheel_angular_velocity_ = {0.0, 0.0};
+    std::fill(wheel_angular_velocity_.begin(), wheel_angular_velocity_.end(), 0.0);
   }
 
   // Reset steering angle to zero if timeout
   if (steering_elapsed_time > timeout_duration_) {
-    wheel_steering_angle_ = {0.0, 0.0};
+    std::fill(wheel_steering_angle_.begin(), wheel_steering_angle_.end(), 0.0);
   }
 
   // Publish steering position
@@ -167,6 +176,11 @@ void VehicleController::steering_angle_callback(const std_msgs::msg::Float64::Sh
     steering_angle_ = msg->data;
   }
 
+  if (single_output_) {
+    wheel_steering_angle_ = {steering_angle_};
+    return;
+  }
+
   const auto wheel_angles{ackermann_steering_angle()};
 
   wheel_steering_angle_ = {wheel_angles.first, wheel_angles.second};
@@ -182,6 +196,11 @@ void VehicleController::velocity_callback(const std_msgs::msg::Float64::SharedPt
     velocity_ = -max_velocity_;
   } else {
     velocity_ = msg->data;
+  }
+
+  if (single_output_) {
+    wheel_angular_velocity_ = {velocity_ / wheel_radius_};
+    return;
   }
 
   const auto wheel_velocity{rear_differential_velocity()};

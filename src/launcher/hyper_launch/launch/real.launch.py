@@ -4,6 +4,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
 # same staggered stage delays apply so odometry/perception/behavior attach
@@ -24,17 +25,43 @@ def generate_launch_description():
 
     # Publishes body_link -> camera_link/lidar_link/gps_link TF from vehicle.xacro, same as
     # hyper_gazebo's vehicle.launch.py does for sim. Lives in hyper_control (not hyper_launch),
-    # since vehicle.xacro is owned there. Real vehicle has no ros2_control hardware interface,
-    # so wheel/steering joint transforms are not published (no /joint_states source yet) --
-    # only the fixed sensor-mount joints resolve.
+    # since vehicle.xacro is owned there.
     robot_state_publisher = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('hyper_control'),
             'launch', 'robot_state_publisher.launch.py')),
     )
 
+    # Real vehicle equivalent of Gazebo's gz_ros2_control plugin: starts ros2_control_node
+    # against the STM32 hardware interface (use_sim:=false) and spawns joint_state_broadcaster/
+    # forward_position_controller/forward_velocity_controller, so wheel/steering joint
+    # transforms (/joint_states) and the controller command topics vehicle_controller_node
+    # publishes to actually exist on the real vehicle.
+    real_control = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_control'),
+            'launch', 'real_control.launch.py')),
+    )
+
+    # Same Ackermann-to-controller-command bridge as hyper_gazebo's vehicle.launch.py, but with
+    # single_output:=true: the real interface exposes one virtual steering joint and one virtual
+    # rear-axle joint (see Stm32SystemInterface), not four independently commandable wheels, so
+    # per-wheel Ackermann geometry doesn't apply on the output end here.
+    vehicle_controller_node = Node(
+        package='hyper_control',
+        executable='vehicle_controller_node',
+        parameters=[
+            os.path.join(
+                get_package_share_directory('hyper_control'), 'config', 'parameters.yaml'),
+            {'single_output': True},
+        ],
+        output='screen',
+    )
+
     return LaunchDescription([
         robot_state_publisher,
+        real_control,
+        vehicle_controller_node,
         stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
         # Real vehicle: hyper_camera owns both physical cameras and publishes plain image
