@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>hyper_waypoint_tracker</name>
+  <name>hyper_waypoint</name>
   <version>0.1.0</version>
-  <description>Standalone absolute-GPS-waypoint recording and pure-pursuit tracking.</description>
+  <description>Records odometry into a CSV of waypoints (idx, x, y, yaw, frame_id).</description>
   <maintainer email="user@example.com">user</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -10,9 +10,6 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
-  <depend>yaml-cpp</depend>
-  <exec_depend>launch</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
+  <depend>diagnostic_msgs</depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

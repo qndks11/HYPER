@@ -1,0 +1,237 @@
+# nav2 controller_server 설정 (follow_path 액션 서버).
+#
+# 차량 제원은 hyper_control/config/parameters.yaml, hyper_planner/config/parking_params.yaml에서
+# 가져왔습니다.
+#   전장 1.34 m / 전폭 0.81 m (body_link가 중심) -> footprint
+#   wheelbase 1.005 m, max_steering_angle 0.5235988 rad (30도)
+#   -> 최소 회전 반경 R = wheelbase / tan(30도) = 1.74 m
+#
+# 프레임: map(ekf_global) -> odom(ekf_local) -> body_link
+# 출력: /cmd_vel (geometry_msgs/Twist). 차량은 /velocity + /steering_angle을 먹으므로
+#       cmd_vel_to_ackermann_node가 변환합니다.
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    # ekf_local의 출력(odom 프레임). 속도 스무딩/제약 판단에만 씁니다.
+    odom_topic: odometry/filtered_odom
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    min_theta_velocity_threshold: 0.001
+    # 이 시간(초) 동안 유효한 제어를 못 만들면 액션을 abort 합니다.
+    # MPPI는 장애물 사이를 비집고 나갈 때 한두 사이클 해를 못 찾는 경우가 있어
+    # RPP 때(0.3)보다 여유를 뒀습니다.
+    failure_tolerance: 1.0
+
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      # 10.0 -> 15.0: 후진을 섞어 빠져나오는 동안 순 이동거리가 한동안 작을 수 있어,
+      # 정상적인 회피 기동이 "진행 없음"으로 abort 되지 않게 여유를 줍니다.
+      movement_time_allowance: 15.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.5
+      # 아커만 차량은 제자리 회전이 불가능하므로 최종 헤딩은 사실상 무시합니다.
+      yaw_goal_tolerance: 3.15
+
+    # MPPI. RPP(순수 추종기)는 준 경로를 절대 벗어나지 않아 장애물을 못 피하므로,
+    # 경로를 "참조"로만 쓰고 로컬 costmap을 보며 궤적을 직접 최적화하는 MPPI로 바꿨습니다.
+    # (이전 RPP 설정이 필요하면 git history에서 이 파일의 직전 버전을 보세요)
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+
+      # 예측 구간: 56 * 0.05 = 2.8초 = 2.5 m/s에서 7 m. 슬라럼 한 세트를 통째로
+      # 내다볼 정도는 됩니다. model_dt는 controller_frequency(20 Hz)와 맞춥니다.
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 1500
+      iteration_count: 1
+      temperature: 0.3
+      # gamma는 제어비용(control cost) 가중치입니다. MPPI에는 "목표 속도" 파라미터가 없고,
+      # 순항 속도는 PathFollowCritic이 앞으로 당기는 힘과 이 항이 억제하는 힘의 균형점으로
+      # 정해집니다. 실측/유도한 근사식:
+      #
+      #     순항속도 = PathFollowCritic.cost_weight * model_dt * vx_std^2 / gamma
+      #
+      # nav2 기본값(cost_weight 5, gamma 0.015)은 vx_max 0.5인 차동구동 로봇 기준이라
+      # 이 식으로 0.67 m/s가 나옵니다 -- 실제로 vx_max를 2.5로 올려도 0.86 m/s로 기어갔습니다.
+      # 현재값(15 * 0.05 * 0.04 / 0.010)은 3.0 m/s로, vx_max 2.5에 여유 있게 포화합니다.
+      # 즉 직선에서는 vx_max로 달리고, 곡선/장애물에서는 critic들이 알아서 감속시킵니다.
+      gamma: 0.010
+      reset_period: 1.0
+      regenerate_noises: false
+      transform_tolerance: 0.2
+      visualize: false
+
+      # vx_min < 0 = 후진 허용. 전방이 막혔을 때 MPPI가 후진 궤적을 샘플링할 수 있습니다.
+      # 후진이 습관이 되지 않도록 PreferForwardCritic(가중치 5)을 켠 채로 둡니다.
+      # wz_max는 최고속에서의 최소 회전 반경 제약(2.5 / 1.74 = 1.44 rad/s)보다 살짝 위로
+      # 두고, 실제 제한은 아래 AckermannConstraints가 매 스텝 걸어줍니다.
+      vx_max: 2.5
+      vx_min: -0.5
+      wz_max: 1.5
+      vx_std: 0.2
+      wz_std: 0.4
+      # 아커만은 비홀로노믹이라 vy는 모델에서 무시되지만 파라미터는 선언해야 합니다.
+      vy_max: 0.5
+      vy_std: 0.2
+
+      motion_model: "Ackermann"
+      AckermannConstraints:
+        min_turning_r: 1.74
+
+      # 예측 구간(7 m)보다 길게 잡아야 critic이 지평선 끝까지 참조 경로를 봅니다.
+      prune_distance: 8.0
+      # 매 틱 "경로에서 차량과 가장 가까운 점"을 찾을 때, 경로 앞머리에서 이 거리(누적 경로
+      # 길이)까지만 뒤집니다. 기본값은 local costmap 반지름(= 10 m)입니다. 여기서 찾은 점부터
+      # costmap 밖으로 나갈 때까지가 MPPI의 참조 경로이므로, 경로 앞머리가 costmap 밖이면
+      # 참조가 0점이 되어 InvalidPath로 액션이 즉시 abort 됩니다.
+      # 그래서 코스 중간에서 출발할 때는 follow_path_client가 미리 경로를 잘라 줍니다
+      # (start_from_nearest). 이 값을 코스 전체 길이만큼 키워서 서버가 알아서 찾게 할 수도
+      # 있지만, 순환 코스에서는 한 바퀴 건너뛴 지점에 붙어 버릴 수 있어 권하지 않습니다.
+      max_robot_pose_search_dist: 10.0
+      enforce_path_inversion: false
+
+      critics: ["ConstraintCritic", "ObstaclesCritic", "GoalCritic", "GoalAngleCritic",
+                "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.5
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 0.5
+      # 회피 강도를 정하는 critic. 옆으로 잘 안 비키면 repulsion_weight를,
+      # 장애물에 너무 붙으면 collision_margin_distance를 올리세요.
+      # consider_footprint: false -> 차체 대신 내접원 + costmap inflation으로 판정하므로
+      # local_costmap의 inflation_radius(0.7)가 실질적인 안전 여유가 됩니다.
+      ObstaclesCritic:
+        enabled: true
+        cost_power: 1
+        repulsion_weight: 1.5
+        critical_weight: 20.0
+        consider_footprint: false
+        collision_cost: 10000.0
+        collision_margin_distance: 0.15
+        near_goal_distance: 0.5
+      # 경로에 붙어 있으려는 힘. 이 값이 크면 장애물을 만나도 안 비킵니다.
+      # max_path_occupancy_ratio: 참조 경로의 5% 이상이 장애물에 걸리면 이 critic을
+      # 스스로 꺼서, 차가 경로를 벗어나 우회할 자유를 줍니다.
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 6.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        # offset_from_furthest는 "미터"가 아니라 경로 점 개수입니다. nav2 기본값 20은
+        # 전역 플래너가 내는 촘촘한 경로(약 0.05 m 간격 = 1 m)를 가정한 값인데, 우리 CSV는
+        # 간격이 0.6 m라 20이면 12 m -- MPPI가 보는 pruned path(약 7.8 m, 13점)보다 길어서
+        # `path_segments_count < offset_from_furthest_` 조건에 걸려 critic이 통째로
+        # 건너뛰어집니다(경로 정렬이 전혀 안 걸림). 4 = 약 2.4 m.
+        offset_from_furthest: 4
+        use_path_orientations: false
+      # cost_weight 5.0 -> 15.0: 위 gamma 주석의 순항 속도 식 참고. 이 값이 사실상
+      # "얼마나 빨리 달릴지"를 정합니다.
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 15.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        # false: 후진을 허용하려면 이 critic이 "경로 방향으로 앞을 보고 있을 것"을
+        # 강제하면 안 됩니다(true면 후진 궤적이 항상 벌점). 후진 억제는
+        # PreferForwardCritic이 담당합니다.
+        forward_preference: false
+
+
+# controller_server의 local costmap. nav2에서는 costmap이 별도 노드(/local_costmap/local_costmap)
+# 이므로 controller_server 아래가 아니라 최상위 키로 두어야 파라미터가 먹습니다.
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: body_link
+      rolling_window: true
+      width: 20
+      height: 20
+      resolution: 0.05
+      # body_link 중심 기준 전장 1.34 / 전폭 0.81 직사각형
+      footprint: "[[0.67, 0.405], [0.67, -0.405], [-0.67, -0.405], [-0.67, 0.405]]"
+      footprint_padding: 0.03
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          max_obstacle_height: 2.0
+          # 15.0 -> 6.0. 언덕(hill) 대책 stopgap입니다. 수평 라이다(지면 위 약 0.8 m)는
+          # 노면이 오목하게 휘는 구간(오르막 아랫부분/내리막 아랫부분)에서 노면 자체를
+          # 때리는데, 그 지점이 대략 7~8 m 앞입니다. tf에 피치가 없어(ekf_local two_d_mode)
+          # 높이로는 걸러낼 수 없으므로 마킹 거리를 그 앞에서 잘랐습니다.
+          # 2.5 m/s에서 6 m면 약 2.4초 전에 장애물을 보게 됩니다. 언덕 문제를 제대로
+          # 해결하면(피치 반영 or 구간 지오펜스) 다시 올리세요.
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 20.0
+          raytrace_min_range: 0.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        # 차폭 반(0.405)에 여유를 더한 값
+        inflation_radius: 0.7
+      always_send_full_costmap: true
+
+lifecycle_manager_control:
+  ros__parameters:
+    use_sim_time: true
+    autostart: true
+    node_names: ["controller_server"]
+    bond_timeout: 4.0
+
+cmd_vel_to_ackermann:
+  ros__parameters:
+    use_sim_time: true
+    wheelbase: 1.005
+    max_steering_angle: 0.5235988
+    max_velocity: 5.0
+    # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
+    input_timeout: 0.3
+    # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.
+    min_speed_for_steering: 0.05

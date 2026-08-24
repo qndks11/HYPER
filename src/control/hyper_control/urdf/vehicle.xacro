@@ -734,7 +734,22 @@
       <topic>imu</topic>
       <gz_frame_id>body_link</gz_frame_id>
       <imu>
-        <!-- <angular_velocity>
+        <!-- sdformat의 <localization> 기본값은 CUSTOM이고, custom_rpy가 비어 있으면 기준
+             프레임이 "스폰 당시 센서 자세"가 됩니다. 그러면 /imu yaw가 스폰 시 0으로
+             시작해 실제 ENU 방위와 스폰 yaw(-Y 인자, 기본 1.64 rad = 93.97deg)만큼
+             어긋나고, ekf_local/ekf_global이 절대 yaw를 imu0에서만 받으므로(odom0_config의
+             yaw는 false) 그 오차가 map 프레임 방위와 map->odom TF까지 그대로 전파됩니다.
+             world의 <world_frame_orientation>이 ENU이므로 ENU로 고정합니다. -->
+        <orientation_reference_frame>
+          <localization>ENU</localization>
+        </orientation_reference_frame>
+        <!-- sdformat's imu sensor has no separate orientation-noise element; ign-sensors
+             derives orientation_covariance from this angular_velocity noise. With this block
+             commented out, orientation_covariance (incl. pitch) came out all-zero, which
+             robot_localization was replacing with a small placeholder every cycle (see
+             ekf_local/ekf_global's "PITCH variance was zero" diagnostics); a second,
+             correlated instance of the same zero-covariance issue fixed for GPS above. -->
+        <angular_velocity>
           <x>
             <noise type="gaussian">
               <mean>0.0</mean>
@@ -773,7 +788,7 @@
               <stddev>1.7e-2</stddev>
             </noise>
           </z>
-        </linear_acceleration> -->
+        </linear_acceleration>
       </imu>
     </sensor>
   </gazebo>
@@ -823,18 +838,23 @@
       <topic>gps/fix</topic>
       <gz_frame_id>gps_link</gz_frame_id>
 
-      <!-- <navsat>
+      <gps>
         <position_sensing>
+          <!-- ign-sensors6's NavSat plugin applies this stddev directly to lat/lon in
+               degrees, not meters as the SDFormat docs describe (confirmed empirically:
+               a 0.5 stddev here produced an observed 0.48 deg stdev in gps/fix). 1 deg
+               of latitude is ~111320 m, so 9e-8 deg ~= 1 cm of horizontal noise,
+               RTK-fixed level (vs. the 0.5 m standalone-GPS noise this replaced). -->
           <horizontal>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.5</stddev>
+              <stddev>0.00000009</stddev>
             </noise>
           </horizontal>
           <vertical>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>1.0</stddev>
+              <stddev>0.02</stddev>
             </noise>
           </vertical>
         </position_sensing>
@@ -843,17 +863,17 @@
           <horizontal>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.1</stddev>
+              <stddev>0.03</stddev>
             </noise>
           </horizontal>
           <vertical>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.2</stddev>
+              <stddev>0.05</stddev>
             </noise>
           </vertical>
         </velocity_sensing>
-      </navsat> -->
+      </gps>
     </sensor>
   </gazebo>
 

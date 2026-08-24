@@ -9,7 +9,8 @@ from launch.substitutions import LaunchConfiguration
 # Same Gazebo sim as sim.launch.py (spawns the vehicle + vehicle_controller_node, which already
 # subscribes to /velocity and /steering_angle std_msgs/Float64), plus a rosbridge_websocket
 # server so a phone app can publish those two topics directly over ws://<host-ip>:<port>
-# without needing a native ROS 2 node.
+# without needing a native ROS 2 node. Also brings up hyper_localization's dual EKF +
+# navsat_transform (odometry/filtered_map etc.) so GPS/pose consumers work under phone teleop too.
 
 
 def generate_launch_description():
@@ -22,6 +23,15 @@ def generate_launch_description():
             'launch', 'rosbridge_websocket_launch.xml')),
         launch_arguments={
             'port': LaunchConfiguration('rosbridge_port'),
+        }.items(),
+    )
+
+    odometry_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_localization'),
+            'launch', 'odometry.launch.py')),
+        launch_arguments={
+            'datum_site': LaunchConfiguration('datum_site'),
         }.items(),
     )
 
@@ -38,6 +48,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'rosbridge_port', default_value='9090',
             description='TCP port for the rosbridge websocket server'),
+        DeclareLaunchArgument(
+            'datum_site', default_value='sim',
+            description="GPS origin for navsat_transform, keyed into hyper_localization's "
+                        "config/datums.yaml (e.g. 'sim', 'school', 'track')."),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
@@ -54,5 +68,6 @@ def generate_launch_description():
             }.items(),
         ),
 
+        odometry_launch,
         rosbridge_launch,
     ])
