@@ -268,12 +268,6 @@ class ObjectDetection(Node):
 
         self.publish_sign(best_sign_name)
 
-        self.get_logger().info(
-            f'Detected traffic light: '
-            f'{best_raw_class_name} -> {best_sign_name} '
-            f'({confidence:.2f})'
-        )
-
     def destroy_node(self):
         cv2.destroyAllWindows()
         super().destroy_node()

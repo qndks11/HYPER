@@ -25,8 +25,8 @@ controller_server:
     failure_tolerance: 1.0
 
     progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker"]
-    controller_plugins: ["FollowPath"]
+    goal_checker_plugins: ["general_goal_checker", "precise_goal_checker"]
+    controller_plugins: ["FollowPath", "ReverseFollowPath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -42,13 +42,29 @@ controller_server:
       # 아커만 차량은 제자리 회전이 불가능하므로 최종 헤딩은 사실상 무시합니다.
       yaw_goal_tolerance: 3.15
 
+    # 미션 매니저가 정지선/신호등/주차 지점처럼 "정확히 거기서 서야 하는" 세그먼트에
+    # goal_checker_id로 골라 쓰는 체커입니다(mission.yaml의 goal_checker: 필드).
+    #
+    # 0.25 m는 타협값입니다. 더 조이면 MPPI가 마지막 몇 십 cm에서 기어가다가
+    # progress_checker(0.5 m / 15초)에 걸려 abort 하기 쉽고, 더 풀면 정지선을 넘습니다.
+    # 정지선은 어차피 "넘지 않는 것"이 중요하므로 라벨을 선보다 조금 앞에 찍으세요.
+    # 그래도 abort가 나면 mission_manager의 arrival_slack_m가 도착으로 처리합니다.
+    #
+    # yaw는 여기서도 열어 둡니다. 아커만은 제자리 회전이 안 되므로 헤딩이 틀어진 채
+    # 도착하면 컨트롤러가 고칠 방법이 없고, 골이 영원히 만족되지 않습니다.
+    precise_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.25
+      yaw_goal_tolerance: 3.15
+
     # MPPI. RPP(순수 추종기)는 준 경로를 절대 벗어나지 않아 장애물을 못 피하므로,
     # 경로를 "참조"로만 쓰고 로컬 costmap을 보며 궤적을 직접 최적화하는 MPPI로 바꿨습니다.
     # (이전 RPP 설정이 필요하면 git history에서 이 파일의 직전 버전을 보세요)
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
 
-      # 예측 구간: 56 * 0.05 = 2.8초 = 2.5 m/s에서 7 m. 슬라럼 한 세트를 통째로
+      # 예측 구간: 56 * 0.05 = 2.8초 = 6.0 m/s에서 16.8 m. 슬라럼 한 세트를 통째로
       # 내다볼 정도는 됩니다. model_dt는 controller_frequency(20 Hz)와 맞춥니다.
       time_steps: 56
       model_dt: 0.05
@@ -63,22 +79,32 @@ controller_server:
       #
       # nav2 기본값(cost_weight 5, gamma 0.015)은 vx_max 0.5인 차동구동 로봇 기준이라
       # 이 식으로 0.67 m/s가 나옵니다 -- 실제로 vx_max를 2.5로 올려도 0.86 m/s로 기어갔습니다.
-      # 현재값(15 * 0.05 * 0.04 / 0.010)은 3.0 m/s로, vx_max 2.5에 여유 있게 포화합니다.
+      # 현재값(8 * 0.05 * 0.42^2 / 0.010)은 7.1 m/s로, vx_max 6.0에 여유 있게 포화합니다.
+      # (이전에는 cost_weight 36 / vx_std 0.2로 7.2 m/s였습니다 -- 순항 속도는 그대로 두고
+      #  코너 컷을 만드는 쪽 항만 줄인 것입니다.)
       # 즉 직선에서는 vx_max로 달리고, 곡선/장애물에서는 critic들이 알아서 감속시킵니다.
       gamma: 0.010
       reset_period: 1.0
       regenerate_noises: false
       transform_tolerance: 0.2
-      visualize: false
+      # MPPI의 유일한 시각화 스위치입니다. false면 /trajectories(후보+최적 궤적)뿐 아니라
+      # /transformed_global_plan(컨트롤러가 실제로 추종 중인 참조 경로)까지 안 나가서
+      # follow_path.rviz가 통째로 비어 보입니다. 마커 생성은 20 Hz마다 도므로 대회 주행에서
+      # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
+      visualize: true
 
       # vx_min < 0 = 후진 허용. 전방이 막혔을 때 MPPI가 후진 궤적을 샘플링할 수 있습니다.
       # 후진이 습관이 되지 않도록 PreferForwardCritic(가중치 5)을 켠 채로 둡니다.
-      # wz_max는 최고속에서의 최소 회전 반경 제약(2.5 / 1.74 = 1.44 rad/s)보다 살짝 위로
+      # wz_max는 최고속에서의 최소 회전 반경 제약(6.0 / 1.74 = 3.45 rad/s)보다 살짝 위로
       # 두고, 실제 제한은 아래 AckermannConstraints가 매 스텝 걸어줍니다.
-      vx_max: 2.5
+      vx_max: 6.0
       vx_min: -0.5
-      wz_max: 1.5
-      vx_std: 0.2
+      wz_max: 3.7
+      # vx_std는 아래 gamma 주석의 순항 속도 식에 제곱으로 들어갑니다. PathFollowCritic의
+      # 가중치를 코너 컷 때문에 36 -> 8로 낮췄으므로(4.5배), 순항 속도를 유지하려고 여기서
+      # 0.2 -> 0.42로 올렸습니다(제곱하면 4.4배). vx_max 6.0에 비하면 여전히 작은 탐색
+      # 폭이라(7%) 스로틀이 거칠어지지는 않습니다.
+      vx_std: 0.42
       wz_std: 0.4
       # 아커만은 비홀로노믹이라 vy는 모델에서 무시되지만 파라미터는 선언해야 합니다.
       vy_max: 0.5
@@ -88,8 +114,8 @@ controller_server:
       AckermannConstraints:
         min_turning_r: 1.74
 
-      # 예측 구간(7 m)보다 길게 잡아야 critic이 지평선 끝까지 참조 경로를 봅니다.
-      prune_distance: 8.0
+      # 예측 구간(16.8 m)보다 길게 잡아야 critic이 지평선 끝까지 참조 경로를 봅니다.
+      prune_distance: 19.0
       # 매 틱 "경로에서 차량과 가장 가까운 점"을 찾을 때, 경로 앞머리에서 이 거리(누적 경로
       # 길이)까지만 뒤집니다. 기본값은 local costmap 반지름(= 10 m)입니다. 여기서 찾은 점부터
       # costmap 밖으로 나갈 때까지가 MPPI의 참조 경로이므로, 경로 앞머리가 costmap 밖이면
@@ -138,39 +164,108 @@ controller_server:
       # 경로에 붙어 있으려는 힘. 이 값이 크면 장애물을 만나도 안 비킵니다.
       # max_path_occupancy_ratio: 참조 경로의 5% 이상이 장애물에 걸리면 이 critic을
       # 스스로 꺼서, 차가 경로를 벗어나 우회할 자유를 줍니다.
+      # cost_weight 6.0 -> 14.0(nav2 기본값): PathFollowCritic(8.0)과의 비율이
+      # 0.17에서 1.75로 뒤집힙니다. 코너 컷은 결국 "앞의 한 점으로 당기는 힘"과
+      # "경로 옆으로 벗어난 것을 벌하는 힘"의 균형 문제이고, 이전 값은 전자에 크게
+      # 치우쳐 있었습니다. 그래도 코너를 자르면 20~24까지 올리세요.
+      # 반대로 장애물을 안 비키기 시작하면 다시 낮추세요(회피는 이 critic이
+      # max_path_occupancy_ratio로 스스로 꺼져야 일어납니다).
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 6.0
+        cost_weight: 14.0
         max_path_occupancy_ratio: 0.05
-        trajectory_point_step: 4
+        # 4 -> 2: 궤적 56점 중 14점만 보던 것을 28점으로 늘려 정렬 신호를 촘촘하게 합니다.
+        # 이 critic의 비용은 batch(1500) x (56 / 이 값) x 참조 경로 점 개수에 비례하는데,
+        # 경로를 0.25 m로 다시 깔면서 점 개수도 32 -> 76으로 늘었습니다. 합쳐서 약 5배입니다.
+        # controller_frequency(20 Hz)를 못 지키면 여기를 3으로 되돌리거나 batch_size를
+        # 1000으로 낮추세요. (`ros2 topic hz /cmd_vel`로 확인)
+        trajectory_point_step: 2
         threshold_to_consider: 0.5
-        # offset_from_furthest는 "미터"가 아니라 경로 점 개수입니다. nav2 기본값 20은
-        # 전역 플래너가 내는 촘촘한 경로(약 0.05 m 간격 = 1 m)를 가정한 값인데, 우리 CSV는
-        # 간격이 0.6 m라 20이면 12 m -- MPPI가 보는 pruned path(약 7.8 m, 13점)보다 길어서
-        # `path_segments_count < offset_from_furthest_` 조건에 걸려 critic이 통째로
-        # 건너뛰어집니다(경로 정렬이 전혀 안 걸림). 4 = 약 2.4 m.
-        offset_from_furthest: 4
+        # 이 critic에서 offset_from_furthest는 사실상
+        # `path_segments_count < offset_from_furthest_ 이면 통째로 건너뛴다`는 가드로만
+        # 쓰입니다(단위는 미터가 아니라 경로 점 개수). 경로를 0.25 m로 다시 깔면서
+        # pruned path가 76점쯤 되므로 6(= 1.5 m)이면 절대 걸리지 않습니다.
+        offset_from_furthest: 6
         use_path_orientations: false
-      # cost_weight 5.0 -> 15.0: 위 gamma 주석의 순항 속도 식 참고. 이 값이 사실상
-      # "얼마나 빨리 달릴지"를 정합니다.
+      # 코너 컷의 주범입니다. 이 critic은 궤적의 *마지막* 점을 경로 위 한 점
+      # (furthest_reached + offset_from_furthest)으로 끌어당기는데, 경로가 휘어 있으면
+      # 그 점까지의 직선 거리는 코너를 잘라야 짧아집니다. nav2 헤더에도 그대로 적혀
+      # 있습니다: "A higher weight here with an offset > 1 will [...] push the follow
+      # point further ahead, creating some shortcutting."
+      #
+      # 36.0 -> 8.0. 다만 이 값은 순항 속도도 같이 정하므로(위 gamma 주석) 그냥 낮추면
+      # 차가 기어갑니다. 속도는 vx_std를 0.2 -> 0.42로 올려 되찾았습니다.
+      # offset 5 -> 6: 경로를 0.25 m로 다시 깔았으므로 5점 = 1.25 m입니다.
+      # 예전 5점(0.59 m 간격)은 3.0 m였는데, 그 앞당김 자체가 코너 컷을 키웠습니다.
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 15.0
-        offset_from_furthest: 5
+        cost_weight: 8.0
+        offset_from_furthest: 6
         threshold_to_consider: 1.4
+      # 경로의 앞 지점을 향해 차체 헤딩을 맞추게 하는 항. 코너 진입을 일찍 시작하게
+      # 만들어 컷을 줄이는 데 도움이 됩니다. 2.0 -> 4.0.
+      # offset 4 -> 8: 0.25 m 간격에서 8점 = 2.0 m로, 예전 4점(0.59 m 간격 = 2.4 m)과
+      # 비슷한 앞보기 거리입니다.
       PathAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 2.0
-        offset_from_furthest: 4
+        cost_weight: 4.0
+        offset_from_furthest: 8
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
         # false: 후진을 허용하려면 이 critic이 "경로 방향으로 앞을 보고 있을 것"을
         # 강제하면 안 됩니다(true면 후진 궤적이 항상 벌점). 후진 억제는
         # PreferForwardCritic이 담당합니다.
         forward_preference: false
+
+    # 후진 주차 전용 컨트롤러(mission.yaml에서 controller: ReverseFollowPath).
+    #
+    # MPPI가 아니라 RPP인 이유: MPPI는 vx_min으로 후진을 "허용"할 뿐이고 후진을 벌점화하는
+    # PreferForwardCritic이 켜져 있어, 주차칸으로 끝까지 밀어 넣는 기동을 안정적으로 못 냅니다.
+    # RPP의 allow_reversing은 carrot 점이 차체 뒤에 있으면 속도 부호를 뒤집는 단순한 규칙이라
+    # 녹화한 후진 경로를 그대로 되짚는 데 적합합니다.
+    #
+    # 주의 1: allow_reversing과 use_rotate_to_heading은 동시에 true일 수 없습니다
+    #        (nav2가 configure에서 거부하고 reversing을 꺼 버립니다). 반드시 false로 두세요.
+    # 주의 2: RPP는 "한 경로 안의 방향 전환"을 처리하지 못합니다. 전진->후진 경계는
+    #        mission.yaml에서 반드시 세그먼트를 쪼개야 합니다.
+    # 주의 3: 이 컨트롤러는 준 경로를 벗어나지 않습니다. 주차 구간에 장애물이 있으면
+    #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
+    ReverseFollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      # 후진은 천천히. 부호는 RPP가 알아서 뒤집고, 이 값은 크기입니다.
+      desired_linear_vel: 0.6
+      lookahead_dist: 1.0
+      min_lookahead_dist: 0.6
+      max_lookahead_dist: 1.2
+      lookahead_time: 1.5
+      use_velocity_scaled_lookahead_dist: false
+      use_interpolation: true
+      transform_tolerance: 0.2
+      # 골에 가까워지면 이 속도까지 줄여 붙입니다.
+      min_approach_linear_velocity: 0.15
+      approach_velocity_scaling_dist: 1.0
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+      # 곡률이 클수록 감속. 최소 회전 반경(1.74 m)을 기준으로 둡니다.
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 1.74
+      regulated_linear_scaling_min_speed: 0.25
+      # costmap 비용에 따른 감속은 끕니다 -- 주차칸은 연석/원뿔 inflation에 둘러싸여 있어
+      # 켜면 진입 내내 최저속으로 기어갑니다.
+      use_cost_regulated_linear_velocity_scaling: false
+      cost_scaling_dist: 0.3
+      cost_scaling_gain: 1.0
+      inflation_cost_scaling_factor: 3.0
+      # 제자리 회전 금지(아커만). allow_reversing과 함께 true면 nav2가 reversing을 끕니다.
+      use_rotate_to_heading: false
+      rotate_to_heading_angular_vel: 0.8
+      rotate_to_heading_min_angle: 0.785
+      max_angular_accel: 3.2
+      allow_reversing: true
+      max_robot_pose_search_dist: 10.0
 
 
 # controller_server의 local costmap. nav2에서는 costmap이 별도 노드(/local_costmap/local_costmap)
@@ -205,8 +300,10 @@ local_costmap:
           # 노면이 오목하게 휘는 구간(오르막 아랫부분/내리막 아랫부분)에서 노면 자체를
           # 때리는데, 그 지점이 대략 7~8 m 앞입니다. tf에 피치가 없어(ekf_local two_d_mode)
           # 높이로는 걸러낼 수 없으므로 마킹 거리를 그 앞에서 잘랐습니다.
-          # 2.5 m/s에서 6 m면 약 2.4초 전에 장애물을 보게 됩니다. 언덕 문제를 제대로
-          # 해결하면(피치 반영 or 구간 지오펜스) 다시 올리세요.
+          # 6.0 m/s에서 6 m면 약 1.0초 전에 장애물을 보게 됩니다(vx_max 2.5 -> 4.0 -> 6.0으로
+          # 올릴 때마다 2.4초 -> 1.5초 -> 1.0초로 줄었습니다). 이 정도면 급제동 여유가 빠듯하니
+          # 실차 정지거리로 꼭 재검증하세요. 언덕 문제를 제대로 해결하면(피치 반영 or 구간
+          # 지오펜스) obstacle_max_range를 다시 올리세요.
           obstacle_max_range: 6.0
           obstacle_min_range: 0.0
           raytrace_max_range: 20.0
@@ -230,7 +327,9 @@ cmd_vel_to_ackermann:
     use_sim_time: true
     wheelbase: 1.005
     max_steering_angle: 0.5235988
-    max_velocity: 5.0
+    # MPPI FollowPath.vx_max(6.0)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
+    # 잘려서 vx_max를 올린 게 무의미해집니다.
+    max_velocity: 7.0
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.

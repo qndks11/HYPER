@@ -10,6 +10,14 @@ HYPER 자율주행 스택을 단계별 또는 한 번에 실행하기 위한 lau
 ros2 launch hyper_launch simulation.launch.py
 ```
 
+`behavior.launch.py`가 띄우는 `mission_manager_node`는 `auto_start` 기본값이 `false`라 노드가 뜬
+뒤에도 대기만 합니다. 실제로 미션 주행을 시작하려면 서비스 콜이 한 번 더 필요합니다(미션 주행은
+사람이 시작하는 게 안전하므로 의도된 동작입니다).
+
+```bash
+ros2 service call /mission_manager/start std_srvs/srv/Trigger
+```
+
 실차 전체 스택:
 
 ```bash

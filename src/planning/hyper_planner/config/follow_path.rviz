@@ -50,10 +50,10 @@ Visualization Manager:
       Color: 255; 85; 0
       Color Transformer: FlatColor
     - Class: rviz_default_plugins/Path
-      Name: Waypoint Path (CSV)
+      Name: Mission Segment Path
       Enabled: true
       Topic:
-        Value: /follow_path_client/path
+        Value: /mission_manager/path
         Depth: 5
         Durability Policy: Transient Local
         Reliability Policy: Reliable
@@ -61,21 +61,41 @@ Visualization Manager:
       Line Style: Lines
       Alpha: 1
     - Class: rviz_default_plugins/Path
-      Name: Received Global Plan
+      Name: Waypoint Path (follow_path_client)
       Enabled: true
       Topic:
-        Value: /received_global_plan
+        Value: /follow_path_client/path
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Color: 0; 160; 0
+      Line Style: Lines
+      Alpha: 1
+    - Class: rviz_default_plugins/Path
+      Name: MPPI Transformed Plan
+      Enabled: true
+      Topic:
+        Value: /transformed_global_plan
         Depth: 5
         Durability Policy: Volatile
         Reliability Policy: Reliable
       Color: 0; 170; 255
       Line Style: Lines
       Alpha: 1
-    - Class: rviz_default_plugins/Path
-      Name: Local Plan
+    - Class: rviz_default_plugins/MarkerArray
+      Name: MPPI Trajectories
       Enabled: true
       Topic:
-        Value: /local_plan
+        Value: /trajectories
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Namespaces: {}
+    - Class: rviz_default_plugins/Path
+      Name: RPP Received Plan (parking)
+      Enabled: true
+      Topic:
+        Value: /received_global_plan
         Depth: 5
         Durability Policy: Volatile
         Reliability Policy: Reliable
@@ -103,7 +123,7 @@ Visualization Manager:
       Color: 255; 0; 255
       Alpha: 1
     - Class: rviz_default_plugins/PointStamped
-      Name: Lookahead Point
+      Name: Lookahead Point (parking)
       Enabled: true
       Topic:
         Value: /lookahead_point

@@ -1,0 +1,105 @@
+# HYPER 미션 정의 -- mission_manager_node가 읽습니다.
+#
+# 구조는 두 부분으로 나뉩니다.
+#   labels: "어디서"  -- 코스 위의 이벤트 지점 좌표 (map 프레임, 미터)
+#   steps:  "무엇을"  -- 그 지점들을 순서대로 엮은 미션 시퀀스
+#
+# 이렇게 나눈 이유: 정지 시간을 5초에서 6초로 바꾸거나 주차 접근을 튜닝할 때마다
+# 코스를 다시 녹화할 수는 없기 때문입니다. labels는 코스를 다시 녹화해도 물리적
+# 위치가 그대로면 살아남습니다(웨이포인트 idx가 아니라 좌표로 저장하므로).
+#
+# labels 채우는 법:
+#   python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+#       src/planning/hyper_waypoint/waypoints/sim.csv
+#
+# 실행:
+#   ros2 launch hyper_planner nav2_controller.launch.py   # 액션 서버가 먼저 떠 있어야 합니다
+#   ros2 launch hyper_planner mission.launch.py
+#   ros2 service call /mission_manager/start std_srvs/srv/Trigger
+#
+# mission_manager는 로드 시점에 각 label을 CSV의 최근접 웨이포인트로 스냅하고,
+# 스냅 거리가 label_snap_tolerance_m를 넘으면 미션을 거부합니다(라벨이 엉뚱한 데
+# 붙은 채로 주행이 시작되는 사고 방지).
+
+label_snap_tolerance_m: 1.0
+
+# --- label_waypoints.py가 관리하는 블록 (아래 주석 참고) ---
+labels:
+  # 이 블록은 label_waypoints.py가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+  stopline_1: {x: 39.812, y: -3.227}   # wp #72
+  light_1: {x: 12.202, y: -8.547}   # wp #275
+  light_2: {x: -0.500, y: 1.395}   # wp #506
+  park_t_entry: {x: -26.564, y: -21.848}   # wp #589
+  park_t_spot: {x: -16.047, y: -28.716}   # wp #616
+  light_3: {x: -9.691, y: -11.769}   # wp #810
+  park_p_entry: {x: 5.395, y: -30.157}   # wp #1234
+  park_p_spot: {x: 9.545, y: -34.518}   # wp #1249
+  finish: {x: 18.669, y: -43.842}   # wp #1354
+
+# --- 미션 시퀀스 ---
+#
+# step 종류:
+#   drive        경로를 따라 `until` 라벨까지 주행. 한 세그먼트 = FollowPath 골 1개.
+#                controller/goal_checker로 nav2 플러그인을 골라 쓸 수 있습니다
+#                (nav2_controller.yaml에 등록된 이름: FollowPath / ReverseFollowPath,
+#                 general_goal_checker / precise_goal_checker).
+#                reverse: true 는 "이 구간은 후진으로 녹화했다"는 표시입니다.
+#                포즈 방향은 CSV의 yaw(= 실제 차체 헤딩)를 그대로 쓰므로 뒤집지 않습니다
+#                -- RPP는 진행 방향을 포즈 방향이 아니라 carrot 점의 차체 좌표계 x부호로
+#                판단하고, goal checker의 yaw 비교는 차체 헤딩 기준이기 때문입니다.
+#                이 플래그가 실제로 하는 일은 (1) 헤딩을 무시하는 직선 진입 경로(lead-in)를
+#                끄고, (2) CSV에 yaw가 없을 때 유도한 방향을 180도 뒤집는 것입니다.
+#                로드 시점에 녹화된 방향과 플래그가 맞는지 검사해 경고합니다.
+#   stop         duration_s 동안 정지. 골을 안 보내면 cmd_vel_to_ackermann의
+#                워치독(input_timeout 0.3s)이 차를 세웁니다.
+#   wait_signal  /perception/sign이 value를 debounce_frames 연속으로 낼 때까지 대기.
+#                value에 쉼표를 넣어 여러 신호를 허용할 수 있습니다(예: "green,left_arrow").
+#                timeout_s 안에 못 보면 기본값(proceed_on_signal_timeout: true)으로는
+#                경고를 남기고 그냥 출발합니다 -- 대회에서 영영 멈춰 서는 것보다 낫습니다.
+#
+# 장애물 회피는 step이 아닙니다 -- 이미 MPPI costmap 안에서 처리되므로
+# 해당 구간 drive step 안에서 자동으로 일어납니다.
+steps:
+  # 1) 출발 -> 첫 정지선
+  - {type: drive, until: stopline_1, goal_checker: precise_goal_checker}
+  - {type: stop, duration_s: 5.0}
+
+  # 2) 첫 신호등
+  - {type: drive, until: light_1, goal_checker: precise_goal_checker}
+  - {type: wait_signal, value: green, timeout_s: 60.0, debounce_frames: 3}
+
+  # 3) 장애물 회피 구간 통과 -> 두 번째 신호등 (회피는 MPPI가 처리)
+  - {type: drive, until: light_2, goal_checker: precise_goal_checker}
+  - {type: wait_signal, value: green, timeout_s: 60.0, debounce_frames: 3}
+
+  # 4) T자 주차: 진입 -> 후진 입고 -> 정차
+  # 출차는 별도 스텝이 아닙니다. 방향 전환 경계는 park_t_spot이 이미 만들고 있고,
+  # 그 뒤 "전진 출차 -> 코스 복귀 -> 신호등"은 전부 전진이라 한 세그먼트로 이어집니다.
+  - {type: drive, until: park_t_entry}
+  - {type: drive, until: park_t_spot, controller: ReverseFollowPath, reverse: true,
+     goal_checker: precise_goal_checker}
+  - {type: stop, duration_s: 3.0}
+
+  # 5) 출차하며 세 번째 신호등까지
+  - {type: drive, until: light_3, goal_checker: precise_goal_checker}
+  # light_3은 좌회전 신호등입니다 -- 이 신호 직후 코스가 왼쪽으로 약 105도 꺾입니다
+  # (wp 810 기준 다음 20 m의 누적 헤딩 변화). 그래서 여기서는 초록불이 아니라 좌회전
+  # 화살표가 켜지며, value: green만 기다리면 영영 매칭되지 않습니다.
+  # 그 경우 timeout_s(60초)를 통째로 서 있다가 proceed_on_signal_timeout: true 때문에
+  # 경고만 남기고 출발합니다 -- 즉 "동작은 하는데 60초를 버리는" 형태로 조용히 실패합니다.
+  # 화살표와 초록불을 모두 허용합니다(perception이 내는 값은 left_arrow입니다).
+  - {type: wait_signal, value: "green,left_arrow", timeout_s: 60.0, debounce_frames: 3}
+
+  # 6) 평행 주차: 진입 -> 후진 입고 -> 정차 (출차는 T자와 같은 이유로 아래 스텝에 포함)
+  #
+  # TODO: 실제 평행주차 동작을 녹화한 뒤 확인하세요. 후진으로 들어간 뒤 차체를 펴는
+  # 전진 조정이 들어간다면 그 지점은 방향 전환이므로 반드시 세그먼트 경계여야 합니다
+  # (RPP는 한 경로 안의 방향 전환을 거부합니다). 그 경우 park_p_spot 앞에
+  # park_p_align 같은 라벨을 하나 더 넣고 스텝을 쪼개야 합니다.
+  - {type: drive, until: park_p_entry}
+  - {type: drive, until: park_p_spot, controller: ReverseFollowPath, reverse: true,
+     goal_checker: precise_goal_checker}
+  - {type: stop, duration_s: 3.0}
+
+  # 7) 출차하며 완주
+  - {type: drive, until: finish, goal_checker: precise_goal_checker}
