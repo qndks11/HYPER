@@ -23,6 +23,15 @@ controller_server:
     # MPPI는 장애물 사이를 비집고 나갈 때 한두 사이클 해를 못 찾는 경우가 있어
     # RPP 때(0.3)보다 여유를 뒀습니다.
     failure_tolerance: 1.0
+    # mission_manager가 decel 프로파일을 실어 보내는 토픽입니다(nav2_msgs/SpeedLimit).
+    # nav2 기본값과 같지만, 양쪽이 맞아야 동작하므로 명시해 둡니다. 이 값을 바꾸면
+    # mission.launch.py의 speed_limit_topic도 같이 바꾸세요.
+    #
+    # 주의: controller_server는 들어온 제한을 등록된 *모든* 컨트롤러에 겁니다
+    # (FollowPath와 ReverseFollowPath 양쪽). 그래서 mission_manager는 프로파일 구간을
+    # 벗어나는 즉시 0.0(NO_SPEED_LIMIT)을 보내 해제합니다 -- 안 그러면 뒤따르는 후진
+    # 주차 스텝에서 RPP가 그 제한 속도로 기어갑니다.
+    speed_limit_topic: "speed_limit"
 
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker", "precise_goal_checker"]
@@ -235,8 +244,7 @@ controller_server:
     #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
     ReverseFollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      # 후진은 천천히. 부호는 RPP가 알아서 뒤집고, 이 값은 크기입니다.
-      desired_linear_vel: 0.6
+      desired_linear_vel: 2.5
       lookahead_dist: 1.0
       min_lookahead_dist: 0.6
       max_lookahead_dist: 1.2

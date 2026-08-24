@@ -349,4 +349,66 @@ inline std::size_t insert_lead_in(
   return lead_in.size();
 }
 
+// 경로 끝에 직선 꼬리를 length_m만큼 덧붙입니다(덧붙인 점 개수를 돌려줍니다).
+//
+// decel 프로파일 전용입니다(mission_manager_node.cpp 머리 주석). 이 꼬리는 "MPPI에게
+// 경로의 끝을 감추는" 용도라 실제로 주행되지 않습니다 -- 차는 항상 그보다 앞의 라벨에서
+// cancel-on-arrival로 섭니다. 그래서 녹화 코스를 이어 붙이지 않고 직선으로 만듭니다.
+//
+//   - 라벨 뒤가 후진 구간이면(주차 진입) 녹화 코스를 이어 붙인 꼬리는 진행 방향이 180도
+//     꺾인 채 되돌아옵니다. 전진 골 하나 안에 방향 전환이 들어가는 셈이라 MPPI가 따라갈
+//     수 없고, trim_to_robot의 최근접 탐색이 꼬리에 붙을 수도 있습니다. 그래서 예전에는
+//     주차 진입 스텝에 프로파일을 아예 못 켰고, 대신 MPPI의 지수 감속(v = 남은거리 /
+//     (time_steps * model_dt))으로 마지막 10 m를 기어들어갔습니다.
+//   - 코스 끝(finish)에서는 이어 붙일 코스가 모자랍니다.
+//   - 직선이면 꼬리 길이가 항상 정확히 length_m이라, 보낸 경로 위에서 라벨을 "끝에서
+//     남은 길이"로 되찾는 set_stop_point가 정확해집니다.
+//
+// 방향은 마지막 fit_window_m 구간의 평균 진행 방향입니다 -- 마지막 두 점만 쓰면 녹화
+// 노이즈가 그대로 꼬리 전체의 각도가 됩니다. 라벨이 곡선 한가운데 있으면 이 직선이 실제
+// 코스에서 벌어지지만, 벌어지는 곳은 라벨보다 뒤쪽이고 차는 거기까지 가지 않습니다.
+// (현재 코스의 정지 라벨은 모두 진입 10 m의 헤딩 변화가 5도 이내입니다. 라벨을 곡선 위로
+//  옮긴다면 이 가정을 다시 확인하세요.)
+inline std::size_t append_straight_tail(
+  nav_msgs::msg::Path & path, double length_m, double spacing_m, double fit_window_m = 2.0)
+{
+  if (length_m <= 0.0 || spacing_m <= 0.0 || path.poses.size() < 2) {
+    return 0;
+  }
+
+  const auto tip = path.poses.back().pose.position;
+  std::size_t base = path.poses.size() - 1;
+  double span = 0.0;
+  while (base > 0 && span < fit_window_m) {
+    const auto & a = path.poses[base - 1].pose.position;
+    const auto & b = path.poses[base].pose.position;
+    span += std::hypot(b.x - a.x, b.y - a.y);
+    --base;
+  }
+
+  const double dx = tip.x - path.poses[base].pose.position.x;
+  const double dy = tip.y - path.poses[base].pose.position.y;
+  const double fitted = std::hypot(dx, dy);
+  if (fitted < 1e-6) {
+    return 0;   // 마지막 구간이 제자리 -- 방향을 못 정합니다.
+  }
+
+  const double ux = dx / fitted;
+  const double uy = dy / fitted;
+  const auto orientation = quaternion_from_yaw(std::atan2(uy, ux));
+  const auto steps = static_cast<std::size_t>(std::ceil(length_m / spacing_m));
+
+  path.poses.reserve(path.poses.size() + steps);
+  for (std::size_t i = 1; i <= steps; ++i) {
+    const double s = length_m * static_cast<double>(i) / static_cast<double>(steps);
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header = path.header;
+    pose.pose.position.x = tip.x + s * ux;
+    pose.pose.position.y = tip.y + s * uy;
+    pose.pose.orientation = orientation;
+    path.poses.push_back(pose);
+  }
+  return steps;
+}
+
 }  // namespace hyper_planner

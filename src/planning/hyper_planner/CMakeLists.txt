@@ -19,6 +19,7 @@ find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(generate_parameter_library REQUIRED)
 
 include_directories(include)
 
@@ -26,10 +27,13 @@ add_executable(follow_path_client_node src/follow_path_client_node.cpp)
 ament_target_dependencies(follow_path_client_node
   rclcpp rclcpp_action geometry_msgs nav_msgs nav2_msgs std_srvs tf2 tf2_ros)
 
+generate_parameter_library(mission_manager_parameters
+  src/mission_manager_parameters.yaml)
+
 add_executable(mission_manager_node src/mission_manager_node.cpp)
 ament_target_dependencies(mission_manager_node
   rclcpp rclcpp_action geometry_msgs nav_msgs nav2_msgs std_msgs std_srvs tf2 tf2_ros)
-target_link_libraries(mission_manager_node yaml-cpp)
+target_link_libraries(mission_manager_node mission_manager_parameters yaml-cpp)
 
 add_executable(cmd_vel_to_ackermann_node src/cmd_vel_to_ackermann_node.cpp)
 ament_target_dependencies(cmd_vel_to_ackermann_node

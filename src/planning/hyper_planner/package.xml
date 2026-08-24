@@ -16,6 +16,7 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>yaml-cpp</depend>
+  <depend>generate_parameter_library</depend>
   <exec_depend>nav2_common</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>

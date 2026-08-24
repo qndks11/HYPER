@@ -1,0 +1,31 @@
+# 코스 한 바퀴 -- mission_manager_node가 읽습니다.
+#
+# 미션이랄 게 없는 미션입니다. 코스 전체를 골 하나로 보내 끝까지 달립니다.
+# 정지도, 신호도, 주차도 없습니다. 컨트롤러 튜닝이나 코스 재녹화 직후의 확인처럼
+# "일단 한 바퀴 돌려 보고 싶다"는 용도입니다.
+#
+# 예전에 follow_path_client_node가 하던 일이 이것입니다. 그 노드는 CSV 로딩과 경로
+# 다듬기를 자기 사본으로 들고 있었지만, 여기서는 mission_manager가 같은 코드
+# (path_loader.hpp)로 처리하므로 실주행과 완전히 같은 경로가 나갑니다.
+#
+# 실행:
+#   ros2 launch hyper_planner nav2_controller.launch.py   # 액션 서버가 먼저 떠 있어야 합니다
+#   ros2 launch hyper_planner mission.launch.py mission_yaml:=<이 파일 경로>
+#   ros2 service call /mission_manager/start std_srvs/srv/Trigger
+
+label_snap_tolerance_m: 1.0
+
+labels:
+  # sim.csv의 마지막 웨이포인트(#1371)입니다. mission.yaml의 finish(#1354)가 아니라
+  # 여기를 쓰는 이유: finish는 "완주 판정" 라벨이라 코스가 그 뒤로 17점 더 남아 있고,
+  # 한 바퀴 돌리는 게 목적이면 녹화한 데까지 다 가는 편이 맞습니다.
+  #
+  # 코스 CSV를 바꾸면 이 좌표도 같이 바꿔야 합니다. 안 바꾸면 스냅 거리가
+  # label_snap_tolerance_m를 넘어 로드가 거부됩니다(조용히 엉뚱한 데서 서지 않습니다).
+  course_end: {x: 18.944, y: -53.223}
+
+steps:
+  # 골 하나, 코스 전부. decel_profile_a도 cancel_on_arrival_m도 켜지 않습니다 --
+  # 뒤에 아무 스텝도 없으니 마지막 몇 미터를 MPPI가 기어서 들어가도 잃을 시간이 없고,
+  # 그만큼 골 판정을 그대로 받는 쪽이 단순합니다.
+  - {type: drive, until: course_end}

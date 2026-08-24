@@ -2,8 +2,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
@@ -59,6 +60,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
+        # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
+        DeclareLaunchArgument('mission', default_value='mission'),
         robot_state_publisher,
         real_control,
         vehicle_controller_node,
@@ -74,5 +78,6 @@ def generate_launch_description():
                 'perception.launch.py',
                 lane_input_backend='intra_process',
                 object_input_backend='usb_camera')]),
-        TimerAction(period=BEHAVIOR_DELAY_S, actions=[stage('behavior.launch.py')]),
+        TimerAction(period=BEHAVIOR_DELAY_S, actions=[
+            stage('behavior.launch.py', mission=LaunchConfiguration('mission'))]),
     ])

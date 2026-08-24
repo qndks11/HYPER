@@ -8,14 +8,20 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     default_nav2_params = PathJoinSubstitution([
         FindPackageShare('hyper_planner'), 'config', 'nav2_controller.yaml'])
+    # mission.launch.py와 같은 규칙입니다: mission은 config/<이름>.yaml을 고르고,
+    # mission_yaml은 그 결과를 절대 경로로 덮어씁니다.
     default_mission_yaml = PathJoinSubstitution([
-        FindPackageShare('hyper_planner'), 'config', 'mission.yaml'])
+        FindPackageShare('hyper_planner'), 'config',
+        [LaunchConfiguration('mission'), '.yaml']])
     default_waypoint_csv = PathJoinSubstitution([
         EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
         'waypoints', 'sim.csv'])
 
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params_file', default_value=default_nav2_params),
+        DeclareLaunchArgument(
+            'mission', default_value='mission',
+            description='config/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
         DeclareLaunchArgument('mission_yaml', default_value=default_mission_yaml),
         DeclareLaunchArgument('waypoint_csv', default_value=default_waypoint_csv),
         # mission_manager_node의 '~/start'는 여전히 사람이 직접 호출해야 합니다
