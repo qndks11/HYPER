@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hyper_interface</name>
+  <version>0.0.0</version>
+  <description>
+    Serial bridge between ROS 2 and the Arduino board that drives the motor
+    drivers. Subscribes to the same /velocity and /steering_angle command
+    topics hyper_control's vehicle_controller uses in sim, and forwards them
+    to the Arduino over USB serial using a small binary protocol. Drive
+    (wheel encoder) and steering (position sensor) feedback both run closed
+    loop on the Arduino (see arduino/) and are republished to ROS 2 as
+    /velocity_actual, /steering_angle_actual, and /odom.
+  </description>
+  <maintainer email="bean1120@hanyang.ac.kr">bean1120</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <exec_depend>python3-serial</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

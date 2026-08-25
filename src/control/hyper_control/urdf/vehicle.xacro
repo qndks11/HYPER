@@ -4,8 +4,6 @@
 
   <!-- Arguments -->
   <xacro:arg name="use_sim" default="true" />
-  <xacro:arg name="serial_port" default="/dev/stm32" />
-  <xacro:arg name="baud_rate" default="115200" />
   <xacro:arg name="body_length" default="2.0" />
   <xacro:arg name="body_width" default="1.0" />
   <xacro:arg name="body_height" default="0.5" />
@@ -576,35 +574,6 @@
       </joint>
     </ros2_control>
   </xacro:if>
-
-  <!-- Real Vehicle Control (STM32) -->
-  <xacro:unless value="$(arg use_sim)">
-    <ros2_control name="control" type="system">
-      <hardware>
-        <plugin>hyper_control/Stm32SystemInterface</plugin>
-        <param name="serial_port">$(arg serial_port)</param>
-        <param name="baud_rate">$(arg baud_rate)</param>
-      </hardware>
-
-      <joint name="steering_joint">
-        <command_interface name="position">
-          <param name="min">${-max_steering_angle}</param>
-          <param name="max">${max_steering_angle}</param>
-        </command_interface>
-
-        <state_interface name="position"/>
-      </joint>
-
-      <joint name="rear_axle_joint">
-        <command_interface name="velocity">
-          <param name="min">${-max_wheel_angular_velocity}</param>
-          <param name="max">${max_wheel_angular_velocity}</param>
-        </command_interface>
-
-        <state_interface name="velocity"/>
-      </joint>
-    </ros2_control>
-  </xacro:unless>
 
   <!-- Gazebo Plugins -->
   <gazebo>

@@ -31,8 +31,8 @@ JoystickController::JoystickController(const double timer_period) :
 void JoystickController::listener_callback(const sensor_msgs::msg::Joy::SharedPtr msg)
 {
   // Set the desired angle and desired velocity based on the joystick's axis
-  steering_angle_ = msg->axes[0] * max_steering_angle_;
-  velocity_ = msg->axes[3] * max_velocity_;
+  steering_angle_ = msg->axes[0] * max_steering_angle_;  // Left stick X
+  velocity_ = msg->axes[4] * max_velocity_;              // Right stick Y
 }
 
 void JoystickController::timer_callback()
