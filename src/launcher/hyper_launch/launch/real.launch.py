@@ -2,9 +2,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
 # same staggered stage delays apply so odometry/perception/behavior attach
@@ -32,36 +32,11 @@ def generate_launch_description():
             'launch', 'robot_state_publisher.launch.py')),
     )
 
-    # Real vehicle equivalent of Gazebo's gz_ros2_control plugin: starts ros2_control_node
-    # against the STM32 hardware interface (use_sim:=false) and spawns joint_state_broadcaster/
-    # forward_position_controller/forward_velocity_controller, so wheel/steering joint
-    # transforms (/joint_states) and the controller command topics vehicle_controller_node
-    # publishes to actually exist on the real vehicle.
-    real_control = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('hyper_control'),
-            'launch', 'real_control.launch.py')),
-    )
-
-    # Same Ackermann-to-controller-command bridge as hyper_gazebo's vehicle.launch.py, but with
-    # single_output:=true: the real interface exposes one virtual steering joint and one virtual
-    # rear-axle joint (see Stm32SystemInterface), not four independently commandable wheels, so
-    # per-wheel Ackermann geometry doesn't apply on the output end here.
-    vehicle_controller_node = Node(
-        package='hyper_control',
-        executable='vehicle_controller_node',
-        parameters=[
-            os.path.join(
-                get_package_share_directory('hyper_control'), 'config', 'parameters.yaml'),
-            {'single_output': True},
-        ],
-        output='screen',
-    )
-
     return LaunchDescription([
+        # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
+        # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
+        DeclareLaunchArgument('mission', default_value='mission'),
         robot_state_publisher,
-        real_control,
-        vehicle_controller_node,
         stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
         # Real vehicle: hyper_camera owns both physical cameras and publishes plain image
@@ -72,19 +47,15 @@ def generate_launch_description():
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage(
                 'perception.launch.py',
-<<<<<<< HEAD
                 lane_input_backend='intra_process',
                 object_input_backend='usb_camera')]),
-        TimerAction(period=BEHAVIOR_DELAY_S, actions=[stage('behavior.launch.py')]),
-=======
-                lane_input_backend='direct_usb',
-                object_input_backend='direct_usb')]),
         # interface.launch.py (hyper_interface's Arduino serial bridge) starts alongside
         # behavior since it only needs /velocity + /steering_angle to exist -- late subscriber
-        # join works fine with ROS 2 discovery either way.
+        # join works fine with ROS 2 discovery either way. It subscribes to those topics
+        # directly (see hyper_interface/README.md), so no vehicle_controller_node/ros2_control
+        # translation step sits in between on the real car.
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
-            stage('behavior.launch.py'),
+            stage('behavior.launch.py', mission=LaunchConfiguration('mission')),
             stage('interface.launch.py'),
         ]),
->>>>>>> 6f6b24572a732012e5e0cfd43b1be11618faaf9a
     ])

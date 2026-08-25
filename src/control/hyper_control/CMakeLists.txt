@@ -11,11 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(hardware_interface REQUIRED)
-find_package(pluginlib REQUIRED)
 
 include_directories(include)
 
@@ -24,16 +21,6 @@ ament_target_dependencies(vehicle_controller_node rclcpp std_msgs)
 
 add_executable(joystick_controller_node src/joystick_controller_node.cpp)
 ament_target_dependencies(joystick_controller_node rclcpp std_msgs sensor_msgs)
-
-add_library(stm32_system_interface SHARED src/stm32_system_interface.cpp)
-target_include_directories(stm32_system_interface PRIVATE include)
-ament_target_dependencies(stm32_system_interface
-  rclcpp
-  rclcpp_lifecycle
-  hardware_interface
-  pluginlib
-)
-pluginlib_export_plugin_description_file(hardware_interface hyper_control_hardware_plugins.xml)
 
 install(
   DIRECTORY launch urdf config
@@ -50,11 +37,6 @@ install(TARGETS
   vehicle_controller_node
   joystick_controller_node
   DESTINATION lib/${PROJECT_NAME}
-)
-
-install(TARGETS
-  stm32_system_interface
-  DESTINATION lib
 )
 
 if(BUILD_TESTING)
