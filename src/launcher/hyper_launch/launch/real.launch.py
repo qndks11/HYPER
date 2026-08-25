@@ -72,7 +72,19 @@ def generate_launch_description():
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage(
                 'perception.launch.py',
+<<<<<<< HEAD
                 lane_input_backend='intra_process',
                 object_input_backend='usb_camera')]),
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[stage('behavior.launch.py')]),
+=======
+                lane_input_backend='direct_usb',
+                object_input_backend='direct_usb')]),
+        # interface.launch.py (hyper_interface's Arduino serial bridge) starts alongside
+        # behavior since it only needs /velocity + /steering_angle to exist -- late subscriber
+        # join works fine with ROS 2 discovery either way.
+        TimerAction(period=BEHAVIOR_DELAY_S, actions=[
+            stage('behavior.launch.py'),
+            stage('interface.launch.py'),
+        ]),
+>>>>>>> 6f6b24572a732012e5e0cfd43b1be11618faaf9a
     ])
