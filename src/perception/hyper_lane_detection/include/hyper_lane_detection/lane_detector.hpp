@@ -53,8 +53,11 @@ public:
    * know either one.
    *
    * @param yellow Yellow paint mask (BEV), from yellow_mask().
-   * @param origin The bottom-center point representing the vehicle's position (BEV coordinates).
-   * @param width Bird's-eye image width [px], used to scale pixel offsets to meters.
+   * @param origin The vehicle's position in BEV coordinates (GroundProjection::origin_px()).
+   * Normally sits below the image's last row, since the BEV starts at the nearest ground the
+   * camera can actually see rather than at the vehicle itself.
+   * @param meters_per_pixel Ground distance one BEV pixel covers [m/px], from
+   * GroundProjection::meters_per_pixel(). Isotropic by construction, so it applies to both axes.
    * @param is_rear False: front camera (straight fit, lane-center bias). True: rear camera (curve
    * fit, parking-line standoff bias).
    * @param view Debug image to draw into; must already carry both mask highlights and be BEV-
@@ -62,7 +65,7 @@ public:
    * @return Both sides' fit results, for publishing and draw_text().
    */
   Result detect_and_draw(
-    const cv::Mat & yellow, const cv::Point2d & origin, int width, bool is_rear,
+    const cv::Mat & yellow, const cv::Point2d & origin, double meters_per_pixel, bool is_rear,
     cv::Mat & view) const;
 
   /// Draws the "L: .. / R: .. / Lane not detected" text block onto view's text panel, starting at
@@ -121,15 +124,16 @@ private:
    * from it.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
-   * @param origin The bottom-center point the chain was anchored to.
-   * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
+   * @param origin The vehicle position the chain was anchored to (BEV coordinates).
+   * @param meters_per_pixel Ground distance one BEV pixel covers [m/px], used to scale the fitted
+   * line's perpendicular pixel offset to meters.
    * @param side Which lane line `points` traces, so the center-offset bias is signed correctly.
    * @param center_bias_m Distance from the detected line to the target, signed per `side`.
    * @return The lane fit result; `valid` is false if there are too few points.
    */
   Fit fit_lane(
-    const std::vector<cv::Point> & points, const cv::Point2d & origin, int width, Side side,
-    double center_bias_m) const;
+    const std::vector<cv::Point> & points, const cv::Point2d & origin, double meters_per_pixel,
+    Side side, double center_bias_m) const;
 
   /**
    * @brief Fits a quadratic curve (x' = a*y'^2 + b*y', in coordinates shifted so the chain's near
@@ -152,8 +156,9 @@ private:
    * chain's observed reach, for drawing, rather than fit_lane()'s two-point straight segment.
    *
    * @param points The lane chain from walk_lane_chain(), in BEV coordinates, near to far.
-   * @param origin The bottom-center point the chain was anchored to.
-   * @param width Bird's-eye image width [px], used to scale pixel offset to meters.
+   * @param origin The vehicle position the chain was anchored to (BEV coordinates).
+   * @param meters_per_pixel Ground distance one BEV pixel covers [m/px], used to scale the fitted
+   * curve's perpendicular pixel offset to meters.
    * @param side Which lane line `points` traces, so the center-offset bias is signed correctly.
    * @param center_bias_m Distance from the detected line to the target, signed per `side` -- same
    * meaning as fit_lane()'s parameter of the same name.
@@ -161,8 +166,8 @@ private:
    * straight/short for a stable curvature estimate.
    */
   Fit fit_lane_curve(
-    const std::vector<cv::Point> & points, const cv::Point2d & origin, int width, Side side,
-    double center_bias_m) const;
+    const std::vector<cv::Point> & points, const cv::Point2d & origin, double meters_per_pixel,
+    Side side, double center_bias_m) const;
 };
 
 }  // namespace hyper_lane_detection

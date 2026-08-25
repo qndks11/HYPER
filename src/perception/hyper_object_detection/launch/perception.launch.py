@@ -13,6 +13,13 @@ def generate_launch_description():
     model_path = os.path.join(
         get_package_share_directory('hyper_object_detection'), 'models', 'best.pt')
 
+    # Bird's-eye-view geometry for the real ELP front camera. lane_detection's built-in defaults
+    # describe the simulated cameras, so only the intra_process (real vehicle) path loads this --
+    # it replaces the sim's ideal-pinhole lens model with the ELP's measured rectified
+    # intrinsics, leaving the ground region and scale identical between sim and car.
+    real_bev_params = os.path.join(
+        get_package_share_directory('hyper_lane_detection'), 'config', 'bev_real.yaml')
+
     # hyper_lane_detection's input_backend: intra_process (real vehicle -- hyper_camera's
     # ElpCameraPublisherNode component and LaneDetection are loaded into one
     # ComposableNodeContainer, so the frame is handed over by pointer instead of a serialized
@@ -56,7 +63,7 @@ def generate_launch_description():
                 package='hyper_lane_detection',
                 plugin='LaneDetection',
                 name='lane_detection',
-                parameters=[{'input_backend': 'intra_process'}],
+                parameters=[real_bev_params, {'input_backend': 'intra_process'}],
                 remappings=[
                     ('/image_raw', '/camera/image_raw'),
                     ('/rear_image_raw', '/camera_rear/image_raw'),

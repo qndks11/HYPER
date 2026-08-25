@@ -300,6 +300,34 @@ Fixed Frame은 `map`입니다. 표시되는 항목:
 | 로컬 코스트맵 | `/local_costmap/costmap` | costmap |
 | footprint | `/local_costmap/published_footprint` | 자홍 |
 | 라이다 | `/scan` | 주황 |
+| BEV Front (차선 IPM 디버그 뷰) | `/lane/bev/image_raw` | Image 패널 |
+| BEV Rear (차선 IPM 디버그 뷰, 시뮬레이션 전용) | `/lane/rear_bev/image_raw` | Image 패널 |
+| BEV 지면 오버레이 (전방) | `/lane/bev/points` | 원본 색 (RGB8) |
+| 후방 깊이 포인트 클라우드 (시뮬레이션 전용) | `/camera_rear/depth/points` | 원본 색 (RGB8) |
+
+BEV 두 패널은 `hyper_lane_detection`의 버드아이뷰 디버그 화면입니다. 그 노드는 자체 OpenCV 창을
+열지 않으므로, 경로/코스트맵과 차선 인지 결과를 한 화면에서 같이 보려면 이 패널을 씁니다. QoS는
+best-effort로 맞춰 두었습니다(발행 측이 SensorDataQoS라 Reliable로 두면 아무것도 안 나옵니다).
+후방 패널은 `input_backend:=ros_raw`(시뮬레이션)에서만 채워지고, 실차에서는 `No Image`로 남습니다.
+패널 크기·위치는 드래그로 바꾼 뒤 `File > Save Config`로 저장하면 됩니다 — 다만 RViz가 파일을
+다시 쓰면서 이 설정 파일의 주석은 지워집니다.
+
+**BEV 지면 오버레이 (전방)**는 같은 화면을 2D 패널이 아니라 3D 씬의 지면(`body_link`, z=0.02 m)에
+깔아 코스트맵·경로·footprint와 직접 겹쳐 봅니다. `body_link` tf가 있어야 보입니다. 오버레이가
+코스트맵과 어긋나 보이면 `hyper_lane_detection`의 지면 투영 파라미터(`bev.*` — 특히 장착 높이·피치,
+`ground_projection.hpp` 참고)가 실제 카메라와 어긋난 것이고, 같은 투영이 `/lane/center`의
+`offset_m`과 `/stopline/detection`의 `distance_m`도 만들어냅니다. 노드 시작 로그에 카메라별로
+실제 만들어진 지면 범위·스케일·원점이 한 줄 찍히므로 먼저 그 줄과 비교해 보십시오.
+
+**후방 깊이 포인트 클라우드**는 오버레이가 아니라 실제로 측정된 3D 점입니다. 후방 RGBD 센서가
+내보내는 `/camera_rear/depth/points`를 그대로 그리므로, 지면을 평면으로 가정하는 IPM 오버레이와
+달리 연석·주차 차량·라바콘처럼 지면 위로 솟은 것도 제 높이에 찍힙니다. 좌표는 `rear_camera_link`
+프레임이고 그 프레임 규약(x 후방 = 카메라 정면)을 그대로 따르므로 별도 변환 노드가 필요 없습니다
+(자세한 이유는 `vehicle.xacro`의 `<gz_frame_id>` 주석 참고). 먼 쪽 끝은 센서의 depth clip(10 m)이
+자르고, 가까운 쪽은 장착 높이·하향각(15°)과 상하 화각이 겹쳐 차 바로 뒤 약 2 m가 비어 있습니다 --
+후진 주차에서 차 뒤 1~2 m를 봐야 한다면 `vehicle.xacro`의 `rear_camera_pitch`를 키워야 합니다.
+`hyper_lane_detection`이 후방 IPM으로 만드는 `/lane/rear_bev/points`는 여전히 발행되지만, 이 뷰에는
+더 이상 올리지 않습니다 -- 차선 IPM 결과를 보고 싶으면 `BEV Rear` Image 패널을 쓰세요.
 
 진초록 경로는 레거시 `follow_path_client_node`를 띄웠을 때만 나옵니다. 미션 주행에서 지금 무엇이
 나가고 있는지는 초록(`/mission_manager/path`)을 보세요 -- decel 프로파일이 켜진 스텝에서는 이 경로가

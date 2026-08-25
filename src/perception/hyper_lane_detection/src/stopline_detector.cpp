@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <vector>
 
-#include "hyper_lane_detection/bev_scale.hpp"
+#include "hyper_lane_detection/course_geometry.hpp"
 
 namespace hyper_lane_detection
 {
@@ -50,9 +50,10 @@ StoplineDetector::Result StoplineDetector::find_stopline(
   // A stop-line bar belonging to some other lane at a multi-lane intersection can still pass the
   // aspect-ratio and min-width checks above, so it's not enough to look at a candidate's shape --
   // gate on lateral position too: reject anything centered more than half a lane away from the
-  // vehicle's own lane center (origin.x). One lane spans mask.cols / kNumLaneInScreen px, the same
-  // scale used everywhere else in this file.
-  const double lane_width_px = mask.cols / kNumLaneInScreen;
+  // vehicle's own lane center (origin.x). A lane's width in pixels now follows from the course's
+  // real lane width and the BEV's real scale, rather than from a "lanes across the image" constant
+  // that only held while the image happened to be the width it was.
+  const double lane_width_px = kLaneWidthMeters / meters_per_pixel;
   const double band_min_x = origin.x - 1.2 * lane_width_px / 2.0;
   const double band_max_x = origin.x + 1.2 * lane_width_px / 2.0;
 
@@ -90,10 +91,9 @@ StoplineDetector::Result StoplineDetector::find_stopline(
 }
 
 StoplineDetector::Result StoplineDetector::detect_and_draw(
-  const cv::Mat & white, const cv::Point2d & origin, cv::Mat & view) const
+  const cv::Mat & white, const cv::Point2d & origin, double meters_per_pixel,
+  cv::Mat & view) const
 {
-  const double meters_per_pixel =
-    kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(white.cols);
   const Result result = find_stopline(white, origin, meters_per_pixel);
 
   if (result.valid) {

@@ -31,6 +31,23 @@
   <xacro:arg name="object_camera_setback" default="0.5" />
   <xacro:arg name="object_camera_fov" default="1.2217305" />
 
+  <!-- Rear camera: RGBD, modelled on the Intel RealSense D435i the real car already carries
+       (see hyper_launch/sensors.launch.py, where it currently supplies /imu only). Gazebo's
+       rgbd_camera renders colour and depth through one shared lens, so the single
+       horizontal_fov below is the D435i's *depth* FOV (87 deg), not its narrower RGB FOV
+       (69 deg); depth is why this sensor is RGBD at all. rear_image_* are pixels, the other
+       rear_camera_* are the mounting pose, kept separate from the front camera's so the rear's
+       geometry no longer moves whenever the front fisheye is retuned. -->
+  <xacro:arg name="rear_camera_height" default="1.5" />
+  <xacro:arg name="rear_camera_pitch" default="0.1" />
+  <xacro:arg name="rear_camera_setback" default="0.3" />
+  <xacro:arg name="rear_camera_fov" default="1.5184364" />
+  <xacro:arg name="rear_camera_fps" default="30" />
+  <xacro:arg name="rear_image_width" default="848" />
+  <xacro:arg name="rear_image_height" default="480" />
+  <xacro:arg name="rear_depth_near" default="0.2" />
+  <xacro:arg name="rear_depth_far" default="10.0" />
+
   <!-- Mathematical Constants -->
   <xacro:property name="PI" value="3.14159265"/>
 
@@ -59,6 +76,15 @@
   <xacro:property name="object_camera_pitch" value="$(arg object_camera_pitch)"/>
   <xacro:property name="object_camera_setback" value="$(arg object_camera_setback)"/>
   <xacro:property name="object_camera_fov" value="$(arg object_camera_fov)"/>
+  <xacro:property name="rear_camera_height" value="$(arg rear_camera_height)"/>
+  <xacro:property name="rear_camera_pitch" value="$(arg rear_camera_pitch)"/>
+  <xacro:property name="rear_camera_setback" value="$(arg rear_camera_setback)"/>
+  <xacro:property name="rear_camera_fov" value="$(arg rear_camera_fov)"/>
+  <xacro:property name="rear_camera_fps" value="$(arg rear_camera_fps)"/>
+  <xacro:property name="rear_image_width" value="$(arg rear_image_width)"/>
+  <xacro:property name="rear_image_height" value="$(arg rear_image_height)"/>
+  <xacro:property name="rear_depth_near" value="$(arg rear_depth_near)"/>
+  <xacro:property name="rear_depth_far" value="$(arg rear_depth_far)"/>
 
   <xacro:property name="body_mass" value="${body_density * body_length * body_height * body_width}"/>
   <xacro:property name="body_inertia_x" value="${1.0/12.0 * body_mass * (body_height*body_height + body_width*body_width)}"/>
@@ -468,7 +494,7 @@
   <!-- Rear Camera Joint -->
   <joint name="rear_camera_joint" type="fixed">
     <axis xyz="0 1 0" />
-    <origin xyz="${-(body_length/2 - camera_box_size/2 - camera_setback)} 0.0 ${camera_height}" rpy="0 ${camera_pitch} ${PI}"/>
+    <origin xyz="${-(body_length/2 - camera_box_size/2 - rear_camera_setback)} 0.0 ${rear_camera_height}" rpy="0 ${rear_camera_pitch} ${PI}"/>
     <parent link="body_link"/>
     <child link="rear_camera_link"/>
   </joint>
@@ -686,42 +712,63 @@
     </sensor>
   </gazebo>
 
-  <!-- Rear Camera -->
+  <!-- Rear Camera (RGBD, Intel RealSense D435i-equivalent) -->
+  <!-- Publishes four ign topics off <topic>: camera_rear/image (colour),
+       camera_rear/depth_image, camera_rear/points and camera_rear/camera_info. All four are
+       bridged in hyper_gazebo's ros_gz_bridge.yaml; the colour one keeps the ROS name
+       /camera_rear/image_raw its existing subscribers already use.
+       Spec source: Intel RealSense D435i datasheet:
+         depth FOV      87 x 58 deg  -> horizontal_fov 1.5184364 rad, and 848x480 is the D435i
+                                       depth mode whose aspect ratio reproduces ~58 deg vertically
+                                       (2*atan(tan(43.5 deg) * 480/848) = 56.5 deg)
+         depth range    ~0.2 m min-Z to ~10 m -> <depth_camera><clip>
+         frame rate     30 Hz (the D435i also does 90 Hz at this resolution; 30 keeps the sim's
+                        software-rendered (LIBGL_ALWAYS_SOFTWARE=1) render budget sane)
+       The colour <clip> deliberately stays at the wide render range rather than the depth
+       range; the D435i's RGB stream is an ordinary camera that sees past 10 m; only its
+       depth is limited. Gazebo shares one lens between the two streams, so the colour image
+       comes out at the 87 deg depth FOV rather than the D435i's 69 deg RGB FOV (see the args
+       block for why depth wins that trade).
+       The libgazebo_ros_camera.so plugin the old <sensor> carried was Gazebo Classic config
+       and was inert under ign-gazebo, so it is not carried over. -->
   <gazebo reference="rear_camera_link">
-    <sensor type="camera" name="vehicle_rear_camera">
-      <update_rate>${camera_fps}</update_rate>
+    <sensor type="rgbd_camera" name="vehicle_rear_camera">
+      <update_rate>${rear_camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera_rear</topic>
+      <!-- All four streams are stamped with this frame. Deliberately rear_camera_link (REP-103
+           body convention, x forward) and NOT a z-forward optical frame: ign-sensors emits the
+           point cloud's xyz in the camera link's own convention, x = range, so the measured
+           cloud only lines up with TF if the frame it names is the x-forward one. sdformat's
+           <optical_frame_id> is a label only here; it renames the frame without rotating the
+           data, which would silently tip the cloud 90 deg. Anyone adding depth_image_proc
+           later does need a z-forward frame for /camera_rear/depth/image_raw + camera_info,
+           and should publish that frame explicitly rather than relabelling this sensor. -->
+      <gz_frame_id>rear_camera_link</gz_frame_id>
 
       <camera name="rear">
-        <horizontal_fov>${camera_fov}</horizontal_fov>
+        <horizontal_fov>${rear_camera_fov}</horizontal_fov>
         <image>
-          <width>${image_width}</width>
-          <height>${image_height}</height>
+          <width>${rear_image_width}</width>
+          <height>${rear_image_height}</height>
           <format>R8G8B8</format>
         </image>
         <clip>
           <near>0.02</near>
           <far>550</far>
         </clip>
+        <depth_camera>
+          <clip>
+            <near>${rear_depth_near}</near>
+            <far>${rear_depth_far}</far>
+          </clip>
+        </depth_camera>
         <noise>
           <type>gaussian</type>
           <mean>0.0</mean>
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="rear_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>vehicle_rear_camera</cameraName>
-        <frameName>rear_camera_link</frameName>
-        <hackBaseline>0.07</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 

@@ -26,6 +26,7 @@ include_directories(include)
 # generates the plain `lane_detection_node` executable used for input_backend:=ros_raw.
 add_library(lane_detection_component SHARED
   src/lane_detection_node.cpp
+  src/ground_projection.cpp
   src/lane_detector.cpp
   src/stopline_detector.cpp
   src/input_backend.cpp
@@ -39,6 +40,10 @@ ament_target_dependencies(lane_detection_component
 rclcpp_components_register_node(lane_detection_component
   PLUGIN "LaneDetection"
   EXECUTABLE lane_detection_node)
+
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
 
 install(TARGETS lane_detection_component
   ARCHIVE DESTINATION lib

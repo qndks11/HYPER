@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
-#include "hyper_lane_detection/bev_scale.hpp"
+#include "hyper_lane_detection/course_geometry.hpp"
 
 namespace hyper_lane_detection
 {
@@ -38,11 +38,13 @@ constexpr double kMaxCurvatureRadiusPx = 1e6;
 
 constexpr double kArrowLength = 100.0;
 
-// Empirical half-lane-width offset [m] from a single tracked lane line to the estimated lane
-// center, calibrated back when only the right lane was tracked. Baked into fit_lane()'s offset_m,
-// signed per side (subtracted for the right lane, added for the left, since the center sits on
-// opposite sides of each line), so each side's own biased offset reports a centered estimate
-// even though the two sides are no longer combined into one fit.
+// Half-lane-width offset [m] from a single tracked lane line to the estimated lane center.
+// Baked into fit_lane()'s offset_m, signed per side (subtracted for the right lane, added for the
+// left, since the center sits on opposite sides of each line), so each side's own biased offset
+// reports a centered estimate even though the two sides are no longer combined into one fit.
+// Now 1.5 m rather than the 1.85 m it was: kLaneWidthMeters used to carry a 3.7 m public-highway
+// figure, while the course this drives is built with 3.0 m lanes, so every published lane offset
+// stood 0.35 m off center in whichever direction the tracked line happened to be on.
 constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
 
 // Rear camera equivalent of kLaneCenterOffsetBiasM: while backing into a parking bay, only one
@@ -201,8 +203,8 @@ std::vector<cv::Point> LaneDetector::walk_lane_chain(
 }
 
 LaneDetector::Fit LaneDetector::fit_lane(
-  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width, Side side,
-  double center_bias_m) const
+  const std::vector<cv::Point> & points, const cv::Point2d & origin, double meters_per_pixel,
+  Side side, double center_bias_m) const
 {
   Fit result;
   if (static_cast<int>(points.size()) < kMinLanePoints) {
@@ -264,7 +266,6 @@ LaneDetector::Fit LaneDetector::fit_lane(
   // A straight line has zero curvature everywhere; see kMaxCurvatureRadiusPx.
   result.curvature_radius_px = kMaxCurvatureRadiusPx;
 
-  const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(width);
   // Signed perpendicular distance from the vehicle to the fitted line itself, rather than just to
   // its anchor point p0 -- for a steeply angled fit, p0's own x-position is an increasingly poor
   // stand-in for where the line actually sits at the vehicle's row. This is the cross product of
@@ -281,8 +282,8 @@ LaneDetector::Fit LaneDetector::fit_lane(
 }
 
 LaneDetector::Fit LaneDetector::fit_lane_curve(
-  const std::vector<cv::Point> & points, const cv::Point2d & origin, int width, Side side,
-  double center_bias_m) const
+  const std::vector<cv::Point> & points, const cv::Point2d & origin, double meters_per_pixel,
+  Side side, double center_bias_m) const
 {
   Fit result;
   if (static_cast<int>(points.size()) < kMinCurveFitPoints) {
@@ -354,7 +355,6 @@ LaneDetector::Fit LaneDetector::fit_lane_curve(
   result.curvature_radius_px = curvature > 1.0 / kMaxCurvatureRadiusPx ?
     1.0 / curvature : kMaxCurvatureRadiusPx;
 
-  const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(width);
   // Same perpendicular-distance-to-tangent-line formula as fit_lane(), just fed this curve's
   // near-point tangent direction instead of the global straight-line direction (standard
   // Frenet-style local approximation for lateral offset to a curve).
@@ -367,7 +367,7 @@ LaneDetector::Fit LaneDetector::fit_lane_curve(
 }
 
 LaneDetector::Result LaneDetector::detect_and_draw(
-  const cv::Mat & yellow, const cv::Point2d & origin, int width, bool is_rear,
+  const cv::Mat & yellow, const cv::Point2d & origin, double meters_per_pixel, bool is_rear,
   cv::Mat & view) const
 {
   const bool use_curve_fit = is_rear;
@@ -389,11 +389,11 @@ LaneDetector::Result LaneDetector::detect_and_draw(
 
   Result result;
   result.right = use_curve_fit ?
-    fit_lane_curve(right_points, origin, width, Side::kRight, center_bias_m) :
-    fit_lane(right_points, origin, width, Side::kRight, center_bias_m);
+    fit_lane_curve(right_points, origin, meters_per_pixel, Side::kRight, center_bias_m) :
+    fit_lane(right_points, origin, meters_per_pixel, Side::kRight, center_bias_m);
   result.left = use_curve_fit ?
-    fit_lane_curve(left_points, origin, width, Side::kLeft, center_bias_m) :
-    fit_lane(left_points, origin, width, Side::kLeft, center_bias_m);
+    fit_lane_curve(left_points, origin, meters_per_pixel, Side::kLeft, center_bias_m) :
+    fit_lane(left_points, origin, meters_per_pixel, Side::kLeft, center_bias_m);
 
   // Each side is published as its own independent estimate now (no more width-based decision
   // between left-only / right-only / averaged-both). If a line is angling outward -- away from
@@ -419,7 +419,6 @@ LaneDetector::Result LaneDetector::detect_and_draw(
     cv::polylines(view, result.left.curve_points, false, cv::Scalar(0, 255, 255), 3);
   }
 
-  const double meters_per_pixel = kNumLaneInScreen * kLaneWidthMeters / static_cast<double>(width);
   // steering_angle_deg is defined as -atan2(direction.x, -direction.y) in fit_lane, so a
   // rightward-tilting fitted line comes out as a *negative* angle; reconstructing a direction
   // vector from the angle therefore needs sin() negated too (-sin, not sin), or the drawn

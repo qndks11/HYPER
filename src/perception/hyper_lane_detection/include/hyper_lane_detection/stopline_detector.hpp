@@ -29,19 +29,25 @@ public:
   /**
    * @brief Finds the stop-line bar in `white` and draws its bounding box into `view`.
    *
-   * @details Computes its own meters-per-pixel scale internally from `white.cols` (via
-   * bev_scale.hpp) -- the caller doesn't need to know or pass this scale factor. Does NOT
-   * highlight the mask into `view` -- the caller highlights both the lane and stop-line masks
-   * into `view` once, before calling either detector; see LaneDetector::detect_and_draw() for the
-   * shared rationale.
+   * @details Does NOT highlight the mask into `view` -- the caller highlights both the lane and
+   * stop-line masks into `view` once, before calling either detector; see
+   * LaneDetector::detect_and_draw() for the shared rationale.
    *
    * @param white White paint mask (BEV), from white_mask().
-   * @param origin The bottom-center point representing the vehicle's position (BEV coordinates).
+   * @param origin The vehicle's position in BEV coordinates (GroundProjection::origin_px()).
+   * Normally sits below the image's last row, since the BEV starts at the nearest ground the
+   * camera can actually see rather than at the vehicle itself.
+   * @param meters_per_pixel Ground distance one BEV pixel covers [m/px], from
+   * GroundProjection::meters_per_pixel(). This used to be reconstructed inside the detector from
+   * the image width and a guessed lanes-per-screen constant; it is now a measured property of the
+   * warp, so the published distance is in the same meters the costmap is.
    * @param view Debug image to draw into; must already carry both mask highlights and be BEV-
    * sized (not yet bordered with the text panel).
    * @return The stop-line detection result, for publishing and draw_text().
    */
-  Result detect_and_draw(const cv::Mat & white, const cv::Point2d & origin, cv::Mat & view) const;
+  Result detect_and_draw(
+    const cv::Mat & white, const cv::Point2d & origin, double meters_per_pixel,
+    cv::Mat & view) const;
 
   /// Draws the "Distance: .. / Stopline not detected" text block onto view's text panel, starting
   /// at panel_top.
@@ -64,7 +70,7 @@ private:
    * that's the stop line that actually governs the vehicle's next stop.
    *
    * @param mask White paint mask (BEV, from white_mask()).
-   * @param origin The bottom-center point representing the vehicle's position.
+   * @param origin The vehicle's position in BEV coordinates.
    * @param meters_per_pixel Scale factor from BEV pixels to meters.
    * @return The stop-line detection result; `valid` is false if nothing qualifies.
    */

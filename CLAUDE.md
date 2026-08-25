@@ -33,3 +33,4 @@ main          <- stable, PR-only, no direct pushes
 
 - Never push directly to `main` — all changes land via PR.
 - ROS 2/C++ changes aren't verified by reading code alone — rebuild, re-source `install/setup.bash`, and relaunch the relevant node before calling something fixed.
+- Kill every node, launch tree or sim you started to verify something, as soon as you're done with it. A leftover ROS process is not idle: it keeps publishing on the same topics, so the next run silently picks up a duplicate publisher, a stale TF, or an old build's output and "verifies" the wrong thing. Check with `pgrep -af <node>` before reporting a result, not after.

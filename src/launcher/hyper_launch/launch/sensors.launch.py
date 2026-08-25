@@ -20,9 +20,12 @@ from launch_ros.actions import Node
 #   WitMotion WT901BLE (witmotion_ros2) -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
-# /camera_rear/image_raw has no physical source yet, and input_backend:=intra_process has no
+# /camera_rear/* has no physical source yet, and input_backend:=intra_process has no
 # rear-camera path at all -- lane_detection_node simply never receives rear frames on the real
-# vehicle until a rear camera and its own backend wiring are added.
+# vehicle until a rear camera and its own backend wiring are added. Note the sim now models the
+# rear camera as an RGBD sensor with this same D435i's specs (see vehicle.xacro), so wiring a
+# real one up later is mostly a matter of pointing realsense2_camera at the rear unit and
+# enabling its colour/depth streams.
 #
 # Neither camera goes through usb_cam here anymore -- usb_cam has been removed from this
 # workspace entirely (see deps.repos); hyper_camera now provides both cameras' driver nodes

@@ -12,6 +12,10 @@
   <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
 
+  <!-- This package's perception.launch.py launches hyper_lane_detection (both backends) and
+       reads its bev_real.yaml from that package's share directory. -->
+  <exec_depend>hyper_lane_detection</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

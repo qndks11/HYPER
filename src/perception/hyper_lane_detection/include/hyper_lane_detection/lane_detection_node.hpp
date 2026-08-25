@@ -2,6 +2,7 @@
 #define HYPER_LANE_DETECTION__LANE_DETECTION_NODE_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -9,8 +10,10 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
+#include "hyper_lane_detection/ground_projection.hpp"
 #include "hyper_lane_detection/input_backend.hpp"
 #include "hyper_lane_detection/lane_detector.hpp"
 #include "hyper_lane_detection/stopline_detector.hpp"
@@ -21,7 +24,7 @@ public:
   explicit LaneDetection(const rclcpp::NodeOptions & options);
 
 private:
-  /// Which physical camera a frame came from -- selects the publishers/window/fit parameters
+  /// Which physical camera a frame came from -- selects the publishers/fit parameters
   /// process_frame() runs it through. Orthogonal to InputBackend: the backend decides how a frame
   /// arrives (topic vs. direct device), CameraSide decides whose lane it is.
   enum class CameraSide { kFront, kRear };
@@ -45,55 +48,90 @@ private:
   /**
    * @brief The full per-frame pipeline shared by every input backend and both cameras: bird's-eye
    * warp, lane and stop-line detection (delegated to lane_detector_/stopline_detector_), message
-   * publish, and debug view. Factored out so the algorithm itself never depends on which backend
-   * fed the topic this frame arrived on -- `side` alone selects the publishers/window/fit
+   * publish, and debug image. Factored out so the algorithm itself never depends on which backend
+   * fed the topic this frame arrived on -- `side` alone selects the publishers and fit
    * parameters below.
    *
    * @param image Camera frame (BGR8) -- already rectified for the front camera under
    * input_backend:=intra_process (rectified upstream by hyper_camera's ElpCameraPublisherNode);
    * passed through as-is for every other backend/camera combination (ros_raw's simulated frames
    * need no rectification at all).
-   * @param stamp Capture timestamp of `image`. Threaded through for future header-stamped outputs
-   * and latency logging; the current output messages (std_msgs/Float64MultiArray) carry no header
-   * of their own to stamp.
-   * @param side Which camera `image` is from -- selects the publishers/window and, in
+   * @param header Header of the frame `image` was decoded from. Copied onto the published debug
+   * image so RViz gets the capture timestamp and the camera's own frame_id; the detection outputs
+   * (std_msgs/Float64MultiArray) carry no header of their own to stamp.
+   * @param side Which camera `image` is from -- selects the publishers and, in
    * LaneDetector::detect_and_draw(), whether the front's straight-fit/lane-center-bias or the
-   * rear's curve-fit/parking-standoff-bias applies (see bird_eye()).
+   * rear's curve-fit/parking-standoff-bias applies, and which camera's ground projection the
+   * warp uses (see projection_for()).
    */
-  void process_frame(const cv::Mat & image, const rclcpp::Time & stamp, CameraSide side);
+  void process_frame(
+    const cv::Mat & image, const std_msgs::msg::Header & header, CameraSide side);
 
   /**
-   * @brief Builds the perspective transform mapping the trapezoidal ROI (sampled from the
-   * source image's own dimensions) to a bird's-eye view of the given destination size.
+   * @brief Republishes the annotated bird's-eye view as a colored PointCloud2 laid flat on the
+   * ground plane, so it can be seen *in the 3D scene* (under the costmap, paths and footprint)
+   * rather than only as a 2D image panel. Each surviving BEV pixel becomes one point at
+   * bev_cloud_z_m_ above the vehicle's ground plane, positioned by the same scale and origin
+   * (`projection`) the lane/stop-line distance outputs already use -- so if this overlay lands
+   * visibly wrong against the costmap, that same error is in the published offsets/distances.
+   * That is exactly how the previous scale error surfaced: the overlay read about a quarter too
+   * wide against the costmap because the offsets it shared a constant with were too.
    *
-   * @param src_height Source image height [px], used only to locate the ROI corners.
-   * @param src_width Source image width [px], used only to locate the ROI corners.
-   * @param dst_height Output (bird's-eye) image height [px].
-   * @param dst_width Output (bird's-eye) image width [px].
-   * @param use_rear_roi Which camera side's ROI shape (front vs. rear) -- see bird_eye().
-   * @param use_sim_roi Which camera *model*'s ROI (real ELP vs. Gazebo sim) -- see bird_eye().
-   * @return The 3x3 perspective transform matrix.
+   * Pure-black pixels are dropped rather than published black: warpPerspective leaves the corners
+   * it could not sample from the source frame at zero, and those are "no data", not dark ground --
+   * publishing them would paint an opaque black rectangle over the costmap underneath.
+   *
+   * @param view Annotated BEV image (BGR8), *before* the text panel is appended -- the text strip
+   * is a readout, not ground, and has no place on the map.
+   * @param header Header of the source frame; the stamp is kept, the frame_id replaced with
+   * bev_cloud_frame_id_.
+   * @param projection The camera's ground projection -- supplies the metric scale and the
+   * vehicle-frame origin's position within the BEV raster.
+   * @param is_rear Rear camera: its BEV looks backward, so the whole image maps to -x/-y (a 180
+   * deg rotation about the vehicle's z) instead of the front's +x/+y. This is the single place
+   * the cameras' looking-direction frames (see CameraExtrinsics) are converted back to the
+   * vehicle's own.
    */
-  cv::Mat build_transform(
-    int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi,
-    bool use_sim_roi) const;
+  void publish_bev_cloud(
+    const cv::Mat & view, const std_msgs::msg::Header & header,
+    const hyper_lane_detection::GroundProjection & projection, bool is_rear);
 
   /**
-   * @brief Warps the input image to a bird's-eye view using build_transform().
+   * @brief The ground projection for one camera at one source-frame size, building it on first
+   * use and rebuilding it if that size ever changes.
    *
-   * @param use_rear_roi False: front camera. True: rear camera -- reaches farther toward the
-   * horizon and stretched across more output rows, for a clearer view of the (comparatively slow,
-   * close-range) parking maneuver than the front's ordinary-road-speed settings need.
-   * @param use_sim_roi False: the real ELP camera, rectified from a ~170 deg fisheye lens down to
-   * a much narrower rectilinear projection (see ELP-USBGS1200P01-KL170.yaml's P vs. K). True: the
-   * Gazebo sim camera, a plain rectilinear model at its own, differently proportioned FOV and
-   * resolution (153 deg HFOV, 640x400 16:10 vs. the real camera's 1280x720 16:9). A homography
-   * tuned for one camera's FOV/geometry does not transfer to the other, so each combination of
-   * `use_rear_roi`/`use_sim_roi` gets its own ROI/BEV-height-scale constants (see the anonymous
-   * namespace in the .cpp) rather than sharing one set across cameras that don't actually see the
-   * same ground-plane geometry.
+   * @details Deferred rather than built in the constructor because the sim path derives its
+   * intrinsics from a horizontal FOV plus the frame's own dimensions, and the node does not know
+   * those dimensions until a frame arrives. Caching on cv::Size means a camera that is restarted
+   * at a different resolution re-derives its homography instead of silently warping with the old
+   * one -- the class of drift this whole mechanism replaced.
+   *
+   * @param side Which camera to build for; selects the parameter set and the cache slot.
+   * @param source Dimensions of the frame the homography must warp.
+   * @return The projection, or nullptr if the configured geometry does not describe a visible
+   * ground patch (the reason is logged; the frame is then dropped rather than warped by a
+   * meaningless transform).
    */
-  cv::Mat bird_eye(const cv::Mat & image, bool use_rear_roi, bool use_sim_roi) const;
+  const hyper_lane_detection::GroundProjection * projection_for(
+    CameraSide side, const cv::Size & source);
+
+  /// One camera's BEV geometry as configured, before it is resolved against a frame size.
+  /// Intrinsics arrive one of two ways: `horizontal_fov_rad` (> 0) derives an ideal centered
+  /// pinhole from the frame's own dimensions, which is exactly what Gazebo renders; otherwise
+  /// `intrinsics` must be filled in explicitly, which is what a real rectified lens needs since
+  /// its principal point is not the image center and its two focal lengths are not equal.
+  struct BevSettings
+  {
+    double horizontal_fov_rad{0.0};
+    hyper_lane_detection::CameraIntrinsics intrinsics;
+    hyper_lane_detection::CameraExtrinsics extrinsics;
+    hyper_lane_detection::GroundRegion region;
+  };
+
+  /// Declares one camera's BEV parameters under `prefix` and returns them. Both cameras take the
+  /// same parameter set, so their geometry is described the same way rather than each carrying
+  /// its own hand-tuned constants in the source.
+  BevSettings declare_bev_settings(const std::string & prefix, const BevSettings & defaults);
 
   hyper_lane_detection::InputBackend input_backend_{
     hyper_lane_detection::InputBackend::kIntraProcess};
@@ -110,6 +148,44 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_lane_center_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_stopline_publisher_;
+
+  /// The annotated bird's-eye debug view, as a sensor_msgs/Image. This is the node's only debug
+  /// output -- it opens no OpenCV window, so the view is watchable in RViz or over the network
+  /// and the node never depends on a local X display.
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr bev_image_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr rear_bev_image_publisher_;
+
+  /// The same view again, ground-projected -- see publish_bev_cloud(). Separate from the image
+  /// publishers because the two answer different questions: the image is "what does the detector
+  /// see", the cloud is "where does that sit relative to the costmap and the planned path".
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr bev_cloud_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr rear_bev_cloud_publisher_;
+
+  /// Vehicle frame the ground overlay is published in. Its origin's position inside the BEV is
+  /// computed by GroundProjection::origin_px() rather than assumed to be the image's
+  /// bottom-center -- it normally sits below the last row, because a forward-looking camera
+  /// cannot see the ground at its own feet. Defaults to body_link, which is what this stack
+  /// actually names its base frame (ekf's base_link_frame, nav2's robot_base_frame), not the
+  /// ROS-conventional base_link.
+  std::string bev_cloud_frame_id_{"body_link"};
+
+  /// Publish every Nth BEV pixel in each axis. 1 is every pixel (a 640x260 BEV is then 166k
+  /// points per frame, per camera); the default trades resolution the map view doesn't need for
+  /// a quarter of the bandwidth.
+  int bev_cloud_stride_{2};
+
+  /// Height [m] to float the overlay above the ground plane. Nonzero purely to stop it z-fighting
+  /// with the costmap, which RViz also draws at z = 0.
+  double bev_cloud_z_m_{0.02};
+
+  /// Each camera's configured BEV geometry, and the projection built from it once a frame size
+  /// is known. See projection_for().
+  BevSettings front_bev_settings_;
+  BevSettings rear_bev_settings_;
+  std::optional<hyper_lane_detection::GroundProjection> front_projection_;
+  std::optional<hyper_lane_detection::GroundProjection> rear_projection_;
+  cv::Size front_projection_source_;
+  cv::Size rear_projection_source_;
 };
 
 #endif  // HYPER_LANE_DETECTION__LANE_DETECTION_NODE_HPP_

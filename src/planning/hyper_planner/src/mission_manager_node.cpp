@@ -58,9 +58,7 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
-#include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -74,66 +72,24 @@
 #include <tf2/time.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
-#include <yaml-cpp/yaml.h>
 
 #include "hyper_planner/mission_manager_parameters.hpp"
 #include "hyper_planner/common.hpp"
+#include "hyper_planner/mission_loader.hpp"
 #include "hyper_planner/path_loader.hpp"
+#include "hyper_planner/path_progress.hpp"
+#include "hyper_planner/speed_limit.hpp"
 
 namespace
 {
 using FollowPath = nav2_msgs::action::FollowPath;
 using GoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
 
-enum class StepType
-{
-  kDrive,
-  kStop,
-  kWaitSignal,
-};
-
-struct Step
-{
-  StepType type{StepType::kDrive};
-
-  // drive
-  std::string label;                 // mission.yaml의 `until`
-  std::size_t begin_index{0};        // CSV 인덱스 (양끝 포함)
-  std::size_t end_index{0};
-  std::string controller_id;
-  std::string goal_checker_id;
-  bool reverse{false};
-  // 골까지 남은 거리가 이 값 이하이고 속도도 cancel_on_arrival_speed 이하로 떨어지면,
-  // 골 판정을 기다리지 않고 취소해 도착으로 칩니다. 0 = 끔.
-  double cancel_on_arrival_m{0.0};
-  // 로드 시점에 이어 둔 prearm 링크(아래 link_prearm_steps 참고). prearm_enabled면 이
-  // drive 스텝을 달리는 동안 steps_[prearm_wait_step]의 신호를 미리 보고, 확인되면
-  // steps_[prearm_merge_step]의 끝까지 골을 이어 보냅니다.
-  bool prearm_enabled{false};
-  std::size_t prearm_wait_step{0};
-  std::size_t prearm_merge_step{0};
-  // 0보다 크면 이 스텝을 등감속(m/s^2)으로 세웁니다. 파일 머리의 "decel 프로파일" 참고.
-  double decel_profile_a{0.0};
-  // 라벨(end_index) 뒤로 덧붙일 직선 꼬리의 길이(0 = 없음). resolve_decel_tails가 정합니다.
-  // 보낸 경로 위에서 라벨이 어디인지 찾을 때도 이 값을 씁니다 -- 좌표로 최근접점을 찾으면
-  // 같은 길을 되짚는 구간에서 엉뚱한 점에 붙을 수 있지만, "경로 끝에서 남은 길이"로 찾으면
-  // 그런 모호함이 없습니다.
-  double tail_after_label_m{0.0};
-
-  // stop
-  double duration_s{0.0};
-
-  // wait_signal
-  std::vector<std::string> accepted;
-  double timeout_s{60.0};
-  int debounce_frames{3};
-
-  // 두 종류가 같이 쓰는 필드. Step은 종류별로 나뉘지 않은 평평한 구조체입니다.
-  //   wait_signal에서: mission.yaml이 적어 준 값. 0보다 크면 prearm을 켭니다.
-  //   drive에서:       link_prearm_steps가 뒤의 wait_signal에서 복사해 온 값. 골까지 남은
-  //                    거리가 이 값 이하로 들어오면 신호를 미리 보기 시작합니다.
-  double prearm_distance_m{0.0};
-};
+// 스텝의 정의와 mission.yaml 로드는 mission_loader.hpp에 있습니다.
+using hyper_planner::Step;
+using hyper_planner::StepType;
+using hyper_planner::join_values;
+using hyper_planner::type_name;
 
 // 스텝 사이를 오가는 상태. kStarting은 "이번 drive 스텝의 골을 아직 못 보냈다"는
 // 뜻이고, 실제 전송은 항상 타이머에서 일어납니다(액션 콜백 안에서 새 골을 보내지
@@ -165,30 +121,6 @@ enum class PathBuild
   kInvalid,
 };
 
-std::vector<std::string> split_values(const std::string & text)
-{
-  std::vector<std::string> values;
-  std::stringstream ss(text);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    const auto begin = item.find_first_not_of(" \t");
-    const auto end = item.find_last_not_of(" \t");
-    if (begin != std::string::npos) {
-      values.push_back(item.substr(begin, end - begin + 1));
-    }
-  }
-  return values;
-}
-
-const char * type_name(StepType type)
-{
-  switch (type) {
-    case StepType::kDrive: return "drive";
-    case StepType::kStop: return "stop";
-    case StepType::kWaitSignal: return "wait_signal";
-  }
-  return "?";
-}
 }  // namespace
 
 class MissionManager : public rclcpp::Node
@@ -227,8 +159,9 @@ public:
     status_pub_ = create_publisher<std_msgs::msg::String>(
       "~/status", rclcpp::QoS(1).transient_local());
     // controller_server가 QoS(10)으로 구독합니다.
-    speed_limit_pub_ = create_publisher<nav2_msgs::msg::SpeedLimit>(
-      params_.speed_limit_topic, rclcpp::QoS(10));
+    speed_limit_ = std::make_unique<hyper_planner::SpeedLimitPublisher>(
+      create_publisher<nav2_msgs::msg::SpeedLimit>(params_.speed_limit_topic, rclcpp::QoS(10)),
+      params_.frame_id);
 
     sign_sub_ = create_subscription<std_msgs::msg::String>(
       params_.sign_topic, rclcpp::QoS(10),
@@ -292,272 +225,25 @@ private:
 
   bool load_mission()
   {
-    std::string error;
-    if (!hyper_planner::load_waypoint_csv(params_.waypoint_csv, params_.min_spacing_m, waypoints_, error)) {
-      RCLCPP_ERROR(get_logger(), "%s", error.c_str());
+    hyper_planner::MissionLoadConfig config;
+    config.waypoint_csv = params_.waypoint_csv;
+    config.min_spacing_m = params_.min_spacing_m;
+    config.frame_id = params_.frame_id;
+    config.mission_yaml = params_.mission_yaml;
+    config.controller_id = params_.controller_id;
+    config.goal_checker_id = params_.goal_checker_id;
+    config.cancel_on_arrival_m = params_.cancel_on_arrival_m;
+    config.decel_profile_a = params_.decel_profile_a;
+    config.decel_profile_lookahead_m = params_.decel_profile_lookahead_m;
+    config.sign_topic = params_.sign_topic;
+
+    hyper_planner::MissionLoader loader(get_logger(), config);
+    if (!loader.load()) {
       return false;
     }
-    if (waypoints_.frame_id.empty()) {
-      waypoints_.frame_id = params_.frame_id;
-    }
-    RCLCPP_INFO(
-      get_logger(), "Loaded %zu waypoints from '%s' in frame '%s' (%zu rows skipped).",
-      waypoints_.points.size(), params_.waypoint_csv.c_str(), waypoints_.frame_id.c_str(),
-      waypoints_.skipped_rows);
-
-    if (params_.mission_yaml.empty()) {
-      RCLCPP_ERROR(get_logger(), "Parameter 'mission_yaml' is empty.");
-      return false;
-    }
-
-    YAML::Node root;
-    try {
-      root = YAML::LoadFile(params_.mission_yaml);
-    } catch (const YAML::Exception & ex) {
-      RCLCPP_ERROR(
-        get_logger(), "Failed to parse '%s': %s", params_.mission_yaml.c_str(), ex.what());
-      return false;
-    }
-
-    const double snap_tolerance_m = root["label_snap_tolerance_m"]
-      ? root["label_snap_tolerance_m"].as<double>() : 1.0;
-
-    if (!root["labels"] || !root["labels"].IsMap() || root["labels"].size() == 0) {
-      RCLCPP_ERROR(
-        get_logger(),
-        "'%s' has no 'labels'. Place them first:\n"
-        "  python3 src/planning/hyper_waypoint/scripts/label_waypoints.py %s",
-        params_.mission_yaml.c_str(), params_.waypoint_csv.c_str());
-      return false;
-    }
-    if (!root["steps"] || !root["steps"].IsSequence() || root["steps"].size() == 0) {
-      RCLCPP_ERROR(get_logger(), "'%s' has no 'steps'.", params_.mission_yaml.c_str());
-      return false;
-    }
-
-    // 라벨을 최근접 웨이포인트로 스냅합니다. 라벨은 좌표로 저장되어 있어 코스를 다시
-    // 녹화해도 살아남지만, 그만큼 엉뚱한 데 붙을 수도 있으므로 여기서 걸러냅니다.
-    for (const auto & entry : root["labels"]) {
-      const auto name = entry.first.as<std::string>();
-      const YAML::Node & point = entry.second;
-      if (!point["x"] || !point["y"]) {
-        RCLCPP_ERROR(get_logger(), "Label '%s' has no x/y.", name.c_str());
-        return false;
-      }
-      const double x = point["x"].as<double>();
-      const double y = point["y"].as<double>();
-
-      std::size_t nearest = 0;
-      double best = std::numeric_limits<double>::max();
-      for (std::size_t i = 0; i < waypoints_.points.size(); ++i) {
-        const double d = std::hypot(waypoints_.points[i].x - x, waypoints_.points[i].y - y);
-        if (d < best) {
-          best = d;
-          nearest = i;
-        }
-      }
-      if (best > snap_tolerance_m) {
-        RCLCPP_ERROR(
-          get_logger(),
-          "Label '%s' (%.3f, %.3f) is %.2f m from the nearest waypoint (#%zu), beyond "
-          "label_snap_tolerance_m (%.2f). Re-place it with label_waypoints.py, or check that "
-          "mission.yaml and '%s' describe the same course.",
-          name.c_str(), x, y, best, nearest, snap_tolerance_m, params_.waypoint_csv.c_str());
-        return false;
-      }
-      label_index_[name] = nearest;
-      RCLCPP_INFO(
-        get_logger(), "Label '%s' -> waypoint #%zu (%.2f m away).", name.c_str(), nearest, best);
-    }
-
-    // 스텝을 읽으면서 drive 세그먼트를 잇습니다. 세그먼트 시작점은 직전 drive 스텝의
-    // 도착점이고, 첫 세그먼트만 CSV 처음부터 시작합니다.
-    std::size_t cursor = 0;
-    bool seen_drive = false;
-    for (std::size_t i = 0; i < root["steps"].size(); ++i) {
-      const YAML::Node & node = root["steps"][i];
-      const auto type_text = node["type"] ? node["type"].as<std::string>() : std::string();
-
-      Step step;
-      if (type_text == "drive") {
-        step.type = StepType::kDrive;
-        if (!node["until"]) {
-          RCLCPP_ERROR(get_logger(), "Step %zu (drive) has no 'until'.", i);
-          return false;
-        }
-        step.label = node["until"].as<std::string>();
-        const auto found = label_index_.find(step.label);
-        if (found == label_index_.end()) {
-          RCLCPP_ERROR(
-            get_logger(), "Step %zu references label '%s', which is not in 'labels'.",
-            i, step.label.c_str());
-          return false;
-        }
-        const std::size_t target = found->second;
-        // 코스는 한 번 주행해 녹화한 것이므로 라벨은 CSV를 따라 단조 증가해야 합니다.
-        // 그렇지 않으면 세그먼트가 비거나 거꾸로 뒤집힙니다.
-        if (seen_drive && target <= cursor) {
-          RCLCPP_ERROR(
-            get_logger(),
-            "Step %zu: label '%s' is at waypoint #%zu, which is not past the previous step's "
-            "#%zu. Labels must advance along the recorded course; re-place '%s'.",
-            i, step.label.c_str(), target, cursor, step.label.c_str());
-          return false;
-        }
-        step.begin_index = seen_drive ? cursor : 0;
-        step.end_index = target;
-        step.reverse = node["reverse"] ? node["reverse"].as<bool>() : false;
-        step.controller_id = node["controller"]
-          ? node["controller"].as<std::string>() : params_.controller_id;
-        step.goal_checker_id = node["goal_checker"]
-          ? node["goal_checker"].as<std::string>() : params_.goal_checker_id;
-        step.cancel_on_arrival_m = node["cancel_on_arrival_m"]
-          ? node["cancel_on_arrival_m"].as<double>() : params_.cancel_on_arrival_m;
-        step.decel_profile_a = node["decel_profile_a"]
-          ? node["decel_profile_a"].as<double>() : params_.decel_profile_a;
-
-        // reverse 플래그가 녹화된 실제 주행 방향과 맞는지 확인합니다. 틀리면 RPP가
-        // 엉뚱한 방향으로 당기므로 바로 알아채는 편이 낫습니다.
-        const double opposing = hyper_planner::reverse_fraction(
-          waypoints_.points, step.begin_index, step.end_index);
-        if (step.reverse && opposing < 0.5) {
-          RCLCPP_WARN(
-            get_logger(),
-            "Step %zu (until '%s') is marked reverse, but only %.0f%% of the recorded segment "
-            "has the body heading opposing travel. Was this stretch actually recorded driving "
-            "backwards?", i, step.label.c_str(), 100.0 * opposing);
-        } else if (!step.reverse && opposing > 0.5) {
-          RCLCPP_WARN(
-            get_logger(),
-            "Step %zu (until '%s') is NOT marked reverse, but %.0f%% of the recorded segment "
-            "has the body heading opposing travel. Add 'reverse: true' and a reversing "
-            "controller, or MPPI will try to drive it nose-first.",
-            i, step.label.c_str(), 100.0 * opposing);
-        }
-
-        cursor = target;
-        seen_drive = true;
-      } else if (type_text == "stop") {
-        step.type = StepType::kStop;
-        step.duration_s = node["duration_s"] ? node["duration_s"].as<double>() : 0.0;
-      } else if (type_text == "wait_signal") {
-        step.type = StepType::kWaitSignal;
-        step.accepted = split_values(
-          node["value"] ? node["value"].as<std::string>() : std::string("green"));
-        step.timeout_s = node["timeout_s"] ? node["timeout_s"].as<double>() : 60.0;
-        step.debounce_frames = node["debounce_frames"]
-          ? node["debounce_frames"].as<int>() : 3;
-        step.prearm_distance_m = node["prearm_distance_m"]
-          ? node["prearm_distance_m"].as<double>() : 0.0;
-        if (step.accepted.empty()) {
-          RCLCPP_ERROR(get_logger(), "Step %zu (wait_signal) has an empty 'value'.", i);
-          return false;
-        }
-      } else {
-        RCLCPP_ERROR(
-          get_logger(), "Step %zu has unknown type '%s' (expected drive/stop/wait_signal).",
-          i, type_text.c_str());
-        return false;
-      }
-      steps_.push_back(step);
-    }
-
-    resolve_decel_tails();
-    link_prearm_steps();
-
-    RCLCPP_INFO(
-      get_logger(), "Mission '%s' loaded: %zu steps, %zu labels.",
-      params_.mission_yaml.c_str(), steps_.size(), label_index_.size());
+    waypoints_ = std::move(loader.waypoints());
+    steps_ = std::move(loader.steps());
     return true;
-  }
-
-  // decel 프로파일을 쓰는 drive 스텝에, 라벨 뒤로 덧붙일 직선 꼬리의 길이를 정해 둡니다.
-  //
-  // MPPI의 감속은 "경로의 마지막 점"에서 나오므로(파일 머리 주석), 그 점을 local costmap
-  // 밖으로 밀어내면 감속 항이 아예 켜지지 않습니다. 감속은 대신 /speed_limit이 맡습니다.
-  //
-  // 꼬리는 녹화 코스가 아니라 직선이므로(append_straight_tail) 길이가 항상 정확히
-  // decel_profile_lookahead_m입니다. 코스가 라벨 뒤에서 무엇을 하든 -- 주차 진입처럼
-  // 후진으로 되돌아오든, finish처럼 아예 끝나든 -- 상관없습니다.
-  void resolve_decel_tails()
-  {
-    for (std::size_t i = 0; i < steps_.size(); ++i) {
-      Step & step = steps_[i];
-      if (step.type != StepType::kDrive) {
-        continue;
-      }
-      step.tail_after_label_m = 0.0;
-      if (step.decel_profile_a <= 0.0) {
-        continue;
-      }
-      if (step.reverse) {
-        RCLCPP_WARN(
-          get_logger(),
-          "Step %zu (until '%s') is a reverse segment; decel_profile_a is ignored there. "
-          "Reverse parking runs on RPP and has to reach the goal checker.",
-          i, step.label.c_str());
-        step.decel_profile_a = 0.0;
-        continue;
-      }
-
-      step.tail_after_label_m = params_.decel_profile_lookahead_m;
-      RCLCPP_INFO(
-        get_logger(),
-        "Step %zu (until '%s'): decel profile at %.1f m/s^2; the goal path runs %.1f m of "
-        "straight extrapolation past the label (wp #%zu) so MPPI does not brake on its own.",
-        i, step.label.c_str(), step.decel_profile_a, step.tail_after_label_m, step.end_index);
-    }
-  }
-
-  // wait_signal의 prearm_distance_m를 그 앞뒤 drive 스텝에 이어 줍니다. 패턴은 반드시
-  // [drive -> wait_signal -> drive]여야 합니다: 신호를 미리 보는 것은 앞의 drive이고,
-  // 통과하면 골을 이어 붙일 끝점은 뒤의 drive이기 때문입니다.
-  //
-  // 조건이 안 맞으면 경고만 남기고 그 자리의 prearm을 끕니다 -- 미션을 거부하지 않는 이유는,
-  // prearm이 꺼진 결과가 곧 "예전처럼 정지선에 서서 기다린다"라서 안전하기 때문입니다.
-  void link_prearm_steps()
-  {
-    for (std::size_t i = 0; i < steps_.size(); ++i) {
-      if (steps_[i].type != StepType::kDrive || i + 1 >= steps_.size()) {
-        continue;
-      }
-      const Step & wait_step = steps_[i + 1];
-      if (wait_step.type != StepType::kWaitSignal || wait_step.prearm_distance_m <= 0.0) {
-        continue;
-      }
-
-      const char * reason = nullptr;
-      if (i + 2 >= steps_.size()) {
-        reason = "there is no step after the wait_signal to merge into";
-      } else if (steps_[i + 2].type != StepType::kDrive) {
-        reason = "the step after the wait_signal is not a drive step";
-      } else if (steps_[i].reverse || steps_[i + 2].reverse) {
-        // 두 세그먼트를 한 골로 합치면 그 안에 방향 전환이 들어갑니다. RPP는 이를 처리하지
-        // 못하고, MPPI도 PreferForwardCritic 때문에 안정적으로 못 냅니다.
-        reason = "merging would put a direction change inside a single goal";
-      } else if (steps_[i].controller_id != steps_[i + 2].controller_id) {
-        reason = "the two drive steps use different controllers";
-      }
-      if (reason != nullptr) {
-        RCLCPP_WARN(
-          get_logger(),
-          "Step %zu's wait_signal has prearm_distance_m %.1f, but %s. Prearm is off here: the "
-          "vehicle will stop at '%s' and wait as usual.",
-          i + 1, wait_step.prearm_distance_m, reason, steps_[i].label.c_str());
-        continue;
-      }
-
-      steps_[i].prearm_enabled = true;
-      steps_[i].prearm_wait_step = i + 1;
-      steps_[i].prearm_merge_step = i + 2;
-      steps_[i].prearm_distance_m = wait_step.prearm_distance_m;
-      RCLCPP_INFO(
-        get_logger(),
-        "Prearm: while driving to '%s', watch %s for '%s' from %.1f m out; if confirmed, roll "
-        "straight through to '%s' without stopping.",
-        steps_[i].label.c_str(), params_.sign_topic.c_str(), join(wait_step.accepted).c_str(),
-        steps_[i].prearm_distance_m, steps_[i + 2].label.c_str());
-    }
   }
 
   // ---------------------------------------------------------------- 상태 진행
@@ -597,7 +283,7 @@ private:
         sign_streak_ = 0;
         RCLCPP_INFO(
           get_logger(), "%s waiting for '%s' on %s (%d frame(s), timeout %.0f s).",
-          progress().c_str(), join(step.accepted).c_str(), params_.sign_topic.c_str(),
+          progress().c_str(), join_values(step.accepted).c_str(), params_.sign_topic.c_str(),
           step.debounce_frames, step.timeout_s);
         break;
     }
@@ -646,11 +332,11 @@ private:
             RCLCPP_WARN(
               get_logger(),
               "No '%s' within %.0f s (last saw '%s'). Proceeding anyway -- check the traffic "
-              "light detector.", join(step.accepted).c_str(), step.timeout_s,
+              "light detector.", join_values(step.accepted).c_str(), step.timeout_s,
               last_sign_.empty() ? "nothing" : last_sign_.c_str());
             advance();
           } else {
-            fail("timed out waiting for signal '" + join(step.accepted) + "'");
+            fail("timed out waiting for signal '" + join_values(step.accepted) + "'");
           }
         }
         break;
@@ -777,7 +463,7 @@ private:
 
     // 진행도는 이 경로를 기준으로 새로 셉니다. 속도도 새 골의 피드백이 올 때까지는
     // 직전 골의 값으로 판단하지 않습니다.
-    reset_progress(path);
+    progress_.reset(path);
     set_stop_point(step, path);
     have_speed_ = false;
 
@@ -797,7 +483,7 @@ private:
         return;   // 갈아끼우기 직전에 출발한 옛 골의 피드백.
       }
       // speed만 씁니다. feedback->distance_to_goal은 프레임이 맞지 않아 못 씁니다
-      // (update_progress의 주석 참고). 거리는 remaining_path_m_로 직접 셉니다.
+      // (path_progress.hpp의 주석 참고). 거리는 PathProgress가 직접 셉니다.
       last_speed_ = feedback->speed;
       last_feedback_time_ = now();
       have_speed_ = true;
@@ -805,8 +491,8 @@ private:
         get_logger(), *get_clock(), 2000,
         // limit 0.00 = 제한 없음(nav2의 NO_SPEED_LIMIT과 같은 뜻).
         "%s %.2f m to '%s' (%.2f m direct), speed=%.2f m/s, limit=%.2f m/s",
-        progress().c_str(), distance_to_stop_m_, steps_[step_index_].label.c_str(),
-        stop_point_distance_m_, feedback->speed, published_speed_limit_);
+        progress().c_str(), progress_.distance_to_stop_m(), steps_[step_index_].label.c_str(),
+        progress_.stop_point_distance_m(), feedback->speed, speed_limit_->last());
     };
     options.result_callback = [this](const GoalHandle::WrappedResult & result) {
       on_result(result);
@@ -822,132 +508,44 @@ private:
     return have_speed_ && (now() - last_feedback_time_).seconds() <= kFeedbackStaleSeconds;
   }
 
-  // 우리가 보낸 경로 위에서 차량이 어디까지 왔는지 직접 셉니다.
-  //
-  // nav2의 FollowPath 피드백에 distance_to_goal이 있지만 이 스택에서는 쓸 수 없습니다.
-  // controller_server는 그 값을 이렇게 계산합니다(controller_server.cpp):
-  //
-  //     feedback->distance_to_goal =
-  //       calculate_path_length(current_path_, find_closest_pose_idx());
-  //
-  // 그리고 find_closest_pose_idx는 차량 포즈와 경로 점의 좌표를 프레임 변환 없이 그대로
-  // 뺍니다. 차량 포즈는 costmap의 global_frame으로 오는데(nav2_controller.yaml의
-  // local_costmap: global_frame: odom) 우리가 보내는 경로는 map 프레임입니다. 이 스택의
-  // odom 원점은 차량 출발 지점이고 그 지점의 map 좌표는 (41.08, -45.70)이므로, 두 좌표계는
-  // 약 61 m 어긋나 있습니다. 그래서 "가장 가까운 점"이 늘 경로 끝쪽으로 잡히고,
-  // distance_to_goal은 골을 보낸 순간부터 0.00 m으로 나옵니다.
-  //
-  // 참고로 틀리는 것은 이 피드백 숫자 하나뿐입니다. MPPI는 경로를 제대로 TF 변환해 쓰고
-  // (transformGlobalPlan), 골 판정도 end_pose_를 costmap 프레임으로 옮긴 뒤 비교하므로
-  // (ControllerServer::isGoalReached) 주행과 도착 판정에는 영향이 없습니다.
-  //
-  // 커서는 앞으로만 움직입니다. 그래서 코스가 자기 자신 근처로 돌아오는 구간에서도, 차가
-  // 경로에서 잠깐 벗어나도 진행도가 뒤로 튀지 않습니다.
+  // 진행도를 한 tick 갱신합니다. 기하 계산은 PathProgress가 하고, 여기서는 tf에서 차량
+  // 좌표를 얻어 넣어 주는 것과 "마지막으로 유효했던 시각"을 적어 두는 것만 합니다.
   void update_progress()
   {
-    progress_valid_ = false;
-    if (active_path_.poses.size() < 2) {
-      return;
-    }
-
     geometry_msgs::msg::PoseStamped robot;
-    if (!lookup_robot_pose(active_path_.header.frame_id, robot, kProgressTfTimeoutSeconds)) {
+    if (!lookup_robot_pose(
+        progress_.path().header.frame_id, robot, kProgressTfTimeoutSeconds))
+    {
+      progress_.invalidate();
       return;
     }
-    const double rx = robot.pose.position.x;
-    const double ry = robot.pose.position.y;
-
-    std::size_t best = path_cursor_;
-    double best_distance = std::numeric_limits<double>::max();
-    double scanned = 0.0;
-    for (std::size_t i = path_cursor_; i < active_path_.poses.size(); ++i) {
-      const auto & point = active_path_.poses[i].pose.position;
-      const double d = std::hypot(point.x - rx, point.y - ry);
-      if (d < best_distance) {
-        best_distance = d;
-        best = i;
-      }
-      if (i + 1 >= active_path_.poses.size()) {
-        break;
-      }
-      const auto & next = active_path_.poses[i + 1].pose.position;
-      scanned += std::hypot(next.x - point.x, next.y - point.y);
-      if (scanned > params_.progress_search_window_m) {
-        break;
-      }
+    if (progress_.update(
+        robot.pose.position.x, robot.pose.position.y, params_.progress_search_window_m))
+    {
+      progress_ok_since_ = now();
     }
-    path_cursor_ = best;
-
-    remaining_path_m_ = path_suffix_len_[path_cursor_];
-    const auto & goal_point = active_path_.poses.back().pose.position;
-    goal_point_distance_m_ = std::hypot(goal_point.x - rx, goal_point.y - ry);
-
-    // 정지점은 경로 끝보다 앞에 있을 수 있습니다(decel 프로파일). 커서가 정지점을
-    // 지나가면 음수가 되고, 그 부호가 cancel-on-arrival의 하드 백스톱이 됩니다.
-    distance_to_stop_m_ = remaining_path_m_ - path_suffix_len_[stop_index_];
-    stop_point_distance_m_ = std::hypot(stop_x_ - rx, stop_y_ - ry);
-
-    progress_valid_ = true;
-    progress_ok_since_ = now();
   }
 
-  // 보낸 경로 위에서 "여기서 서야 한다"는 지점을 정합니다.
-  //
-  // 좌표로 최근접점을 찾지 않는 이유: 주차 진입/출차처럼 같은 길을 되짚는 구간에서는
-  // 라벨 좌표 근처를 경로가 두 번 지나므로 엉뚱한 인덱스에 붙을 수 있습니다. 대신
-  // "경로 끝에서 남은 길이"로 찾습니다 -- trim/lead-in은 경로 앞쪽만 건드리고, resample은
-  // 점을 다시 깔 뿐 꼭짓점을 옮기지 않으므로 꼬리 길이는 tail_after_label_m 그대로입니다.
+  // 이 스텝에서 "여기서 서야 한다"는 지점을 PathProgress에 알려 줍니다. 라벨의 웨이포인트
+  // 좌표를 쓰고, 그게 없으면(끝 인덱스가 CSV 범위 밖) 경로의 마지막 점으로 대신합니다.
   void set_stop_point(const Step & step, const nav_msgs::msg::Path & path)
   {
-    stop_index_ = path.poses.empty() ? 0 : path.poses.size() - 1;
-    for (std::size_t i = 0; i < path_suffix_len_.size(); ++i) {
-      if (path_suffix_len_[i] <= step.tail_after_label_m) {
-        stop_index_ = i;
-        break;
-      }
-    }
-
+    double stop_x = 0.0;
+    double stop_y = 0.0;
     if (step.end_index < waypoints_.points.size()) {
-      stop_x_ = waypoints_.points[step.end_index].x;
-      stop_y_ = waypoints_.points[step.end_index].y;
+      stop_x = waypoints_.points[step.end_index].x;
+      stop_y = waypoints_.points[step.end_index].y;
     } else if (!path.poses.empty()) {
-      stop_x_ = path.poses.back().pose.position.x;
-      stop_y_ = path.poses.back().pose.position.y;
+      stop_x = path.poses.back().pose.position.x;
+      stop_y = path.poses.back().pose.position.y;
     }
+    progress_.set_stop_point(step.tail_after_label_m, stop_x, stop_y);
 
     if (step.tail_after_label_m > 0.0) {
       RCLCPP_INFO(
         get_logger(),
         "Stop point for '%s' is pose %zu/%zu of the sent path (%.1f m of path runs past it).",
-        step.label.c_str(), stop_index_, path.poses.size(),
-        path_suffix_len_.empty() ? 0.0 : path_suffix_len_[stop_index_]);
-    }
-  }
-
-  // 경로를 보낼 때 각 인덱스에서 끝까지 남은 길이를 미리 재 둡니다(tick마다 다시 세지 않게).
-  void reset_progress(const nav_msgs::msg::Path & path)
-  {
-    active_path_ = path;
-    path_cursor_ = 0;
-    progress_valid_ = false;
-    remaining_path_m_ = 0.0;
-    goal_point_distance_m_ = 0.0;
-    stop_index_ = 0;
-    distance_to_stop_m_ = 0.0;
-    stop_point_distance_m_ = 0.0;
-    progress_ok_since_ = now();
-
-    path_suffix_len_.assign(path.poses.size(), 0.0);
-    if (path.poses.size() < 2) {
-      return;
-    }
-    for (std::size_t i = path.poses.size() - 2; ; --i) {
-      const auto & a = path.poses[i].pose.position;
-      const auto & b = path.poses[i + 1].pose.position;
-      path_suffix_len_[i] = path_suffix_len_[i + 1] + std::hypot(b.x - a.x, b.y - a.y);
-      if (i == 0) {
-        break;
-      }
+        step.label.c_str(), progress_.stop_index(), path.poses.size(), progress_.stop_tail_m());
     }
   }
 
@@ -960,8 +558,8 @@ private:
   void update_prearm()
   {
     const Step & step = steps_[step_index_];
-    const bool in_range = step.prearm_enabled && progress_valid_ &&
-      distance_to_stop_m_ <= step.prearm_distance_m;
+    const bool in_range = step.prearm_enabled && progress_.valid() &&
+      progress_.distance_to_stop_m() <= step.prearm_distance_m;
 
     if (in_range && !prearmed_) {
       // 진입하는 순간 streak을 비웁니다. 멀리서 -- 신호등이 아직 몇 픽셀일 때 -- 우연히
@@ -969,8 +567,9 @@ private:
       sign_streak_ = 0;
       RCLCPP_INFO(
         get_logger(), "%s %.1f m from '%s'; watching %s for '%s'.",
-        progress().c_str(), distance_to_stop_m_, step.label.c_str(), params_.sign_topic.c_str(),
-        join(steps_[step.prearm_wait_step].accepted).c_str());
+        progress().c_str(), progress_.distance_to_stop_m(), step.label.c_str(),
+        params_.sign_topic.c_str(),
+        join_values(steps_[step.prearm_wait_step].accepted).c_str());
     }
     prearmed_ = in_range;
   }
@@ -1007,7 +606,7 @@ private:
       get_logger(),
       "%s '%s' confirmed %.1f m before '%s'; skipping the stop and continuing to '%s' "
       "(%zu-pose path preempts the running goal).",
-      progress().c_str(), last_sign_.c_str(), distance_to_stop_m_, step.label.c_str(),
+      progress().c_str(), last_sign_.c_str(), progress_.distance_to_stop_m(), step.label.c_str(),
       merge_step.label.c_str(), path.poses.size());
 
     // 갈아끼워진 옛 골은 nav2가 abort로 끝냅니다. 그 결과가 뒤늦게 도착했을 때 ABORTED
@@ -1040,7 +639,7 @@ private:
     // decel 프로파일을 쓰는 스텝은 경로 끝이 라벨보다 뒤에 있어 goal checker가 받쳐 주지
     // 않습니다. 여기서 tf를 놓치면 남은 안전장치가 없고, 속도 제한도 마지막 값이 그대로
     // 남아 실제 필요한 값보다 빠릅니다. 그러니 차라리 세웁니다.
-    if (step.decel_profile_a > 0.0 && !progress_valid_ &&
+    if (step.decel_profile_a > 0.0 && !progress_.valid() &&
       (now() - progress_ok_since_).seconds() > params_.progress_stale_cancel_sec)
     {
       RCLCPP_ERROR(
@@ -1053,13 +652,13 @@ private:
       return;
     }
 
-    if (!progress_valid_) {
+    if (!progress_.valid()) {
       return;
     }
 
     // 하드 백스톱 2 -- 정지점을 지났으면 속도와 무관하게 취소합니다. 프로파일 스텝에서는
     // 이것이 "정지선을 넘지 않는다"의 마지막 보루입니다.
-    if (distance_to_stop_m_ <= 0.0) {
+    if (progress_.distance_to_stop_m() <= 0.0) {
       RCLCPP_WARN(
         get_logger(),
         "%s reached '%s' at %.2f m/s, above cancel_on_arrival_speed %.2f. Canceling anyway; "
@@ -1077,8 +676,8 @@ private:
     // 두 거리를 모두 봅니다. distance_to_stop_m_는 "경로를 정지점까지 달렸는가"이고
     // stop_point_distance_m_는 "지금 정지점 옆에 있는가"입니다. 하나만 보면, 경로를 벗어난
     // 채 커서만 끝까지 간 경우나 코스가 정지점 근처를 스쳐 지나가는 경우에 잘못 걸립니다.
-    if (distance_to_stop_m_ > step.cancel_on_arrival_m ||
-      stop_point_distance_m_ > step.cancel_on_arrival_m ||
+    if (progress_.distance_to_stop_m() > step.cancel_on_arrival_m ||
+      progress_.stop_point_distance_m() > step.cancel_on_arrival_m ||
       std::fabs(last_speed_) > params_.cancel_on_arrival_speed)
     {
       return;
@@ -1087,20 +686,16 @@ private:
     RCLCPP_INFO(
       get_logger(),
       "%s %.2f m from '%s' at %.2f m/s; canceling instead of crawling into the goal checker.",
-      progress().c_str(), stop_point_distance_m_, step.label.c_str(), std::fabs(last_speed_));
+      progress().c_str(), progress_.stop_point_distance_m(), step.label.c_str(),
+      std::fabs(last_speed_));
     arrival_requested_ = true;
     client_->async_cancel_goal(goal_handle_);
   }
 
   // ------------------------------------------------------------- decel 프로파일
 
-  // 등감속 프로파일을 /speed_limit으로 내보냅니다. 파일 머리의 "decel 프로파일" 참고.
-  //
-  //     v = sqrt(2 * a * (정지점까지 남은 거리 - cancel_on_arrival_m))
-  //
-  // cancel_on_arrival_m를 빼는 이유: 그래야 취소 지점에서 속도가 정확히 하한까지 내려와
-  // cancel-on-arrival의 속도 조건이 열립니다. 안 빼면 프로파일이 정지점에서야 0이 되는데,
-  // 그 전에는 계속 속도 조건에 걸려 취소가 안 되고 결국 백스톱까지 밀립니다.
+  // 지금 스텝에 맞는 속도 제한을 골라 내보냅니다. 프로파일 자체는
+  // speed_limit.hpp의 decel_profile_speed가 계산합니다.
   void update_speed_limit()
   {
     double limit = 0.0;   // 0.0 = NO_SPEED_LIMIT
@@ -1108,34 +703,18 @@ private:
     if (phase_ == Phase::kDriving && step_index_ < steps_.size()) {
       const Step & step = steps_[step_index_];
       if (step.decel_profile_a > 0.0) {
-        if (!progress_valid_) {
+        if (!progress_.valid()) {
           // tf를 잠깐 놓친 것뿐일 수 있습니다. 제한을 해제하면 그 순간 vx_max로 튀어
           // 나가므로, 마지막 값을 그대로 둡니다. 오래 끊기면 위 백스톱이 골을 취소합니다.
           return;
         }
-        const double braking = std::max(
-          0.0, distance_to_stop_m_ - step.cancel_on_arrival_m);
-        const double profile = std::sqrt(2.0 * step.decel_profile_a * braking);
-        // vx_max 이상이면 제한할 게 없습니다. 그대로 실어 보내면 MPPI의 setSpeedLimit이
-        // ratio > 1로 오히려 vx_max를 올리므로 반드시 해제(0.0)해야 합니다.
-        if (profile < params_.controller_vx_max) {
-          limit = std::max(profile, params_.decel_profile_min_speed);
-        }
+        limit = hyper_planner::decel_profile_speed(
+          step.decel_profile_a, progress_.distance_to_stop_m(), step.cancel_on_arrival_m,
+          params_.controller_vx_max, params_.decel_profile_min_speed);
       }
     }
 
-    // 값이 실제로 바뀔 때만 보냅니다(해제 -> 해제는 아무것도 안 보냄).
-    if (std::fabs(limit - published_speed_limit_) < 1e-3) {
-      return;
-    }
-    published_speed_limit_ = limit;
-
-    nav2_msgs::msg::SpeedLimit msg;
-    msg.header.stamp = now();
-    msg.header.frame_id = params_.frame_id;
-    msg.percentage = false;
-    msg.speed_limit = limit;
-    speed_limit_pub_->publish(msg);
+    speed_limit_->publish(limit, now());
   }
 
   // ---------------------------------------------------------------- 액션 결과
@@ -1428,7 +1007,7 @@ private:
     if (step.type == StepType::kDrive) {
       text += " until=" + step.label;
     } else if (step.type == StepType::kWaitSignal) {
-      text += " value=" + join(step.accepted);
+      text += " value=" + join_values(step.accepted);
     }
     return text;
   }
@@ -1440,18 +1019,6 @@ private:
     status_pub_->publish(msg);
   }
 
-  static std::string join(const std::vector<std::string> & values)
-  {
-    std::string text;
-    for (const auto & value : values) {
-      if (!text.empty()) {
-        text += "|";
-      }
-      text += value;
-    }
-    return text;
-  }
-
   // ---------------------------------------------------------------- 멤버
 
   // 파라미터는 전부 여기에 있습니다(src/mission_manager_parameters.yaml에서 생성).
@@ -1460,7 +1027,6 @@ private:
   bool params_logged_once_{false};
 
   hyper_planner::WaypointFile waypoints_;
-  std::unordered_map<std::string, std::size_t> label_index_;
   std::vector<Step> steps_;
 
   Phase phase_{Phase::kIdle};
@@ -1480,25 +1046,9 @@ private:
   // 지금 실행 중인 drive 스텝에서 신호를 미리 보는 중인지.
   bool prearmed_{false};
 
-  // 지금 보낸 경로와 그 위에서의 진행도. prearm과 cancel-on-arrival이 이 값으로 판단합니다.
-  // nav2 피드백의 distance_to_goal은 쓰지 않습니다(update_progress의 주석 참고).
-  nav_msgs::msg::Path active_path_;
-  std::vector<double> path_suffix_len_;   // 각 인덱스에서 경로 끝까지 남은 길이
-  std::size_t path_cursor_{0};            // 앞으로만 움직입니다
-  bool progress_valid_{false};
-  double remaining_path_m_{0.0};          // 커서에서 경로 끝까지
-  double goal_point_distance_m_{0.0};     // 차량에서 경로 마지막 점까지 직선거리
-
-  // "여기서 서야 한다"는 지점(= 스텝의 라벨). decel 프로파일을 안 쓰면 경로 끝과 같습니다.
-  std::size_t stop_index_{0};             // 보낸 경로 위에서의 인덱스
-  double stop_x_{0.0};
-  double stop_y_{0.0};
-  double distance_to_stop_m_{0.0};        // 커서에서 정지점까지 (지나가면 음수)
-  double stop_point_distance_m_{0.0};     // 차량에서 정지점까지 직선거리
+  // 지금 보낸 경로 위에서의 진행도. prearm과 cancel-on-arrival이 이 값으로 판단합니다.
+  hyper_planner::PathProgress progress_;
   rclcpp::Time progress_ok_since_;        // 진행도가 마지막으로 유효했던 시각
-
-  // 마지막으로 내보낸 속도 제한. 0.0 = NO_SPEED_LIMIT(해제).
-  double published_speed_limit_{0.0};
 
   // FollowPath 피드백에서 가져오는 유일한 값. |cmd_vel|이라 프레임과 무관합니다.
   bool have_speed_{false};
@@ -1509,7 +1059,7 @@ private:
   GoalHandle::SharedPtr goal_handle_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
-  rclcpp::Publisher<nav2_msgs::msg::SpeedLimit>::SharedPtr speed_limit_pub_;
+  std::unique_ptr<hyper_planner::SpeedLimitPublisher> speed_limit_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sign_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr cancel_srv_;

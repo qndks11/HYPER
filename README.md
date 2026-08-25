@@ -311,7 +311,7 @@ ros2 launch hyper_launch behavior.launch.py
 
 전방 ELP와 객체 인식용 Logitech C920은 둘 다 여기 포함되지 않습니다 — 대신 `perception.launch.py`가 `hyper_camera`의 드라이버 노드로 각각 엽니다: `ElpCameraPublisherNode`(`/dev/video_elp`, 자체 rectify까지 수행)는 `lane_detection_node`와 같은 `ComposableNodeContainer`에 로드되어 intra-process로 넘어가고, `logitech_camera_publisher_node`(`/dev/video_logitech`, rectify 없음)는 별도 프로세스로 떠서 일반 토픽으로 `object_detection_node`에 연결됩니다.
 
-후방 카메라(`/camera_rear/image_raw`)는 아직 실물이 없고, `intra_process`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
+후방 카메라는 시뮬레이션에서 Intel RealSense D435i 제원(depth FOV 87°×58°, 848×480@30Hz, 측정 거리 0.2~10m)을 따르는 RGBD 센서로 모델링되어 컬러(`/camera_rear/image_raw`) 외에 깊이 영상(`/camera_rear/depth/image_raw`)과 포인트 클라우드(`/camera_rear/depth/points`)도 발행합니다. 다만 실차에는 아직 후방 카메라가 장착되어 있지 않고(`sensors.launch.py`의 D435i는 `/imu` 전용), `intra_process`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
 
 ## 패키지 구성
 
@@ -335,7 +335,10 @@ ros2 launch hyper_launch behavior.launch.py
 |------|------|------|------|
 | `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → hyper_lane_detection (실차) | 전방 카메라 영상 (차선 인식이 구독). 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `ElpCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서는 같은 `ComposableNodeContainer` 안에서 zero-copy로 전달되므로 이 토픽이 DDS까지 나가지 않음 |
 | `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → object_detection_node (실차) | 객체 인식용 카메라 영상 (`object_detection_node`가 항상 구독). 시뮬레이션은 ros_gz_bridge, 실차 기본 경로(`object_input_backend:=usb_camera`)는 `hyper_camera`의 `logitech_camera_publisher_node`가 일반 토픽으로 발행 |
-| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `intra_process`는 후방 경로 자체가 없음) |
+| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 RGBD 카메라(D435i 상당)의 컬러 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `intra_process`는 후방 경로 자체가 없음) |
+| `/camera_rear/depth/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 깊이 영상 (`32FC1`, 0.2~10m) |
+| `/camera_rear/depth/points` | `sensor_msgs/PointCloud2` | Gazebo → ROS | 후방 카메라 포인트 클라우드. `frame_id`는 `rear_camera_link`이고 좌표도 그 프레임 규약(x 전방)을 그대로 따름 — optical 프레임(z 전방)이 아님 |
+| `/camera_rear/camera_info` | `sensor_msgs/CameraInfo` | Gazebo → ROS | 후방 카메라 내부 파라미터 (fx=fy≈446.8, 848×480) |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
