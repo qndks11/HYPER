@@ -33,17 +33,6 @@ def generate_launch_description():
             'launch', 'robot_state_publisher.launch.py')),
     )
 
-    # Real vehicle equivalent of Gazebo's gz_ros2_control plugin: starts ros2_control_node
-    # against the STM32 hardware interface (use_sim:=false) and spawns joint_state_broadcaster/
-    # forward_position_controller/forward_velocity_controller, so wheel/steering joint
-    # transforms (/joint_states) and the controller command topics vehicle_controller_node
-    # publishes to actually exist on the real vehicle.
-    real_control = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('hyper_control'),
-            'launch', 'real_control.launch.py')),
-    )
-
     # Same Ackermann-to-controller-command bridge as hyper_gazebo's vehicle.launch.py, but with
     # single_output:=true: the real interface exposes one virtual steering joint and one virtual
     # rear-axle joint (see Stm32SystemInterface), not four independently commandable wheels, so
@@ -64,7 +53,6 @@ def generate_launch_description():
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
         DeclareLaunchArgument('mission', default_value='mission'),
         robot_state_publisher,
-        real_control,
         vehicle_controller_node,
         stage('sensors.launch.py'),
         TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
