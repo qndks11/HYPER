@@ -1,0 +1,30 @@
+/**:
+  ros__parameters:
+    # USB serial link to the Arduino. Check with `ls /dev/serial/by-id/` -- prefer a
+    # by-id symlink over /dev/ttyACM0 / /dev/ttyUSB0 if more than one USB serial
+    # device is ever plugged in, since the ttyACM/ttyUSB number is not stable.
+    serial_port: "/dev/ttyACM0"
+    baud_rate: 115200
+
+    # Rate at which /velocity + /steering_angle are packed and sent to the Arduino.
+    # Also doubles as the watchdog "heartbeat" the Arduino's own timeout relies on
+    # (see COMMAND_TIMEOUT_MS in the .ino) -- keep this well above that timeout.
+    send_rate: 50.0 # [Hz]
+
+    # If no new /velocity or /steering_angle message has arrived within this long,
+    # the bridge sends zero instead of the last known command (fail-safe on a
+    # dropped topic, e.g. the publishing node died or was Ctrl-C'd).
+    command_timeout: 0.3 # [s]
+
+    # Clamps applied before sending -- keep in sync with hyper_control /
+    # hyper_planner's max_velocity / max_steering_angle so the Arduino never sees
+    # a command outside what it was tuned for. These also define the ROS-side end
+    # of the linear mapping to PWM duty on the Arduino (see hyper_motor_interface.ino).
+    max_velocity: 5.0 # 실차 테스트용으로 하향, hyper_control과 동일하게 맞춤 [m/s]
+    max_steering_angle: 0.5235988 # ~30 deg [rad]
+
+    # Front-to-rear axle distance, used for the bicycle-model yaw rate
+    # published on /odom (see arduino_interface_node.py's _publish_odom()).
+    # Measured by hand on the vehicle. Re-measure and update if the chassis
+    # changes.
+    wheel_base: 0.73 # [m]
