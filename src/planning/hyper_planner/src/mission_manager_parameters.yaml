@@ -194,6 +194,27 @@ mission_manager:
     validation:
       gt_eq<>: [0]
 
+  obstacle_retry_period_sec:
+    type: double
+    default_value: 1.0
+    description: |
+      obstacle_hold_s를 켠 스텝이 막혀서 섰을 때, 같은 골을 다시 보내 보는 주기(초).
+      다시 보낸 골은 앞이 아직 막혀 있으면 컨트롤러가 곧바로 다시 abort 하므로,
+      이 주기가 곧 장애물이 치워졌는지 확인하는 주기입니다. 너무 짧게 잡으면 매번
+      controller_server의 failure_tolerance만큼 붙잡혔다 풀리는 것을 반복합니다.
+    validation:
+      gt<>: [0.0]
+
+  unblocked_speed:
+    type: double
+    default_value: 0.3
+    description: |
+      막힘 상태에서 골을 다시 보낸 뒤, 피드백 속도가 이 값을 넘으면 다시 굴러가기
+      시작한 것으로 보고 막힘 타이머(obstacle_hold_s)를 0으로 되돌립니다. 한 스텝 안에서
+      장애물을 여러 번 만나도 매번 처음부터 기다려 줍니다.
+    validation:
+      gt<>: [0.0]
+
   proceed_on_signal_timeout:
     type: bool
     default_value: true
@@ -216,7 +237,7 @@ mission_manager:
       경로 위 진행 커서를 옮길 때 앞으로 훑는 거리. 커서는 뒤로 가지 않으므로, 코스가
       자기 자신에 가까워지는 구간(주차 진입/출차처럼 같은 길을 되짚는 곳)에서도 엉뚱한
       점에 붙지 않습니다. tick(10 Hz) 사이에 차가 갈 수 있는 거리보다 넉넉하면 됩니다
-      (6 m/s면 0.6 m).
+      (2.5 m/s면 0.25 m).
     validation:
       gt<>: [0.0]
 
@@ -234,7 +255,7 @@ mission_manager:
 
   controller_vx_max:
     type: double
-    default_value: 6.0
+    default_value: 2.22
     description: |
       nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
       ratio = speed_limit / vx_max로 vx_max/vx_min/wz를 한꺼번에 곱하므로, vx_max보다 큰

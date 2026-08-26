@@ -405,8 +405,18 @@
   </joint>
 
 <!-- LiDAR Fixed Joint -->
+  <!-- 스캔 평면 높이 = wheel_radius*1.5 + body_height/2 + 이 오프셋
+       = 0.30 + 0.20 + 0.15 = 지면 위 0.65 m (parameters.yaml 기준값).
+       0.25 -> 0.15으로 10 cm 낮췄습니다. 이유:
+         - 이전 높이(0.75 m)는 hatchback 장애물 지붕(0.778 m)의 위쪽 2.8 cm를 스치기만 해서,
+           피치에 따라 반사가 들어왔다 말았다 했습니다(= local costmap이 비어 MPPI가 직진).
+           0.65 m면 지붕보다 12.8 cm 아래라 차체를 확실히 때립니다.
+         - 아래로는 차체 박스 윗면(0.50 m)보다 15 cm 위여야 gpu_lidar가 자기 차체에
+           가리지 않습니다.
+       주의: 이 xacro는 real.launch.py도 같이 씁니다. 실차 라이다를 실제로 0.65 m로
+       내려 달지 않으면 body_link->lidar_link TF가 실측과 어긋납니다. -->
   <joint name="lidar_joint" type="fixed">
-    <origin xyz="0.15 0 ${body_height/2 + 0.25}" rpy="0 0 0"/>
+    <origin xyz="0.15 0 ${body_height/2 + 0.15}" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="lidar_link"/>
   </joint>
@@ -609,6 +619,12 @@
       <update_rate>${camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera</topic>
+      <!-- ign publishes the image on <topic> and its camera_info on <topic>_info; both are
+           bridged in hyper_gazebo's ros_gz_bridge.yaml (camera -> /camera/image_raw,
+           camera_info -> /camera/info). The libgazebo_ros_camera.so plugin this sensor used
+           to carry was Gazebo Classic config, inert under ign-gazebo, so it is not carried
+           over; its frameName is what the gz_frame_id below replaces. -->
+      <gz_frame_id>camera_link</gz_frame_id>
 
       <camera name="head">
         <horizontal_fov>${camera_fov}</horizontal_fov>
@@ -627,18 +643,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>vehicle_front_camera</cameraName>
-        <frameName>camera_link</frameName>
-        <hackBaseline>0.07</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 
@@ -648,6 +652,9 @@
       <update_rate>${camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera_object</topic>
+      <!-- Bridged as camera_object -> /camera_object/image_raw and camera_object_info ->
+           /camera_object/info. Same Classic-plugin removal as the front camera above. -->
+      <gz_frame_id>object_camera_link</gz_frame_id>
 
       <camera name="object">
         <horizontal_fov>${object_camera_fov}</horizontal_fov>
@@ -666,18 +673,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="object_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>vehicle_object_camera</cameraName>
-        <frameName>object_camera_link</frameName>
-        <hackBaseline>0.07</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 

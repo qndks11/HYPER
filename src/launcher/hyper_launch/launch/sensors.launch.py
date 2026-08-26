@@ -17,19 +17,19 @@ from launch_ros.actions import Node
 #                                          logitech_camera_publisher_node
 #                                          (object_input_backend:=usb_camera, plain topic -- see
 #                                          perception.launch.py)
+#   RealSense D435i (rear)              -> owned by realsense2_camera's RealSenseNodeFactory
+#                                          component, loaded into the same container as the ELP
+#                                          publisher and LaneDetection and configured by
+#                                          hyper_camera's params_d435i.yaml -- see
+#                                          perception.launch.py. Colour only; its built-in IMU is
+#                                          off, /imu belongs to the WitMotion below.
 #   WitMotion WT901BLE (witmotion_ros2) -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
-# /camera_rear/* has no physical source yet, and input_backend:=intra_process has no
-# rear-camera path at all -- lane_detection_node simply never receives rear frames on the real
-# vehicle until a rear camera and its own backend wiring are added. Note the sim now models the
-# rear camera as an RGBD sensor with this same D435i's specs (see vehicle.xacro), so wiring a
-# real one up later is mostly a matter of pointing realsense2_camera at the rear unit and
-# enabling its colour/depth streams.
 #
-# Neither camera goes through usb_cam here anymore -- usb_cam has been removed from this
-# workspace entirely (see deps.repos); hyper_camera now provides both cameras' driver nodes
-# (see perception.launch.py) plus their calibration/config files.
+# No camera is launched here at all -- usb_cam has been removed from this workspace entirely
+# (see deps.repos); hyper_camera now provides both USB cameras' driver nodes (see
+# perception.launch.py) plus every camera's calibration/config files, the D435i's included.
 
 
 def generate_launch_description():

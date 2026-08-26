@@ -32,6 +32,8 @@ labels:
   park_t_entry: {x: -26.564, y: -21.848}   # wp #589
   park_t_spot: {x: -16.047, y: -28.716}   # wp #616
   light_3: {x: -9.691, y: -11.769}   # wp #810
+  accel_start: {x: -36.231, y: 41.459}   # wp #995
+  accel_end: {x: -39.314, y: -34.026}   # wp #1122
   park_p_entry: {x: 5.395, y: -30.157}   # wp #1234
   park_p_spot: {x: 9.545, y: -34.518}   # wp #1249
   finish: {x: 18.669, y: -43.842}   # wp #1354
@@ -86,7 +88,8 @@ labels:
 #                일어납니다. 취소가 안 걸리면 차가 정지선을 그냥 지나갑니다(그때를 위한
 #                하드 백스톱이 노드 안에 두 개 있고, 걸리면 ERROR/WARN 로그가 납니다).
 #
-#                a 값 정하기: 2.0이면 6 m/s에서 제동거리 9 m입니다. 차가 실제로 그만큼 못
+#                a 값 정하기: 2.0이면 2.22 m/s에서 제동거리 1.23 m입니다(6 m/s 시절에는
+#                9 m였습니다 -- vx_max를 내리면서 프로파일이 훨씬 짧아졌습니다). 차가 실제로 그만큼 못
 #                줄이면 프로파일보다 빠르게 라벨에 닿아 "reached ... above
 #                cancel_on_arrival_speed" 경고가 납니다 -- 그러면 a를 낮추세요. 반대로
 #                여유 있게 서면 올려서 시간을 줄이세요.
@@ -97,6 +100,17 @@ labels:
 #                제대로 서기 전에 goal checker가 먼저 만족돼 후진 스텝이 시작됩니다.
 #                늘리는 꼬리가 녹화 코스가 아니라 직선이라, 라벨 뒤가 후진 구간이어도
 #                (주차 진입) 켤 수 있습니다.
+#
+#                obstacle_hold_s: 0보다 크면, 이 스텝에서 컨트롤러가 abort 했을 때 미션을
+#                실패로 끝내지 않고 "앞이 막혔다"로 봅니다. 골을 안 보낸 채로 서 있다가
+#                (워치독이 차를 세웁니다) obstacle_retry_period_sec(기본 1초)마다 같은 골을
+#                다시 보내고, 치워지면 선 자리에서 그대로 이어 갑니다. 이 시간(초) 동안 계속
+#                막혀 있으면 그때는 실패로 끝냅니다(영영 서 있는 것보다 낫습니다).
+#                0 = 끔 -- 그때는 goal_retry_limit(기본 2)이 소진되는 즉시 미션 실패입니다.
+#
+#                경로를 벗어나지 않는 컨트롤러(ForwardFollowPath / ReverseFollowPath)에서만
+#                의미가 있습니다. MPPI(FollowPath)는 애초에 막히면 비켜 가므로 abort 자체가
+#                거의 안 납니다.
 #   stop         duration_s 동안 정지. 골을 안 보내면 cmd_vel_to_ackermann의
 #                워치독(input_timeout 0.3s)이 차를 세웁니다.
 #   wait_signal  /perception/sign이 value를 debounce_frames 연속으로 낼 때까지 대기.
@@ -125,8 +139,10 @@ labels:
 #                대신 늘어나는 위험이 하나 있습니다: 갈아끼우기는 되돌릴 수 없습니다.
 #                통과 판정이 나면 그 자리에서 wait_signal을 건너뛰므로 신호를 더 이상 보지
 #                않고, 통과한 뒤 신호가 초록 -> 빨강으로 바뀌어도 그대로 지나갑니다.
-#                15 m / 6 m/s면 약 2.5초의 노출입니다. 이 값을 키운다는 것은 그 창을
-#                넓힌다는 뜻이므로, 신호 주기를 생각하며 정하세요.
+#                15 m / 2.22 m/s면 약 6.8초의 노출입니다(6 m/s 시절에는 2.5초였습니다).
+#                이 값을 키운다는 것은 그 창을 넓힌다는 뜻이므로, 신호 주기를 생각하며
+#                정하세요. vx_max를 2.5로 내리면서 같은 거리가 2.4배 긴 시간이 됐으므로,
+#                신호 주기가 짧다면 prearm_distance_m를 6~8 m로 줄이는 것을 검토하세요.
 #
 # 장애물 회피는 step이 아닙니다 -- 이미 MPPI costmap 안에서 처리되므로
 # 해당 구간 drive step 안에서 자동으로 일어납니다.
@@ -175,19 +191,27 @@ steps:
   # (줄이면 감속이 이미 시작된 뒤라 이득이 없습니다) 인식 쪽 신뢰도를 먼저 보세요.
   - {type: wait_signal, value: "green,left_arrow", timeout_s: 60.0, debounce_frames: 3,
      prearm_distance_m: 12.0}
+  - {type: drive, until: accel_start, goal_checker: precise_goal_checker,
+       cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
-  # 6) 평행 주차: 진입 -> 후진 입고 -> 정차 (출차는 T자와 같은 이유로 아래 스텝에 포함)
-  #
-  # TODO: 실제 평행주차 동작을 녹화한 뒤 확인하세요. 후진으로 들어간 뒤 차체를 펴는
-  # 전진 조정이 들어간다면 그 지점은 방향 전환이므로 반드시 세그먼트 경계여야 합니다
-  # (RPP는 한 경로 안의 방향 전환을 거부합니다). 그 경우 park_p_spot 앞에
-  # park_p_align 같은 라벨을 하나 더 넣고 스텝을 쪼개야 합니다.
+  # 6) 가속 구간: 여기만 전진 RPP(ForwardFollowPath) + 막힘 유지입니다.
+  # MPPI는 장애물을 만나면 비켜서 지나갑니다. 이 구간은 장애물 앞에서 반드시 서야 하므로
+  # 경로를 벗어나지 않고 충돌이 보이면 제어를 포기(= 정지)하는 RPP를 씁니다.
+  # obstacle_hold_s: 그 정지를 미션 실패가 아니라 대기로 다룹니다 -- 서 있다가 1초마다 골을
+  # 다시 보내 보고, 치워지면 그 자리에서 이어서 갑니다. 30초 넘게 계속 막혀 있으면 실패.
+  # decel_profile_a는 여기서 선택이 아닙니다: RPP는 스스로 라벨 앞에서 감속하지 않고
+  # /speed_limit 프로파일만이 차를 세웁니다.
+  - {type: drive, until: accel_end, controller: ForwardFollowPath,
+       goal_checker: precise_goal_checker, obstacle_hold_s: 30.0,
+       cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+  # 7) 평행 주차: 진입 -> 후진 입고 -> 정차 (출차는 T자와 같은 이유로 아래 스텩에 포함)
   - {type: drive, until: park_p_entry, decel_profile_a: 1.5, cancel_on_arrival_m: 0.15}
   - {type: drive, until: park_p_spot, controller: ReverseFollowPath, reverse: true,
      goal_checker: precise_goal_checker}
   - {type: stop, duration_s: 3.0}
 
-  # 7) 출차하며 완주
+  # 8) 출차하며 완주
   # finish는 코스의 마지막 라벨이고 뒤에 남은 코스는 9.4 m뿐이지만, 꼬리는 녹화 코스가
   # 아니라 직선 외삽이라 여기서도 12 m가 그대로 붙습니다.
   - {type: drive, until: finish, goal_checker: precise_goal_checker,

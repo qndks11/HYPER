@@ -20,6 +20,10 @@ def generate_launch_description():
     real_bev_params = os.path.join(
         get_package_share_directory('hyper_lane_detection'), 'config', 'bev_real.yaml')
 
+    # Rear RealSense D435i settings -- see the file for what is enabled and why.
+    d435i_params = os.path.join(
+        get_package_share_directory('hyper_camera'), 'config', 'params_d435i.yaml')
+
     # hyper_lane_detection's input_backend: intra_process (real vehicle -- hyper_camera's
     # ElpCameraPublisherNode component and LaneDetection are loaded into one
     # ComposableNodeContainer, so the frame is handed over by pointer instead of a serialized
@@ -57,6 +61,22 @@ def generate_launch_description():
                 plugin='hyper_camera::ElpCameraPublisherNode',
                 name='elp_camera_publisher',
                 remappings=[('image_raw', '/camera/image_raw')],
+                extra_arguments=[{'use_intra_process_comms': True}],
+            ),
+            # Rear camera. realsense2_camera's own component, not a hyper_camera node -- the
+            # upstream driver already publishes each frame as a std::unique_ptr<Image> through a
+            # native rclcpp publisher when use_intra_process_comms is set, so it drops into this
+            # container on the same zero-copy terms as the ELP publisher above. It creates its
+            # topics under "~/", so with this name/namespace the colour stream would land on
+            # /camera_rear/color/image_raw -- remapped here to the /camera_rear/image_raw that
+            # LaneDetection's rear subscription and the sim's ros_gz_bridge already agree on.
+            ComposableNode(
+                package='realsense2_camera',
+                plugin='realsense2_camera::RealSenseNodeFactory',
+                name='camera_rear',
+                namespace='',
+                parameters=[d435i_params],
+                remappings=[('/camera_rear/color/image_raw', '/camera_rear/image_raw')],
                 extra_arguments=[{'use_intra_process_comms': True}],
             ),
             ComposableNode(

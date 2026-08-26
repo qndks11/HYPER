@@ -51,6 +51,13 @@
 //
 // 장애물 회피는 스텝이 아닙니다 -- MPPI가 local costmap을 보며 해당 drive 스텝 안에서
 // 알아서 처리합니다.
+//
+//   막힘 유지 -- 피하지 말고 서서 기다린다 (drive 스텝의 obstacle_hold_s, 0이면 끔)
+//     반대로 "피하지 말고 서야 하는" 구간(가속 구간)은 경로를 벗어나지 않는 RPP로 달립니다.
+//     RPP는 앞이 막히면 제어를 포기하고 액션이 abort 되는데, 이 abort는 설정 오류가 아니라
+//     "지금은 못 간다"입니다. 그래서 goal_retry_limit을 태우지 않고 그 자리에 섰다가
+//     주기적으로 같은 골을 다시 보내, 장애물이 치워지면 스스로 이어서 갑니다.
+//     자세한 것은 아래 enter_blocked() 위의 주석을 보세요.
 
 #include <algorithm>
 #include <chrono>
@@ -101,6 +108,9 @@ enum class Phase
   kDriving,
   kHolding,
   kWaiting,
+  // 앞이 막혀 선 상태(obstacle_hold_s를 켠 스텝에서만). 골이 없으므로 차는 워치독이
+  // 세우고 있고, obstacle_retry_period_sec마다 같은 골을 다시 보내 봅니다.
+  kBlocked,
   kFinished,
   kFailed,
 };
@@ -148,6 +158,10 @@ public:
     starting_since_ = now();
     last_feedback_time_ = now();
     progress_ok_since_ = now();
+    // rclcpp::Time의 기본 생성자는 시스템 클록이라, use_sim_time인 now()와 비교하면
+    // 던집니다. 처음 읽히기 전에 반드시 대입되지만 그래도 여기서 맞춰 둡니다.
+    blocked_since_ = now();
+    blocked_retry_at_ = now();
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
     // spin_thread = true: 아래 lookupTransform()이 타임아웃까지 블록하므로 리스너는
@@ -261,6 +275,7 @@ private:
     retries_ = 0;
     prearmed_ = false;
     arrival_requested_ = false;
+    blocked_ = false;
     switch (step.type) {
       case StepType::kDrive:
         phase_ = Phase::kStarting;
@@ -341,6 +356,9 @@ private:
         }
         break;
       }
+      case Phase::kBlocked:
+        tick_blocked();
+        break;
       case Phase::kDriving:
         update_progress();
         update_prearm();
@@ -405,6 +423,59 @@ private:
       progress().c_str(), path.poses.size(), params_.action_name.c_str());
     phase_ = Phase::kDriving;   // 응답이 올 때까지 재전송을 막습니다.
     send_goal(step, path);
+  }
+
+  // ------------------------------------------------------------------ 막힘 처리
+  //
+  // 경로를 벗어나지 않는 컨트롤러(ForwardFollowPath/ReverseFollowPath = RPP)는 앞이
+  // 막히면 회피하지 않고 제어를 포기합니다. controller_server는 그동안 0 속도를 내보내다
+  // failure_tolerance가 지나면 액션을 abort 합니다. 그 abort는 "설정이 틀렸다"가 아니라
+  // "지금 못 간다"이므로, goal_retry_limit을 태워 미션을 죽일 이유가 없습니다.
+  //
+  // 그래서 obstacle_hold_s를 켠 스텝에서는 abort를 이렇게 다룹니다.
+  //   1. 골을 안 보낸 채로 섭니다. 정지 명령은 따로 필요 없습니다 -- /cmd_vel이 끊기면
+  //      cmd_vel_to_ackermann의 워치독(0.3초)이 차를 세웁니다.
+  //   2. obstacle_retry_period_sec마다 같은 골을 다시 보냅니다. 경로는 매번 현재 위치에서
+  //      다시 잘리므로(trim_to_robot) 선 자리에서 그대로 이어집니다. 아직 막혀 있으면
+  //      컨트롤러가 곧바로 다시 abort 하고 여기로 돌아옵니다.
+  //   3. 다시 굴러가기 시작하면(피드백 속도 > unblocked_speed) 타이머를 0으로 되돌립니다.
+  //   4. 계속 막힌 채로 obstacle_hold_s가 지나면 그때는 미션을 실패로 끝냅니다 -- 영영
+  //      서 있는 것보다는 사람이 알아채는 편이 낫습니다.
+  void enter_blocked(const Step & step)
+  {
+    if (!blocked_) {
+      blocked_ = true;
+      blocked_since_ = now();
+    }
+    phase_ = Phase::kBlocked;
+    blocked_retry_at_ = now() + rclcpp::Duration::from_seconds(params_.obstacle_retry_period_sec);
+    RCLCPP_WARN(
+      get_logger(),
+      "%s blocked on the way to '%s' (the controller could not find a valid command -- most "
+      "likely an obstacle ahead). Holding; retrying every %.1f s, giving up after %.0f s "
+      "(blocked for %.1f s so far).",
+      progress().c_str(), step.label.c_str(), params_.obstacle_retry_period_sec,
+      step.obstacle_hold_s, (now() - blocked_since_).seconds());
+    publish_status("blocked " + status_text());
+  }
+
+  void tick_blocked()
+  {
+    const Step & step = steps_[step_index_];
+    const double held = (now() - blocked_since_).seconds();
+    if (held > step.obstacle_hold_s) {
+      fail(
+        "blocked in front of '" + step.label + "' for " + std::to_string(static_cast<int>(held)) +
+        " s (obstacle_hold_s " + std::to_string(static_cast<int>(step.obstacle_hold_s)) + ")");
+      return;
+    }
+    if (now() >= blocked_retry_at_) {
+      RCLCPP_INFO(
+        get_logger(), "%s blocked for %.1f s; re-sending the goal to see if the way is clear.",
+        progress().c_str(), held);
+      phase_ = Phase::kStarting;
+      starting_since_ = now();
+    }
   }
 
   // 세그먼트 경로를 만들어 차량의 현재 위치에 맞춰 다듬습니다. 실패 사유는 여기서 로그로
@@ -487,6 +558,14 @@ private:
       last_speed_ = feedback->speed;
       last_feedback_time_ = now();
       have_speed_ = true;
+      // 다시 굴러가기 시작했으면 막힘 타이머를 되돌립니다. 한 스텝 안에서 장애물을
+      // 여러 번 만나도 매번 obstacle_hold_s를 처음부터 씁니다.
+      if (blocked_ && std::fabs(last_speed_) > params_.unblocked_speed) {
+        blocked_ = false;
+        RCLCPP_INFO(
+          get_logger(), "%s moving again at %.2f m/s; the way ahead is clear.",
+          progress().c_str(), std::fabs(last_speed_));
+      }
       RCLCPP_INFO_THROTTLE(
         get_logger(), *get_clock(), 2000,
         // limit 0.00 = 제한 없음(nav2의 NO_SPEED_LIMIT과 같은 뜻).
@@ -783,6 +862,12 @@ private:
           advance();
           return;
         }
+        // 이 스텝에서의 abort는 "지금 앞이 막혔다"는 뜻입니다. 재시도 횟수를 태우지 않고
+        // 그 자리에 섰다가, 치워지면 이어서 갑니다(enter_blocked 위의 주석 참고).
+        if (step.obstacle_hold_s > 0.0) {
+          enter_blocked(step);
+          return;
+        }
         if (retries_ < params_.goal_retry_limit) {
           ++retries_;
           RCLCPP_WARN(
@@ -922,7 +1007,7 @@ private:
       return;
     }
     if (phase_ == Phase::kDriving || phase_ == Phase::kStarting ||
-      phase_ == Phase::kHolding || phase_ == Phase::kWaiting)
+      phase_ == Phase::kHolding || phase_ == Phase::kWaiting || phase_ == Phase::kBlocked)
     {
       response->success = false;
       response->message = "Mission is already running (step " + std::to_string(step_index_) + ").";
@@ -978,6 +1063,7 @@ private:
     skip_requested_ = false;
     arrival_requested_ = false;
     prearmed_ = false;
+    blocked_ = false;
     if (goal_handle_) {
       client_->async_cancel_goal(goal_handle_);
       goal_handle_.reset();
@@ -1041,6 +1127,11 @@ private:
   rclcpp::Time hold_until_;
   rclcpp::Time wait_until_;
   rclcpp::Time starting_since_;
+  // 막힘 상태(kBlocked). blocked_since_는 "연속으로 막혀 있던" 시작 시각이라,
+  // 다시 굴러가면(피드백 속도 > unblocked_speed) 다음 막힘에서 새로 잡습니다.
+  bool blocked_{false};
+  rclcpp::Time blocked_since_;
+  rclcpp::Time blocked_retry_at_;
   int sign_streak_{0};
   std::string last_sign_;
   // 지금 실행 중인 drive 스텝에서 신호를 미리 보는 중인지.

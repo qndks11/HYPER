@@ -6,8 +6,13 @@ Panels:
       Expanded:
         - /Global Options1
         - /TF1
+        - /MPPI Transformed Plan1
+        - /MPPI Transformed Plan1/Offset1
+        - /BEV Ground Overlay (front)1
+        - /BEV Ground Overlay (front)1/Topic1
+        - /Rear Depth Cloud1
       Splitter Ratio: 0.5
-    Tree Height: 273
+    Tree Height: 195
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -21,7 +26,7 @@ Visualization Manager:
       Cell Size: 1
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
-      Enabled: true
+      Enabled: false
       Line Style:
         Line Width: 0.029999999329447746
         Value: Lines
@@ -34,69 +39,21 @@ Visualization Manager:
       Plane: XY
       Plane Cell Count: 40
       Reference Frame: <Fixed Frame>
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/TF
-      Enabled: true
+      Enabled: false
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        body_link:
-          Value: true
-        camera_link:
-          Value: true
-        front_left_steering_link:
-          Value: true
-        front_right_steering_link:
-          Value: true
-        gps_link:
-          Value: true
-        lidar_link:
-          Value: true
-        map:
-          Value: true
-        object_camera_link:
-          Value: true
-        odom:
-          Value: true
-        rear_camera_link:
-          Value: true
-        rear_left_wheel_link:
-          Value: true
-        rear_right_wheel_link:
-          Value: true
-        utm:
-          Value: true
       Marker Scale: 1
       Name: TF
       Show Arrows: false
       Show Axes: true
       Show Names: true
       Tree:
-        map:
-          odom:
-            body_link:
-              camera_link:
-                {}
-              front_left_steering_link:
-                {}
-              front_right_steering_link:
-                {}
-              gps_link:
-                {}
-              lidar_link:
-                {}
-              object_camera_link:
-                {}
-              rear_camera_link:
-                {}
-              rear_left_wheel_link:
-                {}
-              rear_right_wheel_link:
-                {}
-          utm:
-            {}
+        {}
       Update Interval: 0
-      Value: true
+      Value: false
     - Alpha: 0.800000011920929
       Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
@@ -287,7 +244,7 @@ Visualization Manager:
       Offset:
         X: 0
         Y: 0
-        Z: 0
+        Z: 0.20000000298023224
       Pose Color: 255; 85; 255
       Pose Style: None
       Radius: 0.029999999329447746
@@ -302,18 +259,17 @@ Visualization Manager:
         Value: /transformed_global_plan
       Value: true
     - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
+      Enabled: false
       Name: MPPI Trajectories
       Namespaces:
-        Candidate Trajectories: true
-        Optimal Trajectory: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /trajectories
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -430,7 +386,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /odometry/filtered_map
       Value: false
-    - Alpha: 0.8999999761581421
+    - Alpha: 0.5
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
         Max Value: 10
@@ -453,7 +409,7 @@ Visualization Manager:
       Selectable: true
       Size (Pixels): 3
       Size (m): 0.07999999821186066
-      Style: Flat Squares
+      Style: Points
       Topic:
         Depth: 1
         Durability Policy: Volatile
@@ -498,11 +454,25 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Object Detection Camera
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /perception/object_detection/annotated_image
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: map
-    Frame Rate: 30
+    Fixed Frame: odom
+    Frame Rate: 60
   Name: root
   Tools:
     - Class: rviz_default_plugins/MoveCamera
@@ -516,25 +486,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 26.99910545349121
+      Distance: 43.782676696777344
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -9.396842002868652
-        Y: -1.5625110864639282
-        Z: 0
+        X: -5.675036430358887
+        Y: -3.4326720237731934
+        Z: 9.5367431640625e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 0.384796679019928
       Target Frame: body_link
       Value: ThirdPersonFollower (rviz_default_plugins)
-      Yaw: 3.119206428527832
+      Yaw: 3.0392048358917236
     Saved:
       - Class: rviz_default_plugins/ThirdPersonFollower
         Distance: 33.20220184326172
@@ -559,12 +529,14 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1016
+  Height: 1043
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000001cb0000039efc0200000004fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000194000000c900fffffffb0000000a0056006900650077007301000001d700000204000000a400ffffff000005690000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Object Detection Camera:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd000000010000000000000246000003b9fc0200000005fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000146000000c900fffffffb0000000a005600690065007700730100000189000000ed000000a400fffffffb0000002e004f0062006a00650063007400200044006500740065006300740069006f006e002000430061006d006500720061010000027c0000017a0000002800ffffff00000534000003b900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
-  Width: 1850
-  X: 70
-  Y: 236
+  Width: 1920
+  X: 1920
+  Y: 0

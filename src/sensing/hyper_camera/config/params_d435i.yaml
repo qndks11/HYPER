@@ -1,0 +1,37 @@
+# Rear Intel RealSense D435i, driven by realsense2_camera's RealSenseNodeFactory component.
+#
+# Unlike params_elp.yaml / params_logitech.yaml (which only document their nodes' own defaults),
+# this file IS loaded -- perception.launch.py passes it to the ComposableNode. realsense2_camera
+# is an upstream apt package, so its config has to live here rather than in its own share dir.
+#
+# The node is loaded into lane_detection_container with use_intra_process_comms, which makes
+# realsense2_camera publish each colour frame through a native rclcpp publisher
+# (image_rcl_publisher) instead of image_transport -- the UniquePtr then reaches LaneDetection's
+# rear subscription by pointer, the same zero-copy path the front ELP already uses.
+/**:
+  ros__parameters:
+    # 848x480@30 matches what the sim models this camera as (see vehicle.xacro's rear camera), so
+    # the rear BEV raster has the same source resolution in sim and on the car.
+    enable_color: true
+    rgb_camera.color_profile: "848,480,30"
+
+    # Off: nothing on the real vehicle consumes rear depth yet. The nav2 local costmap's only
+    # observation source is the RPLidar's /scan (hyper_planner/config/nav2_controller.yaml), and
+    # LaneDetection's rear path takes only the colour image. Enabling these also needs TF work:
+    # realsense2_camera stamps depth/points with its own camera_rear_*_optical_frame frames, which
+    # this robot's URDF does not contain -- it has a single x-forward rear_camera_link (see
+    # vehicle.xacro). Wire that link up before turning depth on, or the cloud is untransformable.
+    enable_depth: false
+    pointcloud.enable: false
+    align_depth.enable: false
+    enable_infra1: false
+    enable_infra2: false
+
+    # The D435i's IMU is unused: /imu comes from the WitMotion WT901BLE, whose covariances are
+    # tuned for this EKF in hyper_launch's sensors.launch.py. Two publishers on /imu would feed
+    # ekf_local the same motion twice.
+    enable_gyro: false
+    enable_accel: false
+
+    # No TF from this driver -- robot_state_publisher already owns rear_camera_link from the URDF.
+    publish_tf: false

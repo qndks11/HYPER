@@ -215,10 +215,16 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 ### RealSense D435i
 
-`realsense2_camera`(rosdep으로 설치되는 apt 패키지, `sudo apt install ros-humble-realsense2-camera`)가 D435i를 구동합니다. 이 저장소에는 전용 패키지가 없고, `hyper_launch`의 `sensors.launch.py`가 `realsense2_camera`의 `rs_launch.py`를 직접 include해서 EKF용 `/imu`(`unite_imu_method:=1`로 합성된 gyro+accel)로만 사용합니다 — 객체 인식 카메라 역할은 위 Logitech C920으로 옮겨갔으므로 `enable_color:=false`, `enable_depth:=false`로 컬러/뎁스 스트림은 꺼둡니다.
+`realsense2_camera`(rosdep으로 설치되는 apt 패키지, `sudo apt install ros-humble-realsense2-camera`)가 D435i를 구동합니다. **후방 카메라**로 사용하며, 이 저장소에는 전용 패키지를 두지 않습니다 — `realsense2_camera`가 이미 컴포저블 노드(`realsense2_camera::RealSenseNodeFactory`)를 제공하므로 드라이버 코드를 새로 쓸 이유가 없고, HYPER 쪽에는 설정 yaml과 launch 배선만 있으면 됩니다. 설정은 `hyper_camera/config/params_d435i.yaml`에 있고(`hyper_camera`가 두 USB 카메라와 마찬가지로 이 카메라의 설정 배포처 역할도 합니다), `perception.launch.py`가 `lane_input_backend:=intra_process`일 때 이 컴포넌트를 전방 ELP·`lane_detection`과 **같은 `ComposableNodeContainer`에 함께 로드**합니다.
+
+`use_intra_process_comms`가 켜지면 `realsense2_camera`는 `image_transport` 대신 네이티브 rclcpp 퍼블리셔(`image_rcl_publisher`)로 전환해 프레임을 `std::unique_ptr<Image>`로 발행하므로, 전방 ELP와 **동일한 zero-copy 경로**로 `lane_detection`에 전달됩니다 (직렬화·DDS 왕복 없음).
+
+컬러 스트림만 켜 둡니다 (848x480@30 — 시뮬레이션이 모델링한 해상도와 동일). 깊이/포인트 클라우드는 실차에 아직 소비자가 없어 꺼져 있고(nav2 local costmap의 관측 소스는 RPLidar `/scan` 하나뿐), D435i 내장 IMU도 꺼 둡니다 — `/imu`는 WitMotion WT901BLE가 담당합니다. 자세한 이유와 다시 켤 때 필요한 TF 작업은 `params_d435i.yaml`의 주석 참고.
+
+단독 실행이 필요하면:
 
 ```bash
-ros2 launch realsense2_camera rs_launch.py camera_name:=camera_object camera_namespace:='' enable_gyro:=true enable_accel:=true unite_imu_method:=1 enable_color:=false enable_depth:=false
+ros2 launch hyper_launch perception.launch.py lane_input_backend:=intra_process
 ```
 
 ## 차량 제어 보드 설치 (실차)
@@ -270,7 +276,7 @@ ros2 launch hyper_launch simulation.launch.py
 ros2 launch hyper_launch real.launch.py
 ```
 
-`sim` 대신 `sensors`(D435i + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 전방 ELP와 객체 인식용 Logitech C920 둘 다 `sensors`가 아니라 `perception` 단계에서 각각 `hyper_lane_detection`/`object_detection_node`가 직접 열므로, `sensors.launch.py`에는 더 이상 포함되지 않습니다.
+`sim` 대신 `sensors`(WitMotion IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 셋(전방 ELP, 후방 D435i, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
 
 스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
 
@@ -290,13 +296,21 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 센서 | 패키지 | 최종 토픽 |
 |------|--------|-----------|
-| RealSense D435i | `realsense2_camera` | `/imu` (EKF, `enable_color`/`enable_depth`는 꺼둠) |
+| WitMotion WT901BLE | `witmotion_ros2` | `/imu` (EKF) |
 | RPLidar | `hyper_lidar` | `/scan` |
 | u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
 
-전방 ELP와 객체 인식용 Logitech C920은 둘 다 여기 포함되지 않습니다 — 대신 `perception.launch.py`가 `hyper_camera`의 드라이버 노드로 각각 엽니다: `ElpCameraPublisherNode`(`/dev/video_elp`, 자체 rectify까지 수행)는 `lane_detection_node`와 같은 `ComposableNodeContainer`에 로드되어 intra-process로 넘어가고, `logitech_camera_publisher_node`(`/dev/video_logitech`, rectify 없음)는 별도 프로세스로 떠서 일반 토픽으로 `object_detection_node`에 연결됩니다.
+카메라는 셋 다 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 전방 ELP·후방 D435i·`lane_detection`을 함께 로드하고, 객체 인식용 Logitech C920만 별도 프로세스로 띄웁니다:
 
-후방 카메라는 시뮬레이션에서 Intel RealSense D435i 제원(depth FOV 87°×58°, 848×480@30Hz, 측정 거리 0.2~10m)을 따르는 RGBD 센서로 모델링되어 컬러(`/camera_rear/image_raw`) 외에 깊이 영상(`/camera_rear/depth/image_raw`)과 포인트 클라우드(`/camera_rear/depth/points`)도 발행합니다. 다만 실차에는 아직 후방 카메라가 장착되어 있지 않고(`sensors.launch.py`의 D435i는 `/imu` 전용), `intra_process`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
+| 카메라 | 노드 | 토픽 | 전달 방식 |
+|--------|------|------|-----------|
+| 전방 ELP | `hyper_camera`의 `ElpCameraPublisherNode` (자체 rectify) | `/camera/image_raw` | intra-process (zero-copy) |
+| 후방 D435i | `realsense2_camera::RealSenseNodeFactory` (설정은 `hyper_camera/config/params_d435i.yaml`) | `/camera_rear/image_raw` | intra-process (zero-copy) |
+| 객체 인식 Logitech C920 | `hyper_camera`의 `logitech_camera_publisher_node` (rectify 없음) | `/camera_object/image_raw` | 일반 토픽 (rclpy에는 zero-copy 경로 없음) |
+
+후방 카메라는 시뮬레이션에서 D435i 제원(depth FOV 87°×58°, 848×480@30Hz, 측정 거리 0.2~10m)을 따르는 RGBD 센서로 모델링되어 컬러(`/camera_rear/image_raw`) 외에 깊이 영상(`/camera_rear/depth/image_raw`)과 포인트 클라우드(`/camera_rear/depth/points`)도 발행합니다. 실차에서는 컬러만 발행합니다 — 깊이/포인트 클라우드는 아직 소비자가 없어 꺼져 있습니다(위 D435i 절 참고).
+
+실차 후방 카메라의 BEV 지오메트리는 `hyper_lane_detection/config/bev_real.yaml`의 `bev_rear` 블록이 덮어씁니다. 시뮬레이션은 Gazebo `rgbd_camera`가 컬러·깊이에 렌즈 하나를 공유하는 탓에 87° depth FOV를 쓰지만, 실제 D435i의 RGB 렌즈는 69°라 그대로 두면 후방 거리가 전부 늘어납니다.
 
 ## 패키지 구성
 
@@ -321,9 +335,9 @@ ros2 launch hyper_launch behavior.launch.py
 |------|------|------|------|
 | `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → hyper_lane_detection (실차) | 전방 카메라 영상 (차선 인식이 구독). 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `ElpCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서는 같은 `ComposableNodeContainer` 안에서 zero-copy로 전달되므로 이 토픽이 DDS까지 나가지 않음 |
 | `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → object_detection_node (실차) | 객체 인식용 카메라 영상 (`object_detection_node`가 항상 구독). 시뮬레이션은 ros_gz_bridge, 실차 기본 경로(`object_input_backend:=usb_camera`)는 `hyper_camera`의 `logitech_camera_publisher_node`가 일반 토픽으로 발행 |
-| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 RGBD 카메라(D435i 상당)의 컬러 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `intra_process`는 후방 경로 자체가 없음) |
-| `/camera_rear/depth/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 깊이 영상 (`32FC1`, 0.2~10m) |
-| `/camera_rear/depth/points` | `sensor_msgs/PointCloud2` | Gazebo → ROS | 후방 카메라 포인트 클라우드. `frame_id`는 `rear_camera_link`이고 좌표도 그 프레임 규약(x 전방)을 그대로 따름 — optical 프레임(z 전방)이 아님 |
+| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / `realsense2_camera` → `lane_detection` (실차, intra-process) | 후방 카메라 컬러 영상. 실차에서는 D435i의 RGB 스트림(848×480@30) |
+| `/camera_rear/depth/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 깊이 영상 (`32FC1`, 0.2~10m). 시뮬레이션만 — 실차는 `enable_depth: false` |
+| `/camera_rear/depth/points` | `sensor_msgs/PointCloud2` | Gazebo → ROS | 후방 카메라 포인트 클라우드. `frame_id`는 `rear_camera_link`이고 좌표도 그 프레임 규약(x 전방)을 그대로 따름 — optical 프레임(z 전방)이 아님. 시뮬레이션만 — 실차는 `pointcloud.enable: false` |
 | `/camera_rear/camera_info` | `sensor_msgs/CameraInfo` | Gazebo → ROS | 후방 카메라 내부 파라미터 (fx=fy≈446.8, 848×480) |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
@@ -336,4 +350,4 @@ ros2 launch hyper_launch behavior.launch.py
 | `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
 | `/velocity_actual`, `/steering_angle_actual` | `std_msgs/Float64` | arduino_interface_node → | Arduino의 인코더/조향각 센서로 측정한 실제 값 (실차 전용, 닫힌 루프 피드백) |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / realsense2_camera → ROS (실차, D435i 내장 IMU) | IMU |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `witmotion_ros2` → ROS (실차, WT901BLE) | IMU |

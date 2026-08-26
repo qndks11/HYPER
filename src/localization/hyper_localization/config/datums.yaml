@@ -23,20 +23,16 @@ datums:
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
 
-  # TODO: 한라대학교 실측 원점으로 교체하세요 (예: 출발선 GPS 좌표).
-  # magnetic_declination_deg/yaw_offset_deg는 실제 IMU로 교체 시 확인 후 채우세요 (아래
-  # 값은 이전 실차 설정에서 쓰던 근사값 -- 한국(서울) 자편각과 IMU 장착 offset).
   school:
-    latitude_deg: 0.0
-    longitude_deg: 0.0
+    latitude_deg: 37.555047
+    longitude_deg: 127.045522
     heading_deg: 0.0
     magnetic_declination_deg: -8.02
     yaw_offset_deg: 90.0
 
-  # TODO: 대회 트랙 실측 원점으로 교체하세요.
   track:
-    latitude_deg: 0.0
-    longitude_deg: 0.0
+    latitude_deg: 37.2887947
+    longitude_deg: 127.1072418
     heading_deg: 0.0
     magnetic_declination_deg: -8.02
     yaw_offset_deg: 90.0

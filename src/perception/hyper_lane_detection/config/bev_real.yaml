@@ -1,4 +1,4 @@
-# Bird's-eye-view geometry for the REAL vehicle's front camera (input_backend:=intra_process).
+# Bird's-eye-view geometry for the REAL vehicle's cameras (input_backend:=intra_process).
 #
 # The node's built-in defaults describe the *simulated* cameras, so this file exists to override
 # the one thing that genuinely differs: the lens. Everything else -- the ground region and the
@@ -49,3 +49,25 @@
       far: 7.6
       half_width: 9.0
       meters_per_pixel: 0.028125
+
+    bev_rear:
+      # The rear D435i's COLOUR stream, which is the only stream LaneDetection consumes. The sim
+      # models this camera with the D435i's 87 deg DEPTH FOV, because Gazebo's rgbd_camera shares
+      # one lens between the two streams and depth won that trade (see vehicle.xacro). The real
+      # camera has no such constraint: its RGB imager is a separate 69 x 42 deg lens, so leaving
+      # the node's sim default in place here would over-state the horizontal FOV by 18 deg and
+      # stretch every rear distance this node reports.
+      #
+      # Given as an FOV rather than fx/fy/cx/cy because, unlike the ELP, this camera is not
+      # calibrated in-repo -- the D435i ships factory-calibrated and realsense2_camera delivers
+      # an already-rectified colour image, which the centered-pinhole FOV shortcut describes well
+      # enough. Add explicit intrinsics here (from ~/color/camera_info) if the rear lane fit ever
+      # needs to be tighter than that.
+      horizontal_fov: 1.2043  # [rad] 69 deg, D435i RGB
+
+      # !! UNMEASURED -- same caveat as the front camera above, and for the same reason: these are
+      # the intended rear mount, not a measurement of the built car. Measure camera_height from
+      # the GROUND, not from body_link.
+      camera_height: 1.2              # [m] optical center above the ground
+      camera_pitch: 0.2617994         # [rad] downward tilt (15 deg)
+      camera_longitudinal_offset: 0.145   # [m] behind body_link's origin

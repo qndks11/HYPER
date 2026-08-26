@@ -2,7 +2,6 @@
 
 import os
 
-import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -10,9 +9,6 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from ultralytics import YOLO
-
-
-WINDOW_NAME = 'Object Detection'
 
 
 class ObjectDetection(Node):
@@ -102,7 +98,12 @@ class ObjectDetection(Node):
             qos_profile_sensor_data
         )
 
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        # YOLO 검출 결과를 그린 프레임을 rviz에서 볼 수 있도록 발행 (imshow 대체)
+        self.annotated_image_publisher = self.create_publisher(
+            Image,
+            '/perception/object_detection/annotated_image',
+            qos_profile_sensor_data
+        )
 
         self.get_logger().info(
             'ObjectDetection started: publishing /perception/sign'
@@ -153,9 +154,9 @@ class ObjectDetection(Node):
             )
             return
 
-        self.process_frame(frame)
+        self.process_frame(frame, msg.header)
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, header):
         self.n_frames += 1
 
         # 지정된 프레임 간격마다 YOLO 추론
@@ -188,8 +189,12 @@ class ObjectDetection(Node):
             frame.shape[1]
         )
 
-        cv2.imshow(WINDOW_NAME, annotated_frame)
-        cv2.waitKey(1)
+        annotated_msg = self.bridge.cv2_to_imgmsg(
+            annotated_frame,
+            encoding='bgr8'
+        )
+        annotated_msg.header = header
+        self.annotated_image_publisher.publish(annotated_msg)
 
     def publish_middle_traffic_light(self, result, image_width):
         """
@@ -267,10 +272,6 @@ class ObjectDetection(Node):
         confidence = float(best_box.conf[0])
 
         self.publish_sign(best_sign_name)
-
-    def destroy_node(self):
-        cv2.destroyAllWindows()
-        super().destroy_node()
 
 
 def main(args=None):

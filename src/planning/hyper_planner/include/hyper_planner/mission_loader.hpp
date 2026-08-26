@@ -59,6 +59,11 @@ struct Step
   // 0보다 크면 이 스텝을 등감속(m/s^2)으로 세웁니다. mission_manager_node.cpp 머리의
   // "decel 프로파일" 참고.
   double decel_profile_a{0.0};
+  // 0보다 크면 이 스텝에서의 컨트롤러 abort를 "앞이 막혔다"로 해석합니다. 미션을 실패로
+  // 끝내는 대신 그 자리에 세우고(골을 안 보내면 워치독이 세웁니다) 주기적으로 같은 골을
+  // 다시 보내, 장애물이 치워지면 스스로 이어서 갑니다. 이 시간(초) 동안 계속 막혀 있으면
+  // 그때는 실패로 끝냅니다. 0 = 끔(그때는 goal_retry_limit이 소진되면 바로 실패).
+  double obstacle_hold_s{0.0};
   // 라벨(end_index) 뒤로 덧붙일 직선 꼬리의 길이(0 = 없음). resolve_decel_tails가 정합니다.
   // 보낸 경로 위에서 라벨이 어디인지 찾을 때도 이 값을 씁니다 -- 좌표로 최근접점을 찾으면
   // 같은 길을 되짚는 구간에서 엉뚱한 점에 붙을 수 있지만, "경로 끝에서 남은 길이"로 찾으면
@@ -339,6 +344,8 @@ private:
       ? node["cancel_on_arrival_m"].as<double>() : config_.cancel_on_arrival_m;
     step.decel_profile_a = node["decel_profile_a"]
       ? node["decel_profile_a"].as<double>() : config_.decel_profile_a;
+    step.obstacle_hold_s = node["obstacle_hold_s"]
+      ? node["obstacle_hold_s"].as<double>() : 0.0;
 
     // reverse 플래그가 녹화된 실제 주행 방향과 맞는지 확인합니다. 틀리면 RPP가
     // 엉뚱한 방향으로 당기므로 바로 알아채는 편이 낫습니다.

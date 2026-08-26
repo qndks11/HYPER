@@ -2,8 +2,8 @@
 <sdf version="1.8">
   <world name="course_world">
 
-    <physics name="1ms" type="ignored">
-      <max_step_size>0.001</max_step_size>
+    <physics name="4ms" type="ignored">
+      <max_step_size>0.004</max_step_size>
       <real_time_factor>1.0</real_time_factor>
     </physics>
 
@@ -195,6 +195,31 @@
 
     <include>
       <uri>model://driving_course</uri>
+    </include>
+
+    <!-- Acceleration path obstacles.
+         Path runs from accel_start (-36.231, 41.459) to accel_end (-39.314, -34.026)
+         (see hyper_planner/config/mission.yaml); heading along the path is -1.6116 rad. -->
+
+    <!-- Pedestrian at the midpoint of the acceleration path, facing oncoming traffic. -->
+    <include>
+      <uri>model://person_standing</uri>
+      <name>accel_pedestrian</name>
+      <static>true</static>
+      <pose>-37.77 3.72 0.0 0.0 0.0 1.5708</pose>
+    </include>
+
+    <!-- Two parked vehicles along the acceleration path (positions to be tuned). -->
+    <include>
+      <uri>model://hatchback</uri>
+      <name>accel_car_1</name>
+      <pose>-13.0460 18.0295 0.0 0.0 0.0 -2.5471</pose>
+    </include>
+
+    <include>
+      <uri>model://suv</uri>
+      <name>accel_car_2</name>
+      <pose>-14.8779 30.8502 0.0 0.0 0.0 -0.3970</pose>
     </include>
 
     <include>

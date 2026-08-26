@@ -11,12 +11,9 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
-#include "std_msgs/msg/float64_multi_array.hpp"
 
 #include "hyper_lane_detection/ground_projection.hpp"
 #include "hyper_lane_detection/input_backend.hpp"
-#include "hyper_lane_detection/lane_detector.hpp"
-#include "hyper_lane_detection/stopline_detector.hpp"
 
 class LaneDetection : public rclcpp::Node
 {
@@ -41,28 +38,25 @@ private:
    */
   void raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
 
-  /// input_backend:=ros_raw callback for the rear camera -- see raw_image_callback(). No
-  /// intra_process equivalent: there is no physical rear camera yet.
+  /// Rear-camera callback -- see raw_image_callback(). Gazebo's bridged RGBD sensor under
+  /// ros_raw; realsense2_camera's D435i component under intra_process.
   void raw_rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg);
 
   /**
    * @brief The full per-frame pipeline shared by every input backend and both cameras: bird's-eye
-   * warp, lane and stop-line detection (delegated to lane_detector_/stopline_detector_), message
-   * publish, and debug image. Factored out so the algorithm itself never depends on which backend
-   * fed the topic this frame arrived on -- `side` alone selects the publishers and fit
-   * parameters below.
+   * warp, then publish -- as a debug image and as a ground-projected point cloud. No lane or
+   * stop-line detection runs here any more; this node produces the BEV view and nothing else.
+   * Factored out so the warp never depends on which backend fed the topic this frame arrived on
+   * -- `side` alone selects the publishers and the ground projection below.
    *
    * @param image Camera frame (BGR8) -- already rectified for the front camera under
    * input_backend:=intra_process (rectified upstream by hyper_camera's ElpCameraPublisherNode);
    * passed through as-is for every other backend/camera combination (ros_raw's simulated frames
    * need no rectification at all).
    * @param header Header of the frame `image` was decoded from. Copied onto the published debug
-   * image so RViz gets the capture timestamp and the camera's own frame_id; the detection outputs
-   * (std_msgs/Float64MultiArray) carry no header of their own to stamp.
-   * @param side Which camera `image` is from -- selects the publishers and, in
-   * LaneDetector::detect_and_draw(), whether the front's straight-fit/lane-center-bias or the
-   * rear's curve-fit/parking-standoff-bias applies, and which camera's ground projection the
-   * warp uses (see projection_for()).
+   * image and cloud so RViz gets the capture timestamp.
+   * @param side Which camera `image` is from -- selects the publishers and which camera's ground
+   * projection the warp uses (see projection_for()).
    */
   void process_frame(
     const cv::Mat & image, const std_msgs::msg::Header & header, CameraSide side);
@@ -71,7 +65,8 @@ private:
    * @brief Republishes the annotated bird's-eye view as a colored PointCloud2 laid flat on the
    * ground plane, so it can be seen *in the 3D scene* (under the costmap, paths and footprint)
    * rather than only as a 2D image panel. Each surviving BEV pixel becomes one point at
-   * bev_cloud_z_m_ above the vehicle's ground plane, positioned by the same scale and origin
+   * bev_cloud_z_m_ (negative -- just *below* the ground plane, so RViz sorts it behind the
+   * costmap instead of over it), positioned by the same scale and origin
    * (`projection`) the lane/stop-line distance outputs already use -- so if this overlay lands
    * visibly wrong against the costmap, that same error is in the published offsets/distances.
    * That is exactly how the previous scale error surfaced: the overlay read about a quarter too
@@ -81,8 +76,7 @@ private:
    * it could not sample from the source frame at zero, and those are "no data", not dark ground --
    * publishing them would paint an opaque black rectangle over the costmap underneath.
    *
-   * @param view Annotated BEV image (BGR8), *before* the text panel is appended -- the text strip
-   * is a readout, not ground, and has no place on the map.
+   * @param view The warped BEV image (BGR8).
    * @param header Header of the source frame; the stamp is kept, the frame_id replaced with
    * bev_cloud_frame_id_.
    * @param projection The camera's ground projection -- supplies the metric scale and the
@@ -136,28 +130,19 @@ private:
   hyper_lane_detection::InputBackend input_backend_{
     hyper_lane_detection::InputBackend::kIntraProcess};
 
-  hyper_lane_detection::LaneDetector lane_detector_;
-  hyper_lane_detection::StoplineDetector stopline_detector_;
-
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_image_subscriber_;
-
-  // input_backend:=ros_raw only -- no physical rear camera exists yet.
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_rear_image_subscriber_;
 
-  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lane_center_publisher_;
-  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr stopline_publisher_;
-  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_lane_center_publisher_;
-  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr rear_stopline_publisher_;
-
-  /// The annotated bird's-eye debug view, as a sensor_msgs/Image. This is the node's only debug
+  /// The bird's-eye debug view, as a sensor_msgs/Image. This is the node's only debug
   /// output -- it opens no OpenCV window, so the view is watchable in RViz or over the network
   /// and the node never depends on a local X display.
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr bev_image_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr rear_bev_image_publisher_;
 
   /// The same view again, ground-projected -- see publish_bev_cloud(). Separate from the image
-  /// publishers because the two answer different questions: the image is "what does the detector
-  /// see", the cloud is "where does that sit relative to the costmap and the planned path".
+  /// publishers because the two answer different questions: the image is "what does the camera
+  /// see from above", the cloud is "where does that sit relative to the costmap and the planned
+  /// path".
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr bev_cloud_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr rear_bev_cloud_publisher_;
 
@@ -174,9 +159,12 @@ private:
   /// a quarter of the bandwidth.
   int bev_cloud_stride_{2};
 
-  /// Height [m] to float the overlay above the ground plane. Nonzero purely to stop it z-fighting
-  /// with the costmap, which RViz also draws at z = 0.
-  double bev_cloud_z_m_{0.02};
+  /// Offset [m] along z, in bev_cloud_frame_id_, to sink the overlay below the ground plane.
+  /// Nonzero purely to stop it z-fighting with the costmap, which RViz also draws at z = 0; it is
+  /// *negative* so RViz sorts the overlay behind the costmap, the paths and the footprint rather
+  /// than painting over them. body_link is itself at z = 0 here -- both EKFs run two_d_mode --
+  /// so this is the overlay's height above the costmap plane directly.
+  double bev_cloud_z_m_{-0.15};
 
   /// Each camera's configured BEV geometry, and the projection built from it once a frame size
   /// is known. See projection_for().

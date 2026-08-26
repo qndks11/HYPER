@@ -35,7 +35,7 @@ controller_server:
 
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker", "precise_goal_checker"]
-    controller_plugins: ["FollowPath", "ReverseFollowPath"]
+    controller_plugins: ["FollowPath", "ForwardFollowPath", "ReverseFollowPath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -73,8 +73,12 @@ controller_server:
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
 
-      # 예측 구간: 56 * 0.05 = 2.8초 = 6.0 m/s에서 16.8 m. 슬라럼 한 세트를 통째로
-      # 내다볼 정도는 됩니다. model_dt는 controller_frequency(20 Hz)와 맞춥니다.
+      # 예측 구간: 56 * 0.05 = 2.8초 = 2.22 m/s에서 6.2 m. model_dt는
+      # controller_frequency(20 Hz)와 맞춥니다.
+      # vx_max를 6.0 -> 2.22로 내리면서 지평선도 16.8 m -> 6.2 m로 줄었지만, 이건 오히려
+      # 정상입니다: local costmap의 obstacle_max_range가 6.0 m라 그보다 먼 구간은 어차피
+      # 빈 공간으로 평가됐습니다(6.0 m/s 시절에는 지평선의 2/3가 안 보이는 영역이었습니다).
+      # 이제 지평선(6.2 m)과 시야(6.0 m)가 거의 맞습니다.
       time_steps: 56
       model_dt: 0.05
       batch_size: 1500
@@ -88,7 +92,14 @@ controller_server:
       #
       # nav2 기본값(cost_weight 5, gamma 0.015)은 vx_max 0.5인 차동구동 로봇 기준이라
       # 이 식으로 0.67 m/s가 나옵니다 -- 실제로 vx_max를 2.5로 올려도 0.86 m/s로 기어갔습니다.
-      # 현재값(8 * 0.05 * 0.42^2 / 0.010)은 7.1 m/s로, vx_max 6.0에 여유 있게 포화합니다.
+      # 현재값(8 * 0.05 * 0.42^2 / 0.010)은 7.1 m/s입니다.
+      #
+      # vx_max를 2.5로 내린 뒤에도 이 값들은 일부러 그대로 둡니다. 순항 목표(7.1)가 상한
+      # (2.5)보다 한참 위라 MPPI는 직선에서 늘 상한에 붙어 달립니다 -- 위에 적힌 "vx_max
+      # 2.5에서 0.86 m/s로 기어가던" 증상이 바로 이 목표치가 낮아서 생긴 것이므로, 상한을
+      # 내렸다고 gamma를 같이 올리면 그 증상이 그대로 돌아옵니다.
+      # gamma는 vx뿐 아니라 wz의 제어비용도 같이 정합니다. 건드리면 공들여 맞춘 코너 컷/
+      # 회피 균형(PathAlign 14.0 vs PathFollow 8.0)까지 흔들리므로 손대지 마세요.
       # (이전에는 cost_weight 36 / vx_std 0.2로 7.2 m/s였습니다 -- 순항 속도는 그대로 두고
       #  코너 컷을 만드는 쪽 항만 줄인 것입니다.)
       # 즉 직선에서는 vx_max로 달리고, 곡선/장애물에서는 critic들이 알아서 감속시킵니다.
@@ -104,15 +115,29 @@ controller_server:
 
       # vx_min < 0 = 후진 허용. 전방이 막혔을 때 MPPI가 후진 궤적을 샘플링할 수 있습니다.
       # 후진이 습관이 되지 않도록 PreferForwardCritic(가중치 5)을 켠 채로 둡니다.
-      # wz_max는 최고속에서의 최소 회전 반경 제약(6.0 / 1.74 = 3.45 rad/s)보다 살짝 위로
+      # wz_max는 최고속에서의 최소 회전 반경 제약(2.22 / 1.74 = 1.28 rad/s)보다 살짝 위로
       # 두고, 실제 제한은 아래 AckermannConstraints가 매 스텝 걸어줍니다.
-      vx_max: 6.0
-      vx_min: -0.5
-      wz_max: 3.7
+      #
+      # 6.0 -> 2.5 -> 2.22(= 8 km/h 상한). 6 m/s(= 21.6 km/h)에서는 obstacle_max_range(6.0 m)가 1.0초치 시야밖에
+      # 안 됐고, 거기서 센서/costmap/컨트롤러 지연 약 0.3초를 빼면 실제 반응 거리가 4 m
+      # 남짓이었습니다. 2.22 m/s면 같은 6 m가 2.7초가 되어 회피 기동을 짤 여유가 생깁니다.
+      # 언덕(hill) 때문에 obstacle_max_range를 못 올리는 동안의 대응입니다.
+      #
+      # 이 값을 바꾸면 mission_manager의 controller_vx_max도 반드시 같이 바꾸세요
+      # (launch/mission.launch.py, src/mission_manager_parameters.yaml). 다르면
+      # setSpeedLimit의 ratio가 1을 넘어 vx_max를 오히려 올려 버립니다.
+      vx_max: 2.22
+      # 전진 상한과 같은 크기로 둡니다. 후진 궤적의 탐색 폭이 너무 좁으면 한 지평선
+      # (2.8초) 안에 장애물을 벗어날 만큼 물러나지 못해, 후진해도 여전히 충돌 궤적으로
+      # 평가됩니다.
+      vx_min: -2.22
+      wz_max: 1.6
       # vx_std는 아래 gamma 주석의 순항 속도 식에 제곱으로 들어갑니다. PathFollowCritic의
       # 가중치를 코너 컷 때문에 36 -> 8로 낮췄으므로(4.5배), 순항 속도를 유지하려고 여기서
-      # 0.2 -> 0.42로 올렸습니다(제곱하면 4.4배). vx_max 6.0에 비하면 여전히 작은 탐색
-      # 폭이라(7%) 스로틀이 거칠어지지는 않습니다.
+      # 0.2 -> 0.42로 올렸습니다(제곱하면 4.4배). vx_max 2.22에 비하면 19%로, 감속이
+      # 필요할 때 아래쪽을 탐색하기에 충분하면서 스로틀이 거칠어지지는 않는 폭입니다.
+      # (decel_profile_min_speed 0.4보다 커야 프로파일 하한에서 샘플이 계속 잘리지
+      #  않습니다 -- mission_manager_parameters.yaml의 그 항목 주석 참고)
       vx_std: 0.42
       wz_std: 0.4
       # 아커만은 비홀로노믹이라 vy는 모델에서 무시되지만 파라미터는 선언해야 합니다.
@@ -152,10 +177,13 @@ controller_server:
         cost_power: 1
         cost_weight: 3.0
         threshold_to_consider: 0.5
+      # 5.0 -> 2.0. 이 값이 크면 ObstaclesCritic이 후진 탈출 궤적을 골라도 여기서
+      # 벌점이 이겨서 vx_min(후진 허용)이 사실상 死문자가 됩니다. 막다른 곳에서
+      # 빠져나오려면 후진이 실제로 선택될 수 있어야 합니다.
       PreferForwardCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
+        cost_weight: 2.0
         threshold_to_consider: 0.5
       # 회피 강도를 정하는 critic. 옆으로 잘 안 비키면 repulsion_weight를,
       # 장애물에 너무 붙으면 collision_margin_distance를 올리세요.
@@ -164,11 +192,14 @@ controller_server:
       ObstaclesCritic:
         enabled: true
         cost_power: 1
-        repulsion_weight: 1.5
+        repulsion_weight: 3.0
         critical_weight: 20.0
-        consider_footprint: false
+        # true: 내접원(반폭 0.405) 대신 실제 직사각형 footprint(반전장 0.67 x 반전폭 0.405)로
+        # 충돌을 판정합니다. 차체가 길쭉해서(전장>>전폭) 내접원 판정은 앞뒤 범퍼가 실제보다
+        # 훨씬 가까이 붙어도 "안전"으로 오판할 수 있었습니다.
+        consider_footprint: true
         collision_cost: 10000.0
-        collision_margin_distance: 0.15
+        collision_margin_distance: 0.35
         near_goal_distance: 0.5
       # 경로에 붙어 있으려는 힘. 이 값이 크면 장애물을 만나도 안 비킵니다.
       # max_path_occupancy_ratio: 참조 경로의 5% 이상이 장애물에 걸리면 이 critic을
@@ -229,6 +260,63 @@ controller_server:
         # PreferForwardCritic이 담당합니다.
         forward_preference: false
 
+    # 전진 RPP(mission.yaml에서 controller: ForwardFollowPath).
+    #
+    # 쓰는 이유: MPPI는 장애물을 만나면 *비켜서* 지나갑니다. 가속 구간처럼 장애물 앞에서
+    # 반드시 서야 하는 세그먼트에서는 그 회피가 곧 실격입니다. RPP는 준 경로를 벗어나지
+    # 않고 use_collision_detection이 carrot까지의 궤적에서 충돌을 보면 제어를 포기하므로
+    # (controller_server가 0 속도를 내고 failure_tolerance 뒤 abort) 그 자리에 섭니다.
+    #
+    # 그 abort를 미션 실패로 만들지 않으려면 해당 스텝에 mission.yaml의 obstacle_hold_s를
+    # 켜세요. 켜 두면 mission_manager가 그 자리에 세워 두고 1초마다 같은 골을 다시 보내며,
+    # 장애물이 치워지면 스스로 이어 갑니다(안 켜면 goal_retry_limit 2가 소진되는 대로
+    # 미션이 실패합니다 -- 대략 failure_tolerance 1.0s x 3 = 3초).
+    #
+    # 정지 시점의 한계: 장애물을 볼 수 있는 거리는 local costmap의 obstacle_max_range(6 m)가
+    # 정합니다. 2.22 m/s로 달리다 6 m 앞에서 처음 보면 0.41 m/s^2이면 서므로 여유가 큽니다
+    # (6 m/s 시절에는 3 m/s^2이 필요해 빠듯했습니다). 실차에서는 꼭 재검증하세요.
+    #
+    # 이 구간의 감속은 전적으로 mission_manager의 decel 프로파일(/speed_limit)이 냅니다.
+    # RPP 자신의 approach 감속은 경로 끝(라벨보다 12 m 뒤) 기준이라 라벨에서는 안 걸립니다.
+    # 따라서 이 컨트롤러를 쓰는 스텝에는 decel_profile_a + cancel_on_arrival_m가 필수입니다.
+    ForwardFollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      # MPPI vx_max와 같은 순항 속도. 실제 상한은 /speed_limit이 더 낮게 깎습니다.
+      desired_linear_vel: 2.22
+      # 속도 비례 lookahead (2.22 m/s에서 1.0초 = 2.22 m, min 1.0 / max 6.0 사이).
+      use_velocity_scaled_lookahead_dist: true
+      lookahead_time: 1.0
+      lookahead_dist: 2.0
+      min_lookahead_dist: 1.0
+      max_lookahead_dist: 6.0
+      use_interpolation: true
+      transform_tolerance: 0.2
+      min_approach_linear_velocity: 0.15
+      approach_velocity_scaling_dist: 1.0
+      # 이 컨트롤러의 존재 이유입니다. carrot까지 이 시간 안에 충돌이 예상되면 제어를
+      # 포기합니다. 2.22 m/s에서 1.0초 = 2.22 m입니다.
+      # 이 값을 더 키워도 소용없습니다 -- 이름 그대로 검사 구간이 carrot에서 잘리는데,
+      # carrot도 lookahead_time 1.0초로 같은 2.22 m이기 때문입니다. 더 멀리 보려면
+      # lookahead_time을 함께 키워야 하고, 그러면 조향이 둔해집니다.
+      # 제동거리 기준으로는 충분합니다: 2.22 m/s, decel_profile_a 2.0 = 1.23 m.
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 1.74
+      regulated_linear_scaling_min_speed: 0.25
+      # 켜면 inflation 안에 들어가는 것만으로 기어갑니다(가속 구간에서는 손해).
+      use_cost_regulated_linear_velocity_scaling: false
+      cost_scaling_dist: 0.3
+      cost_scaling_gain: 1.0
+      inflation_cost_scaling_factor: 3.0
+      # 아커만: 제자리 회전 금지, 후진 금지(전진 전용).
+      use_rotate_to_heading: false
+      rotate_to_heading_angular_vel: 0.8
+      rotate_to_heading_min_angle: 0.785
+      max_angular_accel: 3.2
+      allow_reversing: false
+      max_robot_pose_search_dist: 10.0
+
     # 후진 주차 전용 컨트롤러(mission.yaml에서 controller: ReverseFollowPath).
     #
     # MPPI가 아니라 RPP인 이유: MPPI는 vx_min으로 후진을 "허용"할 뿐이고 후진을 벌점화하는
@@ -244,7 +332,7 @@ controller_server:
     #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
     ReverseFollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 2.5
+      desired_linear_vel: 2.22
       lookahead_dist: 1.0
       min_lookahead_dist: 0.6
       max_lookahead_dist: 1.2
@@ -303,15 +391,26 @@ local_costmap:
           data_type: "LaserScan"
           marking: true
           clearing: true
+          # 이게 없으면(기본 false) 아무것도 맞히지 못한 빔의 inf 값이 laser_geometry에서
+          # 통째로 버려집니다. 버려진 빔은 레이캐스팅을 못 하므로, 치워진 장애물/지나간
+          # 차량/언덕 오탐이 rolling window(20 m) 밖으로 밀려날 때까지 costmap에 영원히
+          # 남습니다("라이다는 아무것도 안 보는데 장애물이 안 지워지는" 증상).
+          # true면 inf를 range_max - eps(라이다 range.max 12.0 m)로 바꿔 정상 빔처럼
+          # 레이캐스팅합니다. 12 m는 obstacle_max_range(6.0)보다 멀어 마킹되지 않고,
+          # raytrace_max_range(20.0) 안이라 빔 전 구간이 지워집니다.
+          # 주의: inf만 처리합니다. 실차 드라이버가 무반사를 0.0으로 내보내면 그 빔은
+          # 여전히 버려지므로, 실차에서는 `ros2 topic echo /scan`으로 확인하세요.
+          inf_is_valid: true
           max_obstacle_height: 2.0
           # 15.0 -> 6.0. 언덕(hill) 대책 stopgap입니다. 수평 라이다(지면 위 약 0.8 m)는
           # 노면이 오목하게 휘는 구간(오르막 아랫부분/내리막 아랫부분)에서 노면 자체를
           # 때리는데, 그 지점이 대략 7~8 m 앞입니다. tf에 피치가 없어(ekf_local two_d_mode)
           # 높이로는 걸러낼 수 없으므로 마킹 거리를 그 앞에서 잘랐습니다.
-          # 6.0 m/s에서 6 m면 약 1.0초 전에 장애물을 보게 됩니다(vx_max 2.5 -> 4.0 -> 6.0으로
-          # 올릴 때마다 2.4초 -> 1.5초 -> 1.0초로 줄었습니다). 이 정도면 급제동 여유가 빠듯하니
-          # 실차 정지거리로 꼭 재검증하세요. 언덕 문제를 제대로 해결하면(피치 반영 or 구간
-          # 지오펜스) obstacle_max_range를 다시 올리세요.
+          # vx_max가 2.22이므로 6 m는 약 2.7초치 시야입니다
+          # (vx_max 2.5 -> 4.0 -> 6.0으로 올릴 때마다 2.4초 -> 1.5초 -> 1.0초로 줄었고,
+          #  6.0에서는 회피 기동을 짤 여유가 없었습니다). 언덕 문제를 제대로 해결하면
+          # (피치 반영 or 구간 지오펜스) obstacle_max_range를 다시 올리고, 그때 vx_max도
+          # 같이 올릴지 판단하세요 -- 이 둘은 항상 초 단위 시야로 함께 봐야 합니다.
           obstacle_max_range: 6.0
           obstacle_min_range: 0.0
           raytrace_max_range: 20.0
@@ -320,7 +419,7 @@ local_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
         # 차폭 반(0.405)에 여유를 더한 값
-        inflation_radius: 0.7
+        inflation_radius: 1.0
       always_send_full_costmap: true
 
 lifecycle_manager_control:
@@ -335,9 +434,9 @@ cmd_vel_to_ackermann:
     use_sim_time: true
     wheelbase: 1.005
     max_steering_angle: 0.5235988
-    # MPPI FollowPath.vx_max(6.0)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
+    # MPPI FollowPath.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
-    max_velocity: 7.0
+    max_velocity: 3.0
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.

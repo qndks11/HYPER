@@ -21,6 +21,12 @@ def generate_launch_description():
         DeclareLaunchArgument('R', default_value='0.00', description='Initial Roll'),
         DeclareLaunchArgument('P', default_value='0.00', description='Initial Pitch'),
         DeclareLaunchArgument('Y', default_value='1.64', description='Initial Yaw'),
+        DeclareLaunchArgument(
+            'headless', default_value='false',
+            description='Run Gazebo without the 3D GUI window (sensors still render offscreen)'),
+        DeclareLaunchArgument(
+            'software_rendering', default_value='false',
+            description='Force llvmpipe software rendering. Only needed on WSL2.'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
@@ -34,6 +40,8 @@ def generate_launch_description():
                 'R': LaunchConfiguration('R'),
                 'P': LaunchConfiguration('P'),
                 'Y': LaunchConfiguration('Y'),
+                'headless': LaunchConfiguration('headless'),
+                'software_rendering': LaunchConfiguration('software_rendering'),
             }.items(),
         ),
     ])

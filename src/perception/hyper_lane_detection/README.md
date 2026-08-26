@@ -40,7 +40,7 @@ XYZRGB)를 씁니다. BEV 픽셀 하나가 점 하나이고, 위치는 아래 �
 | --- | --- | --- |
 | `bev_cloud_frame_id` | `body_link` | 오버레이를 발행할 차량 프레임. 이 프레임 원점이 BEV 안 어디에 오는지는 `GroundProjection::origin_px()`가 계산합니다(보통 마지막 행보다 **아래** — 전방 카메라는 자기 발밑 지면을 못 보기 때문). 이 스택의 base 프레임 이름은 `base_link`가 아니라 `body_link`입니다(ekf `base_link_frame`, nav2 `robot_base_frame`). |
 | `bev_cloud_stride` | `2` | 몇 픽셀마다 점을 만들지. 1이면 전체(640x260 BEV 기준 카메라당 16.6만 점/프레임). |
-| `bev_cloud_z_m` | `0.02` | 지면에서 띄울 높이. RViz가 코스트맵도 z=0에 그리므로 z-fighting 방지용입니다. |
+| `bev_cloud_z_m` | `-0.15` | 지면 기준 z 오프셋. RViz가 코스트맵도 z=0에 그리므로 z-fighting 방지용이며, **음수**라서 오버레이가 코스트맵·경로·footprint 뒤로 깔립니다(양수면 그 위를 덮어버림). 두 EKF 모두 `two_d_mode`라 `body_link` 자체가 z=0이므로 이 값이 곧 코스트맵 평면과의 높이차입니다. 예전 `-0.02`는 너무 얇았습니다 — 코스트맵도 오버레이도 반투명(alpha 0.4 / 0.9)이라 깊이를 기록하지 않고 카메라 거리순으로만 정렬되므로, 2 cm 차이로는 시점에 따라 오버레이가 위로 올라왔습니다. |
 
 ## 지면 투영 (IPM) 파라미터
 

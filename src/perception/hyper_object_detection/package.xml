@@ -16,6 +16,12 @@
        reads its bev_real.yaml from that package's share directory. -->
   <exec_depend>hyper_lane_detection</exec_depend>
 
+  <!-- lane_input_backend:=intra_process loads hyper_camera's ELP publisher and
+       realsense2_camera's rear D435i component into this launch file's container, the latter
+       configured by hyper_camera's params_d435i.yaml. -->
+  <exec_depend>hyper_camera</exec_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

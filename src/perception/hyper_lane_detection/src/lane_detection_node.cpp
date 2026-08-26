@@ -18,13 +18,6 @@ using hyper_lane_detection::to_string;
 
 namespace
 {
-// Height [px] of the black strip appended below the BEV image to hold the overlay text. Fixed
-// regardless of the incoming frame size so the 8 possible lines (6 top-anchored, 2 bottom-
-// anchored) always have enough pitch between them -- the overlap this fixes came from anchoring
-// text directly onto the BEV image, whose height depends on the configured ground region and can
-// end up shorter than the text block itself.
-constexpr int kTextPanelHeight = 360;
-
 // How often to repeat the "this camera has no usable ground projection" complaint [ms]. A
 // misconfigured region fails on every single frame, and at camera rate that would bury the log.
 constexpr int kProjectionErrorThrottleMs = 5000;
@@ -47,12 +40,7 @@ constexpr int kProjectionErrorThrottleMs = 5000;
 // wheel_radius changes this constant too.
 //
 // The ground region reproduces roughly the coverage the old hand-picked ROI happened to have
-// (about 0.3..7.6 m ahead, +/-9 m across) at about its true pixel scale, deliberately: several
-// detector constants downstream are still denominated in pixels (LaneDetector's
-// kChainStepRadius, StoplineDetector's kMinStoplineAreaPx), so preserving the scale keeps their
-// physical meaning while the geometry becomes correct. Narrowing half_width_m to something like
-// 3 m would put far more pixels on the lane actually being followed, but it is a re-tuning of
-// those constants, not part of fixing the scale.
+// (about 0.3..7.6 m ahead, +/-9 m across) at about its true pixel scale.
 constexpr double kSimFrontHorizontalFovRad = 2.67;
 constexpr double kSimFrontCameraHeightM = 1.5;
 constexpr double kSimFrontCameraPitchRad = 0.2617994;
@@ -120,15 +108,12 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
 
   bev_cloud_frame_id_ = declare_parameter<std::string>("bev_cloud_frame_id", "body_link");
   bev_cloud_stride_ = std::max(1, static_cast<int>(declare_parameter<int>("bev_cloud_stride", 2)));
-  bev_cloud_z_m_ = declare_parameter<double>("bev_cloud_z_m", 0.02);
-
-  lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
-  stopline_publisher_ =
-    create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/detection", 10);
-  rear_lane_center_publisher_ =
-    create_publisher<std_msgs::msg::Float64MultiArray>("/lane/rear_center", 10);
-  rear_stopline_publisher_ =
-    create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/rear_detection", 10);
+  // -0.02 -> -0.15. 2 cm는 RViz가 코스트맵(alpha 0.4)과 이 오버레이(alpha 0.9)를 둘 다
+  // 반투명으로 -- 즉 깊이 기록 없이 카메라 거리순으로 -- 그리기에는 너무 얇아서, 시점에
+  // 따라 오버레이가 코스트맵 위로 올라오곤 했습니다. 15 cm면 어느 시점에서도 정렬이
+  // 뒤집히지 않습니다. 지면보다 아래일 뿐 BEV의 x/y 기하는 그대로이므로 거리 해석에는
+  // 영향이 없습니다.
+  bev_cloud_z_m_ = declare_parameter<double>("bev_cloud_z_m", -0.15);
 
   // Depth 1 + best-effort (the usual image-stream profile): a debug view is only ever worth
   // showing at its newest frame, and a slow/absent viewer (RViz on another machine) must never
@@ -149,18 +134,16 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
     "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
 
-  // Rear camera: only ros_raw ever has one -- intra_process (real vehicle) has no rear camera
-  // yet, so skip both the subscription and the debug topic that would otherwise never publish.
-  if (input_backend_ == InputBackend::kRosRaw) {
-    raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-      "/rear_image_raw", 10,
-      std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
+  // Rear camera: same deal as the front one under either backend -- Gazebo's bridged RGBD sensor
+  // under ros_raw, realsense2_camera's D435i component sharing this container under intra_process.
+  raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
+    "/rear_image_raw", 10,
+    std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
 
-    rear_bev_image_publisher_ =
-      create_publisher<sensor_msgs::msg::Image>("/lane/rear_bev/image_raw", debug_image_qos);
-    rear_bev_cloud_publisher_ =
-      create_publisher<sensor_msgs::msg::PointCloud2>("/lane/rear_bev/points", debug_image_qos);
-  }
+  rear_bev_image_publisher_ =
+    create_publisher<sensor_msgs::msg::Image>("/lane/rear_bev/image_raw", debug_image_qos);
+  rear_bev_cloud_publisher_ =
+    create_publisher<sensor_msgs::msg::PointCloud2>("/lane/rear_bev/points", debug_image_qos);
 
   RCLCPP_INFO(
     get_logger(), "LaneDetection started (input_backend=%s, bev_cloud_frame_id=%s)",
@@ -245,10 +228,9 @@ void LaneDetection::publish_bev_cloud(
     return;
   }
 
-  // Same scale and same origin the detectors measure their offsets/distances against, so the
-  // overlay and the numbers can never disagree. Both now come from the projection that built the
-  // warp, so the isotropy this arithmetic assumes is a property of the raster rather than a hope:
-  // GroundProjection lays the output out in meters before any pixel is sampled.
+  // Same scale and same origin that built the warp, so the isotropy this arithmetic assumes is a
+  // property of the raster rather than a hope: GroundProjection lays the output out in meters
+  // before any pixel is sampled.
   const double meters_per_pixel = projection.meters_per_pixel();
   const cv::Point2d origin = projection.origin_px();
   // Rear camera: the top of its BEV is *behind* the vehicle, and image-left is the vehicle's
@@ -329,13 +311,11 @@ void LaneDetection::process_frame(
   const cv::Mat & image, const std_msgs::msg::Header & header, CameraSide side)
 {
   const bool is_rear = side == CameraSide::kRear;
-  const auto & lane_publisher = is_rear ? rear_lane_center_publisher_ : lane_center_publisher_;
-  const auto & stopline_publisher = is_rear ? rear_stopline_publisher_ : stopline_publisher_;
   const auto & bev_image_publisher = is_rear ? rear_bev_image_publisher_ : bev_image_publisher_;
 
-  // The warp is now this camera's own ground projection rather than a set of ROI corner ratios
-  // picked per camera model: the same code path serves the sim and the real vehicle, and the
-  // difference between them lives entirely in parameters.
+  // The warp is this camera's own ground projection rather than a set of ROI corner ratios picked
+  // per camera model: the same code path serves the sim and the real vehicle, and the difference
+  // between them lives entirely in parameters.
   const GroundProjection * projection = projection_for(side, image.size());
   if (!projection) {
     return;  // reason already logged (throttled) by projection_for()
@@ -343,56 +323,17 @@ void LaneDetection::process_frame(
 
   cv::Mat warped;
   cv::warpPerspective(image, warped, projection->homography(), projection->bev_size());
-  const cv::Point2d origin = projection->origin_px();
-  const double meters_per_pixel = projection->meters_per_pixel();
 
-  const cv::Mat yellow = lane_detector_.yellow_mask(warped);
-  const cv::Mat white = stopline_detector_.white_mask(warped);
+  publish_bev_cloud(warped, header, *projection, is_rear);
 
-  // Single shared debug view: both masks are highlighted first (different colors so the two
-  // don't read as one blob), before either detector's annotations are drawn on top -- so a mask
-  // fill never overwrites an annotation drawn earlier.
-  cv::Mat view = warped.clone();
-  view.setTo(cv::Scalar(0, 255, 0), yellow);
-  view.setTo(cv::Scalar(180, 180, 180), white);
-
-  const auto lane_result =
-    lane_detector_.detect_and_draw(yellow, origin, meters_per_pixel, is_rear, view);
-  std_msgs::msg::Float64MultiArray lane_msg;
-  lane_msg.data = {
-    lane_result.left.steering_angle_deg, lane_result.left.offset_m,
-    lane_result.left.valid ? 1.0 : 0.0, lane_result.right.steering_angle_deg,
-    lane_result.right.offset_m, lane_result.right.valid ? 1.0 : 0.0};
-  lane_publisher->publish(lane_msg);
-
-  const auto stopline_result =
-    stopline_detector_.detect_and_draw(white, origin, meters_per_pixel, view);
-  std_msgs::msg::Float64MultiArray stopline_msg;
-  stopline_msg.data = {stopline_result.distance_m, stopline_result.valid ? 1.0 : 0.0};
-  stopline_publisher->publish(stopline_msg);
-
-  // Ground overlay first: it must not carry the text panel appended just below, which is a
-  // readout rather than anything that exists on the ground.
-  publish_bev_cloud(view, header, *projection, is_rear);
-
-  // Dedicated black strip below the BEV image for all overlay text, sized independently of the
-  // BEV image's own (config-dependent) height so the lines below never run out of room.
-  cv::copyMakeBorder(
-    view, view, 0, kTextPanelHeight, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
-  const int panel_top = view.rows - kTextPanelHeight;
-
-  lane_detector_.draw_text(lane_result, view, panel_top);
-  stopline_detector_.draw_text(stopline_result, view, panel_top);
-
-  // The annotated view's only sink: a topic, read by RViz's Image display (or rqt_image_view).
-  // This node deliberately opens no cv::imshow window of its own -- a GUI window pins the node to
-  // a local X display, which the headless vehicle doesn't have, and makes the whole node crash on
-  // toolkit mismatches that have nothing to do with lane detection. Published under the source
-  // frame's own header so a viewer can line it up with the rest of the stack; skipped entirely
-  // when nothing has subscribed.
+  // The BEV view's only sink: a topic, read by RViz's Image display (or rqt_image_view). This
+  // node deliberately opens no cv::imshow window of its own -- a GUI window pins the node to a
+  // local X display, which the headless vehicle doesn't have. Published under the source frame's
+  // own header so a viewer can line it up with the rest of the stack; skipped entirely when
+  // nothing has subscribed.
   if (bev_image_publisher && bev_image_publisher->get_subscription_count() > 0) {
     bev_image_publisher->publish(
-      *cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, view).toImageMsg());
+      *cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, warped).toImageMsg());
   }
 }
 

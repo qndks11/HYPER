@@ -72,7 +72,7 @@ def generate_launch_description():
         # nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
         # ratio = speed_limit / vx_max를 곱하는 방식이라, 더 큰 값을 보내면 vx_max를
         # 오히려 올려 버립니다.
-        DeclareLaunchArgument('controller_vx_max', default_value='6.0'),
+        DeclareLaunchArgument('controller_vx_max', default_value='2.22'),
         # controller_server의 speed_limit_topic과 같아야 합니다.
         DeclareLaunchArgument('speed_limit_topic', default_value='/speed_limit'),
         # 프로파일 주행 중 tf가 이 시간 동안 끊기면 골을 취소해 차를 세웁니다.
