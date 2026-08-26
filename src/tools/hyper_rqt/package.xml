@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hyper_rqt</name>
+  <version>0.0.0</version>
+  <description>
+    rqt 패널 "HYPER Panel" -- 스택을 운전할 때 실제로 부르는 서비스만 버튼으로
+    모아 둔 GUI입니다. rqt_service_caller는 실행 중인 모든 서비스를 드롭다운에
+    쏟아내는데(노드마다 파라미터 서비스 6개 + Gazebo/RViz 내부 서비스), 정작
+    사람이 부르는 것은 mission_manager 4개와 model_service 2개뿐입니다.
+
+    버튼 목록은 코드가 아니라 config/panel.yaml에 있습니다. 서비스를 새로
+    만들면 YAML에 몇 줄 적는 것으로 버튼이 생깁니다(재빌드는 필요).
+  </description>
+  <maintainer email="qndks11@gmail.com">Kim Hyeongjun</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>rqt_gui</depend>
+  <depend>rqt_gui_py</depend>
+  <depend>python_qt_binding</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>rosidl_runtime_py</depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+    <rqt_gui plugin="${prefix}/plugin.xml"/>
+  </export>
+</package>

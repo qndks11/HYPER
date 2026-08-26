@@ -16,7 +16,6 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
 - `config/nav2_controller.yaml`: nav2 `controller_server`(= `follow_path` 액션 서버) 파라미터입니다.
 - `src/mission_manager_parameters.yaml`: `mission_manager_node`의 파라미터 정의
   (generate_parameter_library가 여기서 헤더를 생성합니다). 파라미터의 의미는 이 파일이 원본입니다.
-- `config/parking_params.yaml`: 예전 `controller_with_parking_node` 계열 파라미터입니다.
 
 ## 빌드
 

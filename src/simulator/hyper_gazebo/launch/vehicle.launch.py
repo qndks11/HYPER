@@ -297,6 +297,13 @@ def generate_launch_description():
         output='screen'
     )
 
+    # 차량을 mission.yaml의 라벨 위치로 옮기는 테스트용 서비스 (sim 전용).
+    teleport_service_node = Node(
+        package='hyper_gazebo',
+        executable='teleport_service.py',
+        output='screen'
+    )
+
     joint_state, forward_velocity, forward_position = start_vehicle_control()
 
     vehicle_controller_node = Node(
@@ -362,6 +369,7 @@ def generate_launch_description():
         gz_bridge_node,
         camera_compressed_republisher_node,
         model_service_node,
+        teleport_service_node,
     ])
 
     return launch_description

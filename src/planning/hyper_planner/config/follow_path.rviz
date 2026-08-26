@@ -6,8 +6,14 @@ Panels:
       Expanded:
         - /Global Options1
         - /TF1
-        - /MPPI Transformed Plan1
+        - /Mission Segment Path1
+        - /Mission Segment Path1/Offset1
+        - /Waypoint Path (follow_path_client)1
+        - /Waypoint Path (follow_path_client)1/Offset1
         - /MPPI Transformed Plan1/Offset1
+        - /MPPI Trajectories1
+        - /MPPI Trajectories1/Topic1
+        - /MPPI Trajectories1/Namespaces1
         - /BEV Ground Overlay (front)1
         - /BEV Ground Overlay (front)1/Topic1
         - /Rear Depth Cloud1
@@ -177,7 +183,7 @@ Visualization Manager:
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
-      Color: 0; 255; 0
+      Color: 255; 255; 255
       Enabled: true
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
@@ -188,7 +194,7 @@ Visualization Manager:
       Offset:
         X: 0
         Y: 0
-        Z: 0
+        Z: -0.10000000149011612
       Pose Color: 255; 85; 255
       Pose Style: None
       Radius: 0.029999999329447746
@@ -206,7 +212,7 @@ Visualization Manager:
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 0; 160; 0
-      Enabled: true
+      Enabled: false
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -216,7 +222,7 @@ Visualization Manager:
       Offset:
         X: 0
         Y: 0
-        Z: 0
+        Z: -2
       Pose Color: 255; 85; 255
       Pose Style: None
       Radius: 0.029999999329447746
@@ -229,12 +235,12 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /follow_path_client/path
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 0; 170; 255
-      Enabled: true
+      Enabled: false
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -257,9 +263,9 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /transformed_global_plan
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/MarkerArray
-      Enabled: false
+      Enabled: true
       Name: MPPI Trajectories
       Namespaces:
         {}
@@ -269,7 +275,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /trajectories
-      Value: false
+      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -486,25 +492,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 43.782676696777344
+      Distance: 18.828144073486328
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -5.675036430358887
-        Y: -3.4326720237731934
-        Z: 9.5367431640625e-06
+        X: -1.902022361755371
+        Y: 6.7572431564331055
+        Z: 1.0251998901367188e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.384796679019928
+      Pitch: 0.40979671478271484
       Target Frame: body_link
       Value: ThirdPersonFollower (rviz_default_plugins)
-      Yaw: 3.0392048358917236
+      Yaw: 1.7492055892944336
     Saved:
       - Class: rviz_default_plugins/ThirdPersonFollower
         Distance: 33.20220184326172

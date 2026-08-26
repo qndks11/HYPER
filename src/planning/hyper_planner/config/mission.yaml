@@ -173,7 +173,7 @@ steps:
   # 진입에서 덜 간 거리가 그대로 칸 안 정지 오차에 더해집니다.
   - {type: drive, until: park_t_entry, decel_profile_a: 1.5, cancel_on_arrival_m: 0.15}
   - {type: drive, until: park_t_spot, controller: ReverseFollowPath, reverse: true,
-     goal_checker: precise_goal_checker}
+     goal_checker: park_goal_checker}
   - {type: stop, duration_s: 3.0}
 
   # 5) 출차하며 세 번째 신호등까지
@@ -208,7 +208,7 @@ steps:
   # 7) 평행 주차: 진입 -> 후진 입고 -> 정차 (출차는 T자와 같은 이유로 아래 스텩에 포함)
   - {type: drive, until: park_p_entry, decel_profile_a: 1.5, cancel_on_arrival_m: 0.15}
   - {type: drive, until: park_p_spot, controller: ReverseFollowPath, reverse: true,
-     goal_checker: precise_goal_checker}
+     goal_checker: park_goal_checker}
   - {type: stop, duration_s: 3.0}
 
   # 8) 출차하며 완주

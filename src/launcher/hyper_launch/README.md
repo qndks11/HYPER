@@ -23,21 +23,26 @@ ros2 service call /mission_manager/restart std_srvs/srv/Trigger  # 처음부터 
 ```
 
 시뮬레이션에서는 `vehicle.launch.py`(`sim.launch.py`/`simulation.launch.py`가 포함)가
-`remove_model_service` 노드도 함께 띄웁니다. `world_name`/`model_name` 파라미터(기본값
-`course_world`/`accel_pedestrian`)로 지정된 모델을 gz 월드에서 제거하는 `std_srvs/srv/Trigger`
-서비스입니다(예: `track.world`에 배치된 보행자 모델 제거).
+`model_service` 노드도 함께 띄웁니다. `world_name`/`model_name`/`model_uri`/`pose` 파라미터로
+지정된 모델을 gz 월드에 띄우거나 지우는 `std_srvs/srv/Trigger` 서비스 두 개입니다(기본값은
+`track.world`의 가속 구간 보행자).
 
 ```bash
-ros2 service call /remove_model_service/remove std_srvs/srv/Trigger
+ros2 service call /model_service/spawn std_srvs/srv/Trigger
+ros2 service call /model_service/remove std_srvs/srv/Trigger
 ```
 
-매번 서비스 이름과 요청 필드를 외워서 커맨드라인으로 호출하기보다, GUI로 눌러서 부르고 싶다면
-`rqt_service_caller`를 쓰면 됩니다 -- 실행 중인 모든 ROS 2 서비스가 드롭다운에 나오고, 위 서비스들은
-전부 `Trigger`라 요청 필드 없이 Call 버튼만 누르면 됩니다.
+매번 서비스 이름을 외워서 커맨드라인으로 호출하기보다 GUI로 눌러서 부르고 싶다면
+`hyper_rqt` 패널을 쓰세요. 위 서비스들만 버튼으로 모아 두고 `/mission_manager/status`를 맨 위에
+보여 줍니다.
 
 ```bash
-ros2 run rqt_service_caller rqt_service_caller
+ros2 run hyper_rqt hyper_panel
 ```
+
+`rqt_service_caller`도 물론 되지만 드롭다운에 실행 중인 서비스가 전부 나옵니다 -- 노드마다
+파라미터 서비스가 6개씩 붙어서 `simulation.launch.py` 기준 100개가 넘습니다. 버튼을 추가하거나
+고치려면 `src/tools/hyper_rqt/config/panel.yaml`을 보세요(코드가 아니라 YAML입니다).
 
 실차 전체 스택:
 

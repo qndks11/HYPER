@@ -1,7 +1,6 @@
 # nav2 controller_server 설정 (follow_path 액션 서버).
 #
-# 차량 제원은 hyper_control/config/parameters.yaml, hyper_planner/config/parking_params.yaml에서
-# 가져왔습니다.
+# 차량 제원
 #   전장 1.34 m / 전폭 0.81 m (body_link가 중심) -> footprint
 #   wheelbase 1.005 m, max_steering_angle 0.5235988 rad (30도)
 #   -> 최소 회전 반경 R = wheelbase / tan(30도) = 1.74 m
@@ -34,7 +33,7 @@ controller_server:
     speed_limit_topic: "speed_limit"
 
     progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker", "precise_goal_checker"]
+    goal_checker_plugins: ["general_goal_checker", "precise_goal_checker", "park_goal_checker"]
     controller_plugins: ["FollowPath", "ForwardFollowPath", "ReverseFollowPath"]
 
     progress_checker:
@@ -65,6 +64,25 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
       xy_goal_tolerance: 0.25
+      yaw_goal_tolerance: 3.15
+
+    # 후진 주차(ReverseFollowPath) 전용 goal checker.
+    #
+    # RPP의 곡률은 2*y_carrot / L^2 (L = carrot까지의 실제 거리)입니다. 남은 경로가
+    # lookahead_dist보다 짧아지면(주차 골 직전) carrot이 경로 끝점으로 고정되고 L이
+    # 실제 잔여거리로 줄어드는데, precise_goal_checker의 0.25 m 안쪽에서는 L이 몇 cm까지
+    # 작아져 위치 잡음(y)이 그대로 곡률로 증폭됩니다 -- 그 결과 차가 골 공차 안에 있는데도
+    # (goal checker가 아직 안 걸려) 제자리에서 조향이 좌우로 크게 흔들립니다. 후진에서는
+    # carrot의 전후 부호까지 잡음에 흔들려 전후진이 같이 튀기도 합니다.
+    #
+    # precise_goal_checker(0.25)는 MPPI의 crawl-vs-progress_checker 타협값이라 RPP에는
+    # 맞지 않습니다. RPP는 MPPI처럼 지수적으로 기어들지 않으므로(등속 접근 후 approach
+    # 구간에서 선형 감속) tolerance를 이만큼 늘려도 progress_checker에 걸릴 일이 없고,
+    # 대신 L이 붕괴하기 전에 골이 latch되어 이 불안정 구간 자체를 피합니다.
+    park_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.35
       yaw_goal_tolerance: 3.15
 
     # MPPI. RPP(순수 추종기)는 준 경로를 절대 벗어나지 않아 장애물을 못 피하므로,
@@ -113,8 +131,8 @@ controller_server:
       # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
       visualize: true
 
-      # vx_min < 0 = 후진 허용. 전방이 막혔을 때 MPPI가 후진 궤적을 샘플링할 수 있습니다.
-      # 후진이 습관이 되지 않도록 PreferForwardCritic(가중치 5)을 켠 채로 둡니다.
+      # vx_min = 0 = 후진 금지. MPPI가 후진 궤적을 아예 샘플링하지 않습니다.
+      # (후진이 필요한 주차 구간은 별도의 ReverseFollowPath(RPP)가 담당합니다.)
       # wz_max는 최고속에서의 최소 회전 반경 제약(2.22 / 1.74 = 1.28 rad/s)보다 살짝 위로
       # 두고, 실제 제한은 아래 AckermannConstraints가 매 스텝 걸어줍니다.
       #
@@ -127,10 +145,7 @@ controller_server:
       # (launch/mission.launch.py, src/mission_manager_parameters.yaml). 다르면
       # setSpeedLimit의 ratio가 1을 넘어 vx_max를 오히려 올려 버립니다.
       vx_max: 2.22
-      # 전진 상한과 같은 크기로 둡니다. 후진 궤적의 탐색 폭이 너무 좁으면 한 지평선
-      # (2.8초) 안에 장애물을 벗어날 만큼 물러나지 못해, 후진해도 여전히 충돌 궤적으로
-      # 평가됩니다.
-      vx_min: -2.22
+      vx_min: 0.0
       wz_max: 1.6
       # vx_std는 아래 gamma 주석의 순항 속도 식에 제곱으로 들어갑니다. PathFollowCritic의
       # 가중치를 코너 컷 때문에 36 -> 8로 낮췄으므로(4.5배), 순항 속도를 유지하려고 여기서
@@ -177,9 +192,8 @@ controller_server:
         cost_power: 1
         cost_weight: 3.0
         threshold_to_consider: 0.5
-      # 5.0 -> 2.0. 이 값이 크면 ObstaclesCritic이 후진 탈출 궤적을 골라도 여기서
-      # 벌점이 이겨서 vx_min(후진 허용)이 사실상 死문자가 됩니다. 막다른 곳에서
-      # 빠져나오려면 후진이 실제로 선택될 수 있어야 합니다.
+      # vx_min: 0.0이라 후진 궤적 자체가 없으므로 이 critic은 사실상 무해합니다
+      # (남은 역할은 경로 역주행 방향 샘플에 대한 약한 벌점).
       PreferForwardCritic:
         enabled: true
         cost_power: 1
