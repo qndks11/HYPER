@@ -5,6 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
+        - /AerialMap (school)1
         - /TF1
         - /LaserScan1
         - /LaserScan2
@@ -15,13 +16,17 @@ Panels:
         - /MPPI Trajectories1/Topic1
         - /MPPI Trajectories1/Namespaces1
         - /Local Costmap1
+        - /Odometry (map)1
         - /BEV Ground Overlay (front)1/Topic1
+        - /Rear Depth Cloud1
       Splitter Ratio: 0.5
-    Tree Height: 500
+    Tree Height: 383
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
+      - /Current View1/Focal Point1
       - /ThirdPersonFollower1
+      - /ThirdPersonFollower1/Focal Point1
     Name: Views
     Splitter Ratio: 0.5
 Visualization Manager:
@@ -45,6 +50,23 @@ Visualization Manager:
       Plane Cell Count: 40
       Reference Frame: <Fixed Frame>
       Value: false
+    - Alpha: 0.5
+      Blocks: 4
+      Class: rviz_satellite/AerialMap
+      Draw Behind: true
+      Enabled: true
+      Name: AerialMap (school)
+      Object URI: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+      TF tolerance: 0.10000000149011612
+      Timeout: 0
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /aerial_map/anchor
+      Value: true
+      Zoom: 19
     - Class: rviz_default_plugins/TF
       Enabled: false
       Frame Timeout: 15
@@ -301,8 +323,7 @@ Visualization Manager:
       Enabled: true
       Name: MPPI Trajectories
       Namespaces:
-        Candidate Trajectories: false
-        Optimal Trajectory: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -403,8 +424,8 @@ Visualization Manager:
           Color: 204; 51; 204
           Scale: 1
           Value: true
-        Value: true
-      Enabled: false
+        Value: false
+      Enabled: true
       Keep: 100
       Name: Odometry (map)
       Position Tolerance: 0.10000000149011612
@@ -425,7 +446,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /odometry/filtered_map
-      Value: false
+      Value: true
     - Alpha: 0.5
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -438,7 +459,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: RGB8
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -459,7 +480,7 @@ Visualization Manager:
         Value: /lane/bev/points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -471,8 +492,8 @@ Visualization Manager:
       Class: rviz_default_plugins/PointCloud2
       Color: 255; 255; 255
       Color Transformer: RGB8
-      Decay Time: 0
-      Enabled: false
+      Decay Time: 1
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -493,7 +514,7 @@ Visualization Manager:
         Value: /camera_rear/depth/points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
@@ -509,7 +530,7 @@ Visualization Manager:
         Value: /perception/object_detection/annotated_image
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -521,9 +542,9 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /lane/bev/image_raw
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -535,12 +556,12 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /camera_rear/image_raw
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: odom
-    Frame Rate: 60
+    Frame Rate: 30
   Name: root
   Tools:
     - Class: rviz_default_plugins/MoveCamera
@@ -554,25 +575,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 23.789825439453125
+      Distance: 36.81775665283203
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -0.30185627937316895
-        Y: 5.21883487701416
-        Z: 1.4125136658549309e-05
+        X: -13.18973159790039
+        Y: -9.640962600708008
+        Z: 1.5125099707802292e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.8347971439361572
+      Pitch: 0.8197972178459167
       Target Frame: body_link
       Value: ThirdPersonFollower (rviz_default_plugins)
-      Yaw: 1.489193081855774
+      Yaw: 3.464210033416748
     Saved:
       - Class: rviz_default_plugins/ThirdPersonFollower
         Distance: 33.20220184326172
@@ -595,20 +616,20 @@ Visualization Manager:
         Value: ThirdPersonFollower (rviz_default_plugins)
         Yaw: 3.134207010269165
 Window Geometry:
+  BEV (front):
+    collapsed: false
   Displays:
     collapsed: false
-  Height: 1043
+  Height: 1016
   Hide Left Dock: false
   Hide Right Dock: false
   Object Detection Camera:
     collapsed: false
-  BEV (front):
-    collapsed: false
+  QMainWindow State: 000000ff00000000fd0000000100000000000002460000039efc0200000007fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000202000000c900fffffffb0000000a00560069006500770073000000010c00000117000000a400fffffffb0000002e004f0062006a00650063007400200044006500740065006300740069006f006e002000430061006d0065007200610100000245000001960000002800fffffffb000000160042004500560020002800660072006f006e007400290000000256000000bf0000002800fffffffb000000160052006500610072002000430061006d00650072006100000002e6000000f50000002800ffffff000004ee0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Rear Camera:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd000000010000000000000246000003b9fc0200000005fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000277000000c900fffffffb0000000a005600690065007700730000000352000000a4000000a400fffffffb0000002e004f0062006a00650063007400200044006500740065006300740069006f006e002000430061006d00650072006101000002ba0000013c0000002800ffffff00000534000003b900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
-  Width: 1920
-  X: 1920
-  Y: 0
+  Width: 1850
+  X: 70
+  Y: 27

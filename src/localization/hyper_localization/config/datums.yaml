@@ -23,16 +23,31 @@ datums:
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
 
+  # imu_yaw_sign / imu_yaw_offset_deg / imu_flip_gyro_z: hyper_localization의 imu_enu_relay가
+  # WitMotion 드라이버 원본(/imu/raw)을 ENU로 고쳐 /imu로 내보낼 때 쓰는 값.
+  #   out_yaw = imu_yaw_sign * in_yaw + radians(imu_yaw_offset_deg)
+  # 캘리브레이션: 차를 정북으로 세우고 `ros2 topic echo /imu` yaw가 +1.5708(=pi/2)이 되도록
+  # imu_yaw_offset_deg를 맞춘다. 반시계로 돌릴 때 yaw가 감소하면 imu_yaw_sign을 +1.0으로.
+  # 아래 값은 "정북인데 서쪽으로 표시"(raw yaw≈180) + "회전 반대" 증상 기준의 시작 추정값이다.
+  # relay가 /imu를 정북 기준 ENU로 맞춰 주므로(캘리브레이션 목표가 정북=+pi/2), 여기서
+  # navsat_transform의 magnetic_declination_deg/yaw_offset_deg는 0으로 둔다. 둘 다 relay가
+  # 이미 흡수한 상수라 다시 얹으면 GPS 오도메트리가 그만큼 더 돌아가 ekf_global이 발산한다.
   school:
     latitude_deg: 37.555047
     longitude_deg: 127.045522
     heading_deg: 0.0
-    magnetic_declination_deg: -8.02
-    yaw_offset_deg: 90.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+    imu_yaw_sign:   1.0
+    imu_yaw_offset_deg: -90.0
+    imu_flip_gyro_z: true
 
   track:
     latitude_deg: 37.2887947
     longitude_deg: 127.1072418
     heading_deg: 0.0
-    magnetic_declination_deg: -8.02
-    yaw_offset_deg: 90.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+    imu_yaw_sign: -1.0
+    imu_yaw_offset_deg: -90.0
+    imu_flip_gyro_z: true

@@ -47,7 +47,7 @@ ros2 run hyper_rqt hyper_panel
 실차 전체 스택:
 
 ```bash
-ros2 launch hyper_launch real.launch.py
+ros2 launch hyper_launch real.launch.py datum_site:=school use_joystick:=true
 ```
 
 단계별 실행 (시뮬레이션):

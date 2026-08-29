@@ -135,13 +135,21 @@ def generate_launch_description():
             # topics under "~/", so with this name/namespace the colour stream would land on
             # /camera_rear/color/image_raw -- remapped here to the /camera_rear/image_raw that
             # LaneDetection's rear subscription and the sim's ros_gz_bridge already agree on.
+            # The point cloud needs the same treatment for the same reason: this driver hardcodes
+            # its cloud topic to "~/depth/color/points" (it is the only cloud topic string in
+            # librealsense2_camera.so -- the name does not follow pointcloud.stream_filter), so
+            # /camera_rear/depth/points, the name the sim's ros_gz_bridge publishes and RViz's
+            # follow_path config expects, only exists if it is remapped here.
             ComposableNode(
                 package='realsense2_camera',
                 plugin='realsense2_camera::RealSenseNodeFactory',
                 name='camera_rear',
                 namespace='',
                 parameters=[d435i_params],
-                remappings=[('/camera_rear/color/image_raw', '/camera_rear/image_raw')],
+                remappings=[
+                    ('/camera_rear/color/image_raw', '/camera_rear/image_raw'),
+                    ('/camera_rear/depth/color/points', '/camera_rear/depth/points'),
+                ],
                 extra_arguments=[{'use_intra_process_comms': True}],
             ),
             ComposableNode(
@@ -165,6 +173,31 @@ def generate_launch_description():
         ],
         output='screen',
         condition=LaunchConfigurationEquals('lane_input_backend', 'intra_process'),
+    )
+
+    # Grafts realsense2_camera's TF subtree onto the URDF. The driver publishes its own frames
+    # (camera_rear_depth_frame -> camera_rear_depth_optical_frame, and the colour pair) under a
+    # root named <camera_name>_<base_frame_id> == camera_rear_link, with nothing joining it to
+    # body_link. The point cloud is stamped camera_rear_depth_optical_frame, so without this link
+    # it is untransformable and RViz/costmaps drop every message.
+    # camera_name is set in params_d435i.yaml for exactly this reason -- at its default the root
+    # is the bare "camera_link" the URDF already uses for the FRONT camera, which silently
+    # re-parents the rear cloud to the front of the car.
+    # Identity is correct rather than approximate in orientation: both rear_camera_link and the
+    # driver's root are x-forward REP-103 body frames, and rear_camera_link already carries the
+    # rear-facing yaw (the resulting body_link -> camera_depth_optical_frame maps optical +z to
+    # body -x). The residual translation is the sub-centimetre offset between the D435i's case
+    # origin and its left imager, which is below this camera's depth noise at any usable range.
+    rear_camera_tf_graft_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='rear_camera_tf_graft',
+        arguments=[
+            '--frame-id', 'rear_camera_link',
+            '--child-frame-id', 'camera_rear_link',
+        ],
+        condition=LaunchConfigurationEquals('lane_input_backend', 'intra_process'),
+        output='screen',
     )
 
     # ros_raw: no physical camera to publish here -- lane_detection_node runs standalone and
@@ -214,6 +247,7 @@ def generate_launch_description():
         drivable_area_arg,
         rear_scan_arg,
         rear_depth_to_scan_node,
+        rear_camera_tf_graft_node,
         lane_detection_container,
         lane_detection_node,
         logitech_camera_publisher_node,

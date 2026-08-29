@@ -52,6 +52,10 @@ def generate_launch_description():
                 # base_link_frame도 body_link이므로, 그대로 두면 robot_localization이 IMU를
                 # body_link로 변환하지 못해 실차에서 IMU 메시지를 전부 조용히 버립니다.
                 'frame_id': 'body_link',
+                # 드라이버 yaw는 나침반식(시계방향 증가)이라 ROS ENU와 부호가 반대다.
+                # 원본을 /imu/raw로 내보내고, hyper_localization의 imu_enu_relay가 yaw축을
+                # 뒤집어 EKF가 먹는 /imu로 다시 publish한다 (odometry.launch.py).
+                'topic': '/imu/raw',
                 # yaw 분산을 드라이버 기본값 0.02 rad^2(1sigma≈8.1deg)에서 크게 올립니다.
                 # WT901BLE의 yaw는 지자기 기반이라 차량 모터/철제 구조물 근처에서 수십 도씩
                 # 틀어질 수 있는데, 8.1deg로 신고하면 ekf_global이 그 값을 거의 진리로

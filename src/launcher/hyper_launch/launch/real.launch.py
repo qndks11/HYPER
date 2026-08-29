@@ -47,6 +47,18 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_rviz')),
     )
 
+    # GPS 정확도 모니터. /ublox_gps_node/navpvt의 hAcc/vAcc를 큰 글씨로 띄웁니다.
+    # 조건 없이 항상 뜹니다 -- 어떤 토픽도 publish하지 않는 순수 구독자라 nav2든
+    # 조이스틱이든 아무것과도 충돌하지 않고, 실차에서 "지금 GPS를 믿어도 되는가"는
+    # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node)보다 먼저
+    # 떠도 무방합니다: NavPVT가 안 오는 동안은 NO DATA (stale)로 표시됩니다.
+    gps_accuracy_gui = Node(
+        package='hyper_localization',
+        executable='gps_accuracy_gui.py',
+        name='gps_accuracy_gui',
+        output='screen',
+    )
+
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
@@ -60,8 +72,20 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
             description='Launch RViz with the follow_path nav2 view'),
+        # 수동 주행용 조이스틱. 기본값 false인 이유가 있습니다: joystick_controller_node는
+        # 스틱을 안 건드려도 100Hz로 /velocity + /steering_angle을 계속 내보내는데, 이는
+        # behavior 스테이지의 cmd_vel_to_ackermann이 쓰는 토픽과 똑같습니다. 둘을 같이
+        # 띄우면 스틱 중립(0.0) 명령이 nav2의 명령과 번갈아 arduino_interface에 도착해
+        # 차가 자율주행을 못 합니다. 수동으로 몰 때만 켜세요:
+        #   ros2 launch hyper_launch real.launch.py use_joystick:=true
+        # (이때 nav2도 같이 도는 게 싫으면 mission 스테이지를 따로 내리거나, 조이스틱
+        #  단독으로 sensors + interface만 띄우는 편이 낫습니다.)
+        DeclareLaunchArgument(
+            'use_joystick', default_value='false',
+            description='Xbox/joy 수동 조작 노드를 함께 띄웁니다 (nav2와 /velocity 충돌 주의)'),
         robot_state_publisher,
         rviz,
+        gps_accuracy_gui,
         stage('sensors.launch.py'),
         # use_sim_time=false가 핵심입니다. 실차에는 /clock을 내보내는 노드가 없으므로,
         # dual_ekf_navsat.yaml에 박혀 있는 use_sim_time: true를 그대로 두면 ekf_local /
@@ -92,5 +116,12 @@ def generate_launch_description():
                   # nav2_controller.yaml의 use_sim_time을 덮어쓰므로 인자만 넘기면 됩니다.
                   use_sim_time='false'),
             stage('interface.launch.py'),
+            # interface.launch.py와 같은 타이밍에 올립니다. 조이스틱 명령이 가는 곳이
+            # arduino_interface_node이므로, 그보다 먼저 떠 있어 봐야 받을 노드가 없습니다.
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(os.path.join(
+                    get_package_share_directory('hyper_control'),
+                    'launch', 'joystick.launch.py')),
+                condition=IfCondition(LaunchConfiguration('use_joystick'))),
         ]),
     ])
