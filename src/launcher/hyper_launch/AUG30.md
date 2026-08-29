@@ -16,7 +16,7 @@
 띄울 필요가 없습니다.
 
 ```bash
-# 터미널 1 — 센서 + TF + EKF + 조이스틱 + GPS 모니터 + RViz + 웨이포인트 레코더
+# 터미널 1 — 센서 + TF + EKF + 조이스틱 + GPS 모니터 + 웨이포인트 레코더
 ros2 launch hyper_launch joystick_control_real.launch.py datum_site:=school
 ```
 
@@ -33,6 +33,13 @@ GPS 정확도 모니터(hAcc/vAcc/fix/RTK 비트를 큰 글씨로) GUI가 같이
 | RTK 등급 | GUI의 우측 상태줄 | `RTK FIXED` (`FLOAT`면 아직 수렴 중) |
 | 수평 정확도 | GUI의 `Horizontal (hAcc)` | **FIXED면 0.02 m 근처**, FLOAT는 0.3~1 m, 단독측위는 1~3 m |
 | NTRIP 보정이 오는가 | `ros2 topic hz /rtcm` | 꾸준히 올라와야 함. 0이면 caster 연결 실패 |
+| 바퀴 오도메트리 | `ros2 topic hz /odom` | 나와야 함. 없으면 아두이노 브리지가 죽은 것 |
+| EKF가 실제로 도는가 | `ros2 topic hz /odometry/filtered_map` | **30 Hz**. 0이면 녹화해 봐야 소용없음 |
+
+`/odom`과 `/odometry/filtered_map`은 GPS만큼 중요합니다. `/odom`이 없으면 ekf_local이 굶고,
+gps_heading의 초기 heading 시드 해제와 후진 판정도 같이 죽습니다. 지난 녹화가 실패한 이유가
+정확히 이것이었습니다 — `real.csv.diag.log`에 `ekf_local ... Actual frequency (Hz)=0.000000`이
+남아 있고, 그래서 `real.csv`에 점이 하나뿐입니다.
 
 명령줄로 직접 보고 싶으면:
 
@@ -55,7 +62,7 @@ ros2 topic echo /ublox_gps_node/navpvt --field flags
 ## 2. 웨이포인트 기록
 
 1번에서 띄운 스택을 그대로 씁니다 — 내렸다 다시 띄울 필요 없습니다. 터미널 하나로 끝납니다.
-센서 + TF + EKF + 아두이노 브리지 + 조이스틱 + GPS 모니터 + RViz + **웨이포인트 레코더와 녹화 조작판 GUI**까지 한
+센서 + TF + EKF + 아두이노 브리지 + 조이스틱 + GPS 모니터 + **웨이포인트 레코더와 녹화 조작판 GUI**까지 한
 트리입니다. 카메라와 차선/객체 인식은 아예 안 뜹니다
 
 ```bash
@@ -98,8 +105,8 @@ EKF가 뜨는 데 5초 걸립니다(`ODOMETRY_DELAY_S`).
 | EKF 공분산 xx / yy | 커지면 융합이 흔들리는 중 |
 | 미니맵 | 지금까지 찍힌 점(파랑)과 현재 위치(보라). 코스 모양이 실제와 맞는지 눈으로 확인 |
 
-같은 내용이 `/waypoint_recorder/status`(String)와 `/waypoint_recorder/path`(Path)로도 나가므로
-RViz에서 경로를 겹쳐 볼 수도 있습니다.
+같은 내용이 `/waypoint_recorder/status`(String)와 `/waypoint_recorder/path`(Path)로도 나갑니다
+(이 스택은 RViz를 띄우지 않습니다 -- 경로를 겹쳐 보려면 `rviz2`를 따로 실행하세요).
 
 기존 `real.csv`는 `gps_status: -1`(fix 없음)에 위경도가 `-6.8, 134.8`인 쓰레기 기록이라
 덮어써도 아깝지 않습니다. 그래도 불안하면 먼저 `cp real.csv real.csv.bak`.
@@ -138,10 +145,15 @@ GPS인지 좌표변환인지 EKF인지 여기서 갈립니다.
 ```bash
 # 터미널 1 — 센서 + TF + EKF + 인지 + nav2 + 미션 매니저 + 아두이노 + RViz
 ros2 launch hyper_launch real.launch.py \
-  datum_site:=track \
+  datum_site:=school \
   mission:=simple \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
 ```
+
+> `datum_site`는 **1·2번과 반드시 같아야 합니다.** 웨이포인트는 위경도가 아니라 map 프레임
+> x,y로 저장되고 그대로 소비되므로(`waypoint_recorder_node.cpp` -> `mission_manager_node.cpp`),
+> 원점이 달라지면 코스 전체가 그 원점 차이만큼 통째로 옮겨집니다. school과 track은 약 30 km
+> 떨어져 있습니다. 대회장에서 녹화했다면 세 명령 모두 `datum_site:=track`으로 맞추세요.
 
 ### 출발 전 체크 (차를 세워 둔 채로)
 
