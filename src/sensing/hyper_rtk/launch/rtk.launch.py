@@ -34,8 +34,8 @@ def generate_launch_description():
                 'aid': {'hui': False},
                 'nav': {'posecef': False},
             },
-            'tmode3': 0, 
-            'rate': 1.0,
+            'tmode3': 0,
+            'rate': 5.0,
         }],
     )
 
