@@ -495,6 +495,22 @@ void apply_drive(float velocity_target) {
   // actively correcting toward it, so a push away from a standstill gets
   // resisted immediately rather than only once it drifts past a threshold.
   float error = velocity_target - measured_drive_velocity;
+
+  // Reset the integral immediately if it's now pointing the WRONG way (its
+  // accumulated sign opposes the current error) instead of letting it
+  // unwind naturally. A long sustained drive (e.g. 15+ seconds forward)
+  // winds the integral up toward its clamp (DRIVE_INTEGRAL_LIMIT_PWM); once
+  // the target then drops to 0/reverses, natural unwinding (only
+  // drive_integral += error*dt per tick) is far too slow -- at the clamp,
+  // fully discharging it can take on the order of 100+ seconds, during
+  // which the stale integral's contribution (up to +-DRIVE_INTEGRAL_LIMIT_PWM,
+  // 150 here -- more than STEER_MIN_PWM-scale forces) can outweigh the
+  // fresh (now negative) error entirely, so the vehicle keeps driving
+  // forward on old momentum regardless of the new target. Symptom: stop
+  // command does nothing for a long stretch after a sustained drive.
+  if ((drive_integral > 0.0f && error < 0.0f) || (drive_integral < 0.0f && error > 0.0f)) {
+    drive_integral = 0.0f;
+  }
   drive_integral = constrain(
       drive_integral + error * (CONTROL_PERIOD_MS / 1000.0f),
       -DRIVE_INTEGRAL_LIMIT_PWM / DRIVE_KI, DRIVE_INTEGRAL_LIMIT_PWM / DRIVE_KI);
