@@ -36,9 +36,9 @@
        (69 deg); depth is why this sensor is RGBD at all. rear_image_* are pixels, the other
        rear_camera_* are the mounting pose, kept separate from the front camera's so the rear's
        geometry no longer moves whenever the front fisheye is retuned. -->
-  <xacro:arg name="rear_camera_height" default="1.5" />
-  <xacro:arg name="rear_camera_pitch" default="0.1" />
-  <xacro:arg name="rear_camera_setback" default="0.3" />
+  <xacro:arg name="rear_camera_height" default="0.3" />
+  <xacro:arg name="rear_camera_pitch" default="0.0" />
+  <xacro:arg name="rear_camera_setback" default="0.0" />
   <xacro:arg name="rear_camera_fov" default="1.5184364" />
   <xacro:arg name="rear_camera_fps" default="30" />
   <xacro:arg name="rear_image_width" default="848" />
@@ -707,7 +707,12 @@
            <optical_frame_id> is a label only here; it renames the frame without rotating the
            data, which would silently tip the cloud 90 deg. Anyone adding depth_image_proc
            later does need a z-forward frame for /camera_rear/depth/image_raw + camera_info,
-           and should publish that frame explicitly rather than relabelling this sensor. -->
+           and should publish that frame explicitly rather than relabelling this sensor.
+           depthimage_to_laserscan (see hyper_object_detection's perception.launch.py) is NOT
+           such a consumer: it reads the depth image's *pixels*, never its frame_id, and names
+           its output frame through the output_frame parameter, which is this link because
+           a LaserScan's own convention (x along the view direction, y to its left) is exactly
+           this link's, not an optical frame's. -->
       <gz_frame_id>rear_camera_link</gz_frame_id>
 
       <camera name="rear">
@@ -817,11 +822,20 @@
 
       <lidar>
         <scan>
+          <!-- Forward 180 deg only, not the full 360 the RPLidar's turret actually sweeps.
+               The unit sits on the bumper, so the vehicle's own body occludes everything behind
+               it; modelling that as a narrowed FOV is closer to the truth than letting the sim
+               return clean rear beams the real car will never have.
+               samples 720 -> 360 keeps the angular resolution at 0.5 deg/sample. Halving the
+               arc does not sharpen the sensor, so the sample count has to halve with it.
+               Consequence, deliberately: nothing raytrace-clears the rear of the local costmap
+               except the rear camera's /scan_rear, whose FOV is 87 deg. See the scan and
+               rear_scan blocks in hyper_planner/config/nav2_controller.yaml. -->
           <horizontal>
-            <samples>720</samples>
+            <samples>360</samples>
             <resolution>1</resolution>
-            <min_angle>-3.14159265</min_angle>
-            <max_angle>3.14159265</max_angle>
+            <min_angle>-1.57079633</min_angle>
+            <max_angle>1.57079633</max_angle>
           </horizontal>
         </scan>
 

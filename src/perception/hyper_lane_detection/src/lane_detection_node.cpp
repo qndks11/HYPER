@@ -1,6 +1,7 @@
 #include "hyper_lane_detection/lane_detection_node.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 #include <cv_bridge/cv_bridge.h>
@@ -51,20 +52,27 @@ constexpr double kSimFrontHalfWidthM = 9.0;
 constexpr double kSimFrontMetersPerPixel = 0.028125;
 
 // Default BEV geometry for the simulated rear camera (D435i-equivalent RGBD: 87 deg HFOV,
-// 848x480, same 1.5 m / 15 deg mounting as the front -- see the front block on why that height is
-// 1.5 and not parameters.yaml's 1.2). Unlike the front, this region is NOT a reproduction of the
-// old one -- the old rear ROI reached 24 m backward with a scale that was 64% too wide laterally
-// and 54% too short longitudinally at the same time, so there was no coherent tuning to preserve.
-// It is sized for the job the rear camera has instead: the close, slow parking maneuver.
+// 848x480). Unlike the front, this region is NOT a reproduction of the old one -- the old rear ROI
+// reached 24 m backward with a scale that was 64% too wide laterally and 54% too short
+// longitudinally at the same time, so there was no coherent tuning to preserve. It is sized for
+// the job the rear camera has instead: the close, slow parking maneuver.
 //
-// near_m is 1.8 m because that is genuinely the closest ground this camera can see -- at 1.5 m
-// up and only 15 deg of downward pitch, its bottom image row strikes the ground 1.74 m behind
-// body_link. That blind zone is a mounting property, not something the warp can recover; a rear
-// camera meant for parking wants to be lower, or pitched considerably further down.
+// The mount is bumper-level and horizontal (0.6 m above ground, 0 deg pitch, 0.645 m behind
+// body_link), which is what parameters.yaml's rear_camera_* now describe -- see that file for why
+// the pitch has to be zero: the depth stream doubles as a pseudo-laser scan, and
+// depthimage_to_laserscan slices a *pixel row* band around cy, which is only a constant-height
+// horizontal plane when the optical axis is level. Height is stated here from the GROUND, so it is
+// parameters.yaml's rear_camera_height (body_link-relative) plus body_link's own 0.3 m.
+//
+// near_m stays 1.8 m across that change, which is a coincidence worth writing down rather than a
+// tuning: the old 1.5 m / 15 deg mount saw its first ground 1.74 m behind body_link, and the new
+// 0.6 m / 0 deg one sees it at 1.76 m (0.6 / tan(28.24 deg) = 1.12 m ahead of a camera that sits
+// 0.645 m back). Halving the height bought back exactly what removing the pitch cost. The blind
+// zone is still a mounting property that no warp can recover.
 constexpr double kSimRearHorizontalFovRad = 1.5184364;
-constexpr double kSimRearCameraHeightM = 1.5;
-constexpr double kSimRearCameraPitchRad = 0.2617994;
-constexpr double kSimRearCameraOffsetM = 0.145;
+constexpr double kSimRearCameraHeightM = 0.6;
+constexpr double kSimRearCameraPitchRad = 0.0;
+constexpr double kSimRearCameraOffsetM = 0.645;
 constexpr double kSimRearNearM = 1.8;
 constexpr double kSimRearFarM = 5.0;
 constexpr double kSimRearHalfWidthM = 2.5;
@@ -144,6 +152,45 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
     create_publisher<sensor_msgs::msg::Image>("/lane/rear_bev/image_raw", debug_image_qos);
   rear_bev_cloud_publisher_ =
     create_publisher<sensor_msgs::msg::PointCloud2>("/lane/rear_bev/points", debug_image_qos);
+
+  // ---- Drivable-area classification (see drivable_area.hpp) ----
+  // Off unless a launch file asks for it: unlike this node's other outputs, this one is consumed
+  // by the local costmap and therefore steers the vehicle, so it should not switch itself on just
+  // because someone started the node to look at a BEV.
+  drivable_enabled_ = declare_parameter<bool>("drivable.enabled", false);
+  drivable_max_range_m_ = declare_parameter<double>("drivable.max_range", 9.0);
+  drivable_max_lateral_m_ = declare_parameter<double>("drivable.max_lateral", 6.0);
+
+  hyper_lane_detection::DrivableAreaSettings drivable_settings;
+  drivable_settings.surface_max_saturation = declare_parameter<int>(
+    "drivable.surface_max_saturation", drivable_settings.surface_max_saturation);
+  drivable_settings.paint_hue_min =
+    declare_parameter<int>("drivable.paint_hue_min", drivable_settings.paint_hue_min);
+  drivable_settings.paint_hue_max =
+    declare_parameter<int>("drivable.paint_hue_max", drivable_settings.paint_hue_max);
+  drivable_settings.paint_min_saturation = declare_parameter<int>(
+    "drivable.paint_min_saturation", drivable_settings.paint_min_saturation);
+  drivable_settings.close_radius_m =
+    declare_parameter<double>("drivable.close_radius", drivable_settings.close_radius_m);
+  drivable_settings.open_radius_m =
+    declare_parameter<double>("drivable.open_radius", drivable_settings.open_radius_m);
+  drivable_settings.seed_width_m =
+    declare_parameter<double>("drivable.seed_width", drivable_settings.seed_width_m);
+  drivable_settings.seed_depth_m =
+    declare_parameter<double>("drivable.seed_depth", drivable_settings.seed_depth_m);
+  drivable_settings.min_seed_coverage =
+    declare_parameter<double>("drivable.min_seed_coverage", drivable_settings.min_seed_coverage);
+  drivable_detector_ = hyper_lane_detection::DrivableAreaDetector{drivable_settings};
+
+  if (drivable_enabled_) {
+    // Reliable, depth 1. The BEV streams above are best-effort because a dropped debug frame
+    // costs nothing; a dropped classification frame instead quietly ages the costmap layer's
+    // belief, and that layer's decay would read the silence as "the road went away".
+    drivable_grid_publisher_ =
+      create_publisher<nav_msgs::msg::OccupancyGrid>("/lane/drivable_area", rclcpp::QoS(1));
+    drivable_image_publisher_ =
+      create_publisher<sensor_msgs::msg::Image>("/lane/drivable/image_raw", debug_image_qos);
+  }
 
   RCLCPP_INFO(
     get_logger(), "LaneDetection started (input_backend=%s, bev_cloud_frame_id=%s)",
@@ -283,6 +330,93 @@ void LaneDetection::publish_bev_cloud(
   publisher->publish(cloud);
 }
 
+void LaneDetection::publish_drivable_area(
+  const cv::Mat & view, const std_msgs::msg::Header & header, const GroundProjection & projection)
+{
+  if (!drivable_grid_publisher_) {
+    return;
+  }
+
+  const double meters_per_pixel = projection.meters_per_pixel();
+  const cv::Point2d origin = projection.origin_px();
+
+  // Crop to the box actually worth publishing, before classifying. The BEV is 18 m wide at the
+  // configured half_width of 9 m, and its outer columns are stretched out of a handful of source
+  // pixels near the frame edge -- keeping them would cost four times the work to hand the flood
+  // fill its least trustworthy input. Rows are clipped from the far end (small row index = far
+  // ground); columns symmetrically about the vehicle's own column.
+  const int far_row =
+    static_cast<int>(std::ceil(origin.y - drivable_max_range_m_ / meters_per_pixel));
+  const int lateral_px =
+    static_cast<int>(std::lround(drivable_max_lateral_m_ / meters_per_pixel));
+  cv::Rect crop(
+    static_cast<int>(std::lround(origin.x)) - lateral_px, std::max(0, far_row),
+    2 * lateral_px + 1, view.rows - std::max(0, far_row));
+  crop &= cv::Rect(cv::Point(0, 0), view.size());
+  if (crop.empty()) {
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
+      "drivable.max_range/max_lateral select nothing inside the %dx%d BEV -- no grid published",
+      view.cols, view.rows);
+    return;
+  }
+
+  const cv::Mat cropped = view(crop);
+  // The vehicle origin, expressed in the cropped raster's own pixels.
+  const cv::Point2d crop_origin(origin.x - crop.x, origin.y - crop.y);
+  const auto result = drivable_detector_.detect(cropped, crop_origin, meters_per_pixel);
+
+  if (!result.seeded) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
+      "No drivable surface under the vehicle -- publishing the grid as all-unknown. Either the "
+      "vehicle is genuinely off-course, or drivable.surface_max_saturation does not match this "
+      "camera's road.");
+  }
+
+  // BEV -> OccupancyGrid. The grid's x axis is the vehicle's, so it indexes BEV *rows*: width is
+  // the longitudinal cell count and height the lateral one, which reads backwards until you
+  // remember an OccupancyGrid is indexed in its own frame, not in image order.
+  //
+  //   BEV row r is at x = (origin.y - r) * mpp, so i = (rows - 1 - r) makes x grow with i.
+  //   BEV col c is at y = (origin.x - c) * mpp, so j = (cols - 1 - c) makes y grow with j.
+  //
+  // Both axes therefore run opposite to the image's, and the grid's own origin is its minimum
+  // corner, half a cell out from the first cell's center.
+  const int rows = result.classes.rows;
+  const int cols = result.classes.cols;
+
+  nav_msgs::msg::OccupancyGrid grid;
+  grid.header = header;
+  grid.header.frame_id = bev_cloud_frame_id_;
+  grid.info.map_load_time = header.stamp;
+  grid.info.resolution = static_cast<float>(meters_per_pixel);
+  grid.info.width = static_cast<uint32_t>(rows);
+  grid.info.height = static_cast<uint32_t>(cols);
+  grid.info.origin.position.x = (crop_origin.y - rows + 0.5) * meters_per_pixel;
+  grid.info.origin.position.y = (crop_origin.x - cols + 0.5) * meters_per_pixel;
+  grid.info.origin.position.z = 0.0;
+  grid.info.origin.orientation.w = 1.0;
+
+  grid.data.resize(static_cast<size_t>(rows) * static_cast<size_t>(cols));
+  for (int r = 0; r < rows; ++r) {
+    const int8_t * class_row = result.classes.ptr<int8_t>(r);
+    const size_t i = static_cast<size_t>(rows - 1 - r);
+    for (int c = 0; c < cols; ++c) {
+      const size_t j = static_cast<size_t>(cols - 1 - c);
+      grid.data[j * static_cast<size_t>(rows) + i] = class_row[c];
+    }
+  }
+  drivable_grid_publisher_->publish(grid);
+
+  if (drivable_image_publisher_ && drivable_image_publisher_->get_subscription_count() > 0) {
+    cv::Mat annotated = cropped.clone();
+    drivable_detector_.draw(result, crop_origin, meters_per_pixel, annotated);
+    drivable_image_publisher_->publish(
+      *cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
+  }
+}
+
 void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
 {
   cv_bridge::CvImageConstPtr cv_ptr;
@@ -325,6 +459,10 @@ void LaneDetection::process_frame(
   cv::warpPerspective(image, warped, projection->homography(), projection->bev_size());
 
   publish_bev_cloud(warped, header, *projection, is_rear);
+
+  if (drivable_enabled_ && !is_rear) {
+    publish_drivable_area(warped, header, *projection);
+  }
 
   // The BEV view's only sink: a topic, read by RViz's Image display (or rqt_image_view). This
   // node deliberately opens no cv::imshow window of its own -- a GUI window pins the node to a

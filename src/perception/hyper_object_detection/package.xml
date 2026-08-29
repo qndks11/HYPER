@@ -21,6 +21,8 @@
        configured by hyper_camera's params_d435i.yaml. -->
   <exec_depend>hyper_camera</exec_depend>
   <exec_depend>realsense2_camera</exec_depend>
+  <!-- Rear depth -> /scan_rear pseudo-LaserScan, launched only when rear_scan:=true. -->
+  <exec_depend>depthimage_to_laserscan</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

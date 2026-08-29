@@ -37,6 +37,19 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'software_rendering', default_value='false',
             description='Force llvmpipe software rendering. Only needed on WSL2.'),
+        # 전방 카메라의 색 기반 주행가능영역 분류(/lane/drivable_area)를 켭니다. 기본은 off --
+        # 이 토픽을 실제로 읽는 쪽(hyper_planner/config/nav2_controller.yaml의 local_costmap
+        # plugins에 있는 drivable_area_layer)도 따로 켜야 주행이 달라집니다. 켜기 전에
+        # /lane/drivable/image_raw를 rqt_image_view로 먼저 확인하세요.
+        DeclareLaunchArgument(
+            'drivable_area', default_value='false',
+            description="Publish the camera drivable-area grid for nav2's DrivableAreaLayer"),
+        # 후방 RGBD 카메라의 깊이 영상을 유사 라이다(/scan_rear)로 변환해 local costmap의 두 번째
+        # 관측 소스로 씁니다. 기본은 off. 카메라가 수평(rear_camera_pitch 0.0)이라는 전제 위에
+        # 서 있으니 마운트를 바꿀 거면 perception.launch.py의 주석을 먼저 읽으세요.
+        DeclareLaunchArgument(
+            'rear_scan', default_value='false',
+            description="Publish /scan_rear from the rear camera's depth stream"),
         stage('sim.launch.py',
               headless=LaunchConfiguration('headless'),
               software_rendering=LaunchConfiguration('software_rendering')),
@@ -46,7 +59,9 @@ def generate_launch_description():
         # image_transport/compressed subscription. object_detection_node's own default is
         # already ros_raw, so no override needed for it.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
-            stage('perception.launch.py', lane_input_backend='ros_raw')]),
+            stage('perception.launch.py', lane_input_backend='ros_raw',
+                  drivable_area=LaunchConfiguration('drivable_area'),
+                  rear_scan=LaunchConfiguration('rear_scan'))]),
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             stage('behavior.launch.py', mission=LaunchConfiguration('mission'))]),
     ])

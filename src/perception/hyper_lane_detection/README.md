@@ -18,7 +18,8 @@
 - 입력: `input_backend`에 따라 다름 (위 참고)
 - 출력: `/lane/center`, `/stopline/detection`
 - 후방 출력: `/lane/rear_center`, `/stopline/rear_detection` (`intra_process`에서는 발행되지 않음)
-- 디버그 영상: `/lane/bev/image_raw`, `/lane/rear_bev/image_raw` (`sensor_msgs/Image`, BGR8)
+- 주행가능영역: `/lane/drivable_area` (`nav_msgs/OccupancyGrid`, `drivable.enabled` 필요 -- 아래 참고)
+- 디버그 영상: `/lane/bev/image_raw`, `/lane/rear_bev/image_raw`, `/lane/drivable/image_raw` (`sensor_msgs/Image`, BGR8)
 - 지면 투영 디버그: `/lane/bev/points`, `/lane/rear_bev/points` (`sensor_msgs/PointCloud2`, XYZRGB)
 
 ## 디버그 뷰 (BEV / IPM)
@@ -41,6 +42,103 @@ XYZRGB)를 씁니다. BEV 픽셀 하나가 점 하나이고, 위치는 아래 �
 | `bev_cloud_frame_id` | `body_link` | 오버레이를 발행할 차량 프레임. 이 프레임 원점이 BEV 안 어디에 오는지는 `GroundProjection::origin_px()`가 계산합니다(보통 마지막 행보다 **아래** — 전방 카메라는 자기 발밑 지면을 못 보기 때문). 이 스택의 base 프레임 이름은 `base_link`가 아니라 `body_link`입니다(ekf `base_link_frame`, nav2 `robot_base_frame`). |
 | `bev_cloud_stride` | `2` | 몇 픽셀마다 점을 만들지. 1이면 전체(640x260 BEV 기준 카메라당 16.6만 점/프레임). |
 | `bev_cloud_z_m` | `-0.15` | 지면 기준 z 오프셋. RViz가 코스트맵도 z=0에 그리므로 z-fighting 방지용이며, **음수**라서 오버레이가 코스트맵·경로·footprint 뒤로 깔립니다(양수면 그 위를 덮어버림). 두 EKF 모두 `two_d_mode`라 `body_link` 자체가 z=0이므로 이 값이 곧 코스트맵 평면과의 높이차입니다. 예전 `-0.02`는 너무 얇았습니다 — 코스트맵도 오버레이도 반투명(alpha 0.4 / 0.9)이라 깊이를 기록하지 않고 카메라 거리순으로만 정렬되므로, 2 cm 차이로는 시점에 따라 오버레이가 위로 올라왔습니다. |
+
+## 주행가능영역 (drivable area)
+
+전방 BEV를 **주행 가능(0) / 진입 금지(60) / 주행 불가(100) / 데이터 없음(-1)** 으로 분류해
+`/lane/drivable_area`
+(`nav_msgs/OccupancyGrid`, `bev_cloud_frame_id` 기준)로 발행합니다. 이걸 로컬 코스트맵에 넣는
+쪽은 `hyper_costmap_plugins`의 `DrivableAreaLayer`입니다 -- 그 README에 코스트 해석과 튜닝이
+있습니다.
+
+기본값은 **꺼짐**(`drivable.enabled: false`). 이 노드의 다른 출력은 구독자가 없으면 공짜인 디버그
+뷰지만 이건 코스트맵을 거쳐 차량을 조종하므로, 켜는 것은 launch 파일이 명시적으로 할 일입니다:
+
+```bash
+ros2 launch hyper_launch simulation.launch.py drivable_area:=true
+```
+
+### 학습 모델이 아니라 색 규칙인 이유
+
+시뮬레이터 코스 텍스처의 실제 색 분포(HSV):
+
+| | H | S | V | 판정 |
+| --- | --- | --- | --- | --- |
+| 아스팔트 | 4 | **12** | 151 | 주행 가능 |
+| 연석/갓길 | 90 | **1** | 178 | 주행 가능 |
+| 흰 페인트 | 0 | **0** | 255 | 주행 가능 |
+| 노란 차선 | 30 | 255 | 193 | **진입 금지**(넘으면 안 되는 선) |
+| 잔디 | 74 | **205** | 127 | 주행 불가 |
+
+노면 계열은 전부 무채색이고 코스를 가르는 것은 전부 유채색이라, 규칙 하나로 갈립니다:
+
+```
+surface = (S < surface_max_saturation) && !yellow_paint
+```
+
+밝기(V)가 아니라 **채도(S)**를 쓰는 이유는 그림자입니다 -- 그늘진 아스팔트는 어둡지만 여전히
+무채색이라, 밝기 임계값이 정확히 실패하는 지점에서 채도는 거의 움직이지 않습니다.
+
+노란 차선은 채도가 높아 이 규칙에서 이미 빠지고, **의도적으로 그대로 둡니다**. 노랑은 코스
+경계와 중앙선, 즉 넘으면 안 되는 선이므로, 노면에 뚫린 구멍으로 남겨두면 3단계 flood fill이
+반대 차선이나 코스 밖으로 새지 못하게 막는 벽이 됩니다. 다만 그게 전부입니다 -- 페인트 자체는
+다른 모든 비주행 영역과 똑같이 `kOffLimits`(60)로 나갑니다(4단계 참고). 흰 페인트는 무채색이라 그대로 노면으로 남습니다 -- 흰 선은 경계가 아니라
+차선 힌트입니다.
+(노랑 범위는 `LaneDetector::yellow_mask()`와 같은 값이므로 한쪽을 바꾸면 같이 바꾸세요.)
+
+### 네 단계
+
+1. **색** -- 위 규칙.
+2. **모폴로지** -- close 후 open, 반지름은 미터로 지정(`meters_per_pixel`이 바뀌어도 같은 뜻).
+   close가 글레어가 뚫은 구멍을 메워 flood fill이 새거나 쪼개지지 않게 하고, open이
+   잔디 위 고립된 회색 점을 지웁니다. 그다음 **노란 페인트를 다시 뺍니다** -- close 반지름은
+   차선 하나를 통째로 메울 만큼 넓어서, 먼저 빼두면 다시 메워집니다.
+3. **도달성** -- 차량 바로 앞 seed 패치가 닿는 연결 성분만 남깁니다. **이 단계가 핵심입니다**:
+   색만 보면 잔디 건너편 회색 도로도 주행 가능으로 읽히고, 컨트롤러는 코스 안쪽을 가로질러
+   계획합니다. BEV에서의 연결성이 곧 지면에서의 연결성이므로 "도달 가능"이 말 그대로 성립합니다.
+   2단계가 노란 차선을 구멍으로 남겨두므로, 끊기지 않은 노란 선은 아스팔트 가장자리와 똑같이
+   flood fill을 가둡니다.
+4. **라벨링** -- fill이 닿은 곳은 `kDrivable`(0), 프레임 안의 나머지는 전부
+   `kOffLimits`(60)입니다. 잔디든 페인트든 그 너머 반대 차선이든 세기를 나누지 않습니다.
+   **이 레이어는 어떤 셀도 치명으로 내보내지 않습니다**: 지면 평면 호모그래피에는 높이 정보가
+   없으므로, 한 프레임의 오분류(글레어, 그림자 경계, 보간된 원거리 행)가 충돌 판정이나 팽창
+   헤일로를 만들 수 있으면 안 됩니다. 높이는 라이다 장애물 레이어의 주제이고, 치명을 낼 수
+   있는 것도 그쪽입니다. 회피는 코스트맵의 `off_limits_cost`(200)가 MPPI에 주는 이격거리로
+   냅니다.
+
+   `kUndrivable`(100) 상수는 소비자 쪽(`DrivableAreaLayer`의 `lethal_threshold`) 때문에 남아
+   있을 뿐, 지금 이 검출기는 그 값을 만들지 않습니다.
+
+seed 패치에 노면이 `min_seed_coverage`만큼도 없으면 전부 **unknown**으로 발행하고 경고합니다 --
+전부 주행 불가가 아닙니다. 그 상태에서 빠져나오는 방법은 주행이고, 차 주위를 코스트로 둘러싸면
+그걸 막습니다.
+
+### 한계
+
+호모그래피 기반 지면 투영이 다 그렇듯 **세상이 지면이라고 가정**합니다. 높이가 있는 것(콘, 벽,
+다른 차)은 제 발자국이 아니라 카메라에서 멀어지는 방향으로 늘어집니다. 이 레이어 목적에는
+보수적인 방향의 오차지만(장애물 그림자가 주행 불가로 찍히고, 그 방향은 항상 차에서 *멀어지는*
+쪽), 그래서 이건 라이다 장애물 레이어의 **보완**이지 대체가 아닙니다. 코스의 언덕(hill)은 평면
+가정을 정면으로 깨므로 그 구간의 마스크는 틀립니다.
+
+### 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+| --- | --- | --- |
+| `drivable.enabled` | `false` | |
+| `drivable.max_range` | `6.0` | 발행할 전방 거리 [m]. local costmap의 `obstacle_max_range`와 맞췄습니다 |
+| `drivable.max_lateral` | `4.0` | 좌우 [m]. `bev.half_width`(9.0)는 프레임 가장자리 몇 픽셀에서 늘려낸 것이라 그대로 쓰면 flood fill에 가장 못 믿을 입력을 주는 셈입니다 |
+| `drivable.surface_max_saturation` | `40` | 분류기의 전부. 위 표 참고 |
+| `drivable.paint_hue_min` / `paint_hue_max` / `paint_min_saturation` | `22` / `35` / `80` | 노란 차선. `LaneDetector::yellow_mask()`와 같은 값 |
+| `drivable.close_radius` / `open_radius` | `0.12` / `0.06` | 모폴로지 반지름 [m] |
+| `drivable.seed_width` / `seed_depth` | `0.81` / `0.60` | seed 패치 [m]. 폭 기본값은 차량 윤거 |
+| `drivable.min_seed_coverage` | `0.25` | 이보다 낮으면 전부 unknown |
+
+### 디버그 뷰
+
+`/lane/drivable/image_raw` -- 크롭된 BEV 위에 초록(주행 가능)/주황(off-limits) 틴트와 seed 패치
+사각형(흰색 = seed 성공, 빨강 = 실패). BEV 디버그 뷰와 마찬가지로 **Best Effort**입니다.
+켜기 전에 이걸 `rqt_image_view`로 먼저 확인하세요.
 
 ## 지면 투영 (IPM) 파라미터
 

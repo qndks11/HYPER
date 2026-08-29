@@ -24,6 +24,14 @@ from launch_ros.actions import Node
 def _launch_setup(context, config, datums_yaml):
     datum_site = LaunchConfiguration('datum_site').perform(context)
 
+    # dual_ekf_navsat.yaml은 시뮬레이션 기준으로 use_sim_time: true를 박아 두고 있습니다.
+    # 실차에는 /clock을 내보내는 노드가 없어서 그대로 두면 세 노드 모두 멈춘 시계 위에서
+    # 돌며 아무것도 publish하지 않습니다. YAML 뒤에 dict로 얹어 덮어씁니다
+    # (파라미터는 나중에 오는 쪽이 이깁니다).
+    use_sim_time = LaunchConfiguration('use_sim_time').perform(context).lower() in (
+        'true', '1', 'yes')
+    clock_override = {'use_sim_time': use_sim_time}
+
     with open(datums_yaml) as f:
         datums = yaml.safe_load(f)['datums']
     if datum_site not in datums:
@@ -33,6 +41,7 @@ def _launch_setup(context, config, datums_yaml):
     datum = datums[datum_site]
 
     navsat_overrides = {
+        **clock_override,
         'wait_for_datum': True,
         'datum': [
             datum['latitude_deg'],
@@ -52,7 +61,7 @@ def _launch_setup(context, config, datums_yaml):
             executable='ekf_node',
             name='ekf_local',
             output='screen',
-            parameters=[config],
+            parameters=[config, clock_override],
             remappings=[
                 ('odometry/filtered', 'odometry/filtered_odom'),
             ],
@@ -66,7 +75,7 @@ def _launch_setup(context, config, datums_yaml):
             executable='ekf_node',
             name='ekf_global',
             output='screen',
-            parameters=[config],
+            parameters=[config, clock_override],
             remappings=[
                 ('odometry/filtered', 'odometry/filtered_map'),
             ],
@@ -104,6 +113,9 @@ def generate_launch_description():
     datums_yaml = os.path.join(share_dir, 'config', 'datums.yaml')
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'use_sim_time', default_value='true',
+            description='시뮬레이션은 true, 실차는 false'),
         DeclareLaunchArgument(
             'datum_site', default_value='sim',
             description="GPS origin to use, keyed into config/datums.yaml (e.g. 'sim', "

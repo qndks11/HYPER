@@ -9,9 +9,11 @@
 #include <opencv2/opencv.hpp>
 
 #include "rclcpp/rclcpp.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 
+#include "hyper_lane_detection/drivable_area.hpp"
 #include "hyper_lane_detection/ground_projection.hpp"
 #include "hyper_lane_detection/input_backend.hpp"
 
@@ -91,6 +93,34 @@ private:
     const hyper_lane_detection::GroundProjection & projection, bool is_rear);
 
   /**
+   * @brief Classifies the front camera's BEV into drivable / undrivable ground and publishes the
+   * result as a nav_msgs/OccupancyGrid in bev_cloud_frame_id_, for nav2's DrivableAreaLayer to
+   * fold into the local costmap.
+   *
+   * @details The grid is cropped out of the BEV first (see drivable_max_range_m_ /
+   * drivable_max_lateral_m_) and only then classified. Cropping first is not just cheaper: the
+   * configured half_width of 9 m puts the BEV's outer columns far past anything the source frame
+   * actually sampled well, and feeding that extrapolated fringe to the reachability flood fill
+   * lets it decide the road connects to things it does not.
+   *
+   * Published in the *vehicle* frame with an identity orientation, leaving the transform into the
+   * costmap's rolling odom frame to the costmap layer, which has the tf buffer and the message
+   * stamp to do it at the right time. Publishing pre-transformed here would bake in this node's
+   * idea of "now".
+   *
+   * Front camera only. The rear camera's BEV maps to -x/-y (see publish_bev_cloud), which an
+   * identity-orientation grid cannot express, and its job -- the close parking maneuver -- is not
+   * one the drivable-area mask helps with.
+   *
+   * @param view The warped front BEV (BGR8).
+   * @param header Header of the source frame; stamp kept, frame_id replaced.
+   * @param projection The front camera's ground projection, for the metric scale and origin.
+   */
+  void publish_drivable_area(
+    const cv::Mat & view, const std_msgs::msg::Header & header,
+    const hyper_lane_detection::GroundProjection & projection);
+
+  /**
    * @brief The ground projection for one camera at one source-frame size, building it on first
    * use and rebuilding it if that size ever changes.
    *
@@ -165,6 +195,26 @@ private:
   /// than painting over them. body_link is itself at z = 0 here -- both EKFs run two_d_mode --
   /// so this is the overlay's height above the costmap plane directly.
   double bev_cloud_z_m_{-0.15};
+
+  /// Publishes the drivable-area classification (see publish_drivable_area) and, separately, the
+  /// same classification tinted over the BEV for a human. The grid is latched-style reliable
+  /// rather than best-effort like the debug streams: a costmap layer that silently drops frames
+  /// degrades in a way nobody notices until the vehicle plans through a hedge.
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr drivable_grid_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr drivable_image_publisher_;
+
+  hyper_lane_detection::DrivableAreaDetector drivable_detector_;
+
+  /// Master switch. Off by default: this node's existing outputs are debug views that cost
+  /// nothing when unsubscribed, whereas this one feeds the costmap and therefore the controller,
+  /// so turning it on is a decision the launch file should make explicitly.
+  bool drivable_enabled_{false};
+
+  /// The BEV crop published as a grid, in meters ahead of and to either side of body_link.
+  /// The longitudinal default matches the local costmap's obstacle_max_range (6.0 m) so the
+  /// camera and the lidar agree on how far ahead the costmap is allowed to believe anything.
+  double drivable_max_range_m_{6.0};
+  double drivable_max_lateral_m_{4.0};
 
   /// Each camera's configured BEV geometry, and the projection built from it once a frame size
   /// is known. See projection_for().

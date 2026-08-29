@@ -17,6 +17,10 @@
   <depend>tf2_ros</depend>
   <depend>yaml-cpp</depend>
   <depend>generate_parameter_library</depend>
+  <!-- nav2_controller.yaml's local_costmap can load drivable_area_layer from this
+       package; pluginlib needs it installed even when the layer is commented out of
+       `plugins`, since a typo there fails at costmap activation, not at build. -->
+  <exec_depend>hyper_costmap_plugins</exec_depend>
   <exec_depend>nav2_common</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>

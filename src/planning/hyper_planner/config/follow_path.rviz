@@ -6,19 +6,18 @@ Panels:
       Expanded:
         - /Global Options1
         - /TF1
-        - /Mission Segment Path1
+        - /LaserScan1
+        - /LaserScan2
         - /Mission Segment Path1/Offset1
-        - /Waypoint Path (follow_path_client)1
         - /Waypoint Path (follow_path_client)1/Offset1
         - /MPPI Transformed Plan1/Offset1
         - /MPPI Trajectories1
         - /MPPI Trajectories1/Topic1
         - /MPPI Trajectories1/Namespaces1
-        - /BEV Ground Overlay (front)1
+        - /Local Costmap1
         - /BEV Ground Overlay (front)1/Topic1
-        - /Rear Depth Cloud1
       Splitter Ratio: 0.5
-    Tree Height: 195
+    Tree Height: 500
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -181,6 +180,40 @@ Visualization Manager:
       Use rainbow: true
       Value: true
     - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: -9999
+        Min Value: 9999
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/LaserScan
+      Color: 235; 85; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: LaserScan
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /scan_rear
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 255; 255; 255
@@ -268,7 +301,8 @@ Visualization Manager:
       Enabled: true
       Name: MPPI Trajectories
       Namespaces:
-        {}
+        Candidate Trajectories: false
+        Optimal Trajectory: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -404,7 +438,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: RGB8
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -425,7 +459,7 @@ Visualization Manager:
         Value: /lane/bev/points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -438,7 +472,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: RGB8
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -459,7 +493,7 @@ Visualization Manager:
         Value: /camera_rear/depth/points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
@@ -492,25 +526,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 18.828144073486328
+      Distance: 23.789825439453125
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -1.902022361755371
-        Y: 6.7572431564331055
-        Z: 1.0251998901367188e-05
+        X: -0.30185627937316895
+        Y: 5.21883487701416
+        Z: 1.4125136658549309e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.40979671478271484
+      Pitch: 0.8347971439361572
       Target Frame: body_link
       Value: ThirdPersonFollower (rviz_default_plugins)
-      Yaw: 1.7492055892944336
+      Yaw: 1.489193081855774
     Saved:
       - Class: rviz_default_plugins/ThirdPersonFollower
         Distance: 33.20220184326172
@@ -540,7 +574,7 @@ Window Geometry:
   Hide Right Dock: false
   Object Detection Camera:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd000000010000000000000246000003b9fc0200000005fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000146000000c900fffffffb0000000a005600690065007700730100000189000000ed000000a400fffffffb0000002e004f0062006a00650063007400200044006500740065006300740069006f006e002000430061006d006500720061010000027c0000017a0000002800ffffff00000534000003b900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd000000010000000000000246000003b9fc0200000005fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000277000000c900fffffffb0000000a005600690065007700730000000352000000a4000000a400fffffffb0000002e004f0062006a00650063007400200044006500740065006300740069006f006e002000430061006d00650072006101000002ba0000013c0000002800ffffff00000534000003b900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 1920

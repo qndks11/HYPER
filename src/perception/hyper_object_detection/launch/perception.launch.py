@@ -7,6 +7,7 @@ from launch.conditions import LaunchConfigurationEquals, LaunchConfigurationNotE
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -47,6 +48,70 @@ def generate_launch_description():
         default_value='ros_raw',
     )
 
+    # Turns the rear RGBD camera's depth stream into a pseudo-LaserScan on /scan_rear, which
+    # nav2's obstacle_layer folds into the local costmap as a second observation source (see
+    # hyper_planner/config/nav2_controller.yaml). Off by default for the same reason
+    # drivable_area is: it steers the vehicle.
+    #
+    # Only the simulation currently has a depth stream to convert -- params_d435i.yaml leaves
+    # enable_depth false on the real car -- so real.launch.py has no reason to pass this true
+    # until that changes.
+    rear_scan_arg = DeclareLaunchArgument(
+        'rear_scan',
+        default_value='false',
+    )
+
+    # depthimage_to_laserscan slices a band of image rows centered on cy and keeps the nearest
+    # valid range per column. That band is a constant-height horizontal plane ONLY because the
+    # rear camera is mounted level (parameters.yaml: rear_camera_pitch 0.0, 0.6 m above ground);
+    # tilt it down and the centre rows hit the road, and shortest-range-wins collapses the whole
+    # scan into a ring at that distance. Do not re-pitch that camera without revisiting this.
+    #
+    #   scan_height 40  -> +/-20 rows = +/-2.56 deg about level (fy = 446.8 at 848x480, 87 deg
+    #                      HFOV). The lowest ray in that band would not reach the ground until
+    #                      0.6 / tan(2.56 deg) = 13.4 m, comfortably past range_max, so no ground
+    #                      return can win a column. Widening this shortens that distance fast
+    #                      (scan_height 80 -> 6.7 m), which is when ground starts leaking in.
+    #   range_max 8.0   -> under the sensor's own 10 m depth clip (rear_depth_far) and well under
+    #                      the 13.4 m above.
+    #   range_min 0.3   -> the camera is bumper-flush, so this is ~0.28 m behind the car. The
+    #                      D435i's min-Z is 0.2 m (rear_depth_near); nothing closer is measurable.
+    #   output_frame    -> rear_camera_link, NOT an optical frame. A LaserScan is x-along-view /
+    #                      y-left, which is this link's convention; the node reads only the depth
+    #                      image's pixels and cx/fx, never its frame_id, so the sim stamping every
+    #                      rear stream with the x-forward link (vehicle.xacro's gz_frame_id) is
+    #                      not a problem here.
+    rear_depth_to_scan_node = Node(
+        package='depthimage_to_laserscan',
+        executable='depthimage_to_laserscan_node',
+        name='rear_depth_to_scan',
+        parameters=[{
+            'scan_time': 0.033,
+            'range_min': 0.3,
+            'range_max': 8.0,
+            'scan_height': 40,
+            'output_frame': 'rear_camera_link',
+        }],
+        remappings=[
+            ('depth', '/camera_rear/depth/image_raw'),
+            ('depth_camera_info', '/camera_rear/camera_info'),
+            ('scan', '/scan_rear'),
+        ],
+        output='screen',
+        condition=LaunchConfigurationEquals('rear_scan', 'true'),
+    )
+
+    # Publishes /lane/drivable_area, the colour-based drivable-ground classification that
+    # hyper_costmap_plugins' DrivableAreaLayer folds into the local costmap. Off by default: it is
+    # the only output of this stage that steers the vehicle rather than just being watchable, so
+    # enabling it is a decision an entrypoint launch file makes on purpose. Turning it on here
+    # without also adding drivable_area_layer to the local_costmap plugins in
+    # hyper_planner/config/nav2_controller.yaml just publishes a topic nobody reads.
+    drivable_area_arg = DeclareLaunchArgument(
+        'drivable_area',
+        default_value='false',
+    )
+
     # intra_process: hyper_camera's ElpCameraPublisherNode and LaneDetection load into one
     # process. rclcpp's intra-process manager hands the publisher's std::unique_ptr<Image>
     # straight to LaneDetection's subscription instead of serializing it over a DDS topic.
@@ -83,7 +148,14 @@ def generate_launch_description():
                 package='hyper_lane_detection',
                 plugin='LaneDetection',
                 name='lane_detection',
-                parameters=[real_bev_params, {'input_backend': 'intra_process'}],
+                parameters=[
+                    real_bev_params,
+                    {
+                        'input_backend': 'intra_process',
+                        'drivable.enabled': ParameterValue(
+                            LaunchConfiguration('drivable_area'), value_type=bool),
+                    },
+                ],
                 remappings=[
                     ('/image_raw', '/camera/image_raw'),
                     ('/rear_image_raw', '/camera_rear/image_raw'),
@@ -100,7 +172,11 @@ def generate_launch_description():
     lane_detection_node = Node(
         package='hyper_lane_detection',
         executable='lane_detection_node',
-        parameters=[{'input_backend': LaunchConfiguration('lane_input_backend')}],
+        parameters=[{
+            'input_backend': LaunchConfiguration('lane_input_backend'),
+            'drivable.enabled': ParameterValue(
+                LaunchConfiguration('drivable_area'), value_type=bool),
+        }],
         remappings=[
             ('/image_raw', '/camera/image_raw'),
             ('/rear_image_raw', '/camera_rear/image_raw'),
@@ -135,6 +211,9 @@ def generate_launch_description():
     return LaunchDescription([
         lane_input_backend_arg,
         object_input_backend_arg,
+        drivable_area_arg,
+        rear_scan_arg,
+        rear_depth_to_scan_node,
         lane_detection_container,
         lane_detection_node,
         logitech_camera_publisher_node,

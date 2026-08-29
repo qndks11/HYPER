@@ -97,11 +97,11 @@ controller_server:
       # 정상입니다: local costmap의 obstacle_max_range가 6.0 m라 그보다 먼 구간은 어차피
       # 빈 공간으로 평가됐습니다(6.0 m/s 시절에는 지평선의 2/3가 안 보이는 영역이었습니다).
       # 이제 지평선(6.2 m)과 시야(6.0 m)가 거의 맞습니다.
-      time_steps: 56
+      time_steps: 100
       model_dt: 0.05
-      batch_size: 1500
+      batch_size: 1000
       iteration_count: 1
-      temperature: 0.3
+      temperature: 0.6
       # gamma는 제어비용(control cost) 가중치입니다. MPPI에는 "목표 속도" 파라미터가 없고,
       # 순항 속도는 PathFollowCritic이 앞으로 당기는 힘과 이 항이 억제하는 힘의 균형점으로
       # 정해집니다. 실측/유도한 근사식:
@@ -234,7 +234,7 @@ controller_server:
         # 경로를 0.25 m로 다시 깔면서 점 개수도 32 -> 76으로 늘었습니다. 합쳐서 약 5배입니다.
         # controller_frequency(20 Hz)를 못 지키면 여기를 3으로 되돌리거나 batch_size를
         # 1000으로 낮추세요. (`ros2 topic hz /cmd_vel`로 확인)
-        trajectory_point_step: 2
+        trajectory_point_step: 4
         threshold_to_consider: 0.5
         # 이 critic에서 offset_from_furthest는 사실상
         # `path_segments_count < offset_from_furthest_ 이면 통째로 건너뛴다`는 가드로만
@@ -255,7 +255,7 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 8.0
+        cost_weight: 4.0
         offset_from_furthest: 6
         threshold_to_consider: 1.4
       # 경로의 앞 지점을 향해 차체 헤딩을 맞추게 하는 항. 코너 진입을 일찍 시작하게
@@ -395,11 +395,20 @@ local_costmap:
       # body_link 중심 기준 전장 1.34 / 전폭 0.81 직사각형
       footprint: "[[0.67, 0.405], [0.67, -0.405], [-0.67, -0.405], [-0.67, 0.405]]"
       footprint_padding: 0.03
-      plugins: ["obstacle_layer", "inflation_layer"]
+      # drivable_area_layer는 obstacle_layer 뒤, inflation_layer 앞에 둡니다. 이 레이어는 비용을
+      # 올리기만 하므로 라이다 마킹을 먼저 읽어도 손해가 없고, cost_value가 254(치명)이므로
+      # 팽창을 받으려면 반드시 inflation_layer보다 앞이어야 합니다.
+      #
+      # 이 레이어는 /lane/drivable_area가 안 나와도 안전합니다(has_data_가 false면 아무것도
+      # 하지 않고 current도 true로 보고). 실제 스위치는 perception 스테이지의 drivable_area
+      # 인자입니다: `ros2 launch hyper_launch simulation.launch.py drivable_area:=true`.
+      plugins: ["obstacle_layer", "drivable_area_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
-        observation_sources: scan
+        observation_sources: scan rear_scan
+        # 전방 180도만 옵니다(vehicle.xacro: min/max_angle -pi/2..+pi/2, 360 samples).
+        # 따라서 아래 raytrace_max_range 20.0이 지우는 것도 앞쪽 절반뿐입니다.
         scan:
           topic: /scan
           data_type: "LaserScan"
@@ -425,10 +434,116 @@ local_costmap:
           #  6.0에서는 회피 기동을 짤 여유가 없었습니다). 언덕 문제를 제대로 해결하면
           # (피치 반영 or 구간 지오펜스) obstacle_max_range를 다시 올리고, 그때 vx_max도
           # 같이 올릴지 판단하세요 -- 이 둘은 항상 초 단위 시야로 함께 봐야 합니다.
-          obstacle_max_range: 6.0
+          obstacle_max_range: 9.0
           obstacle_min_range: 0.0
           raytrace_max_range: 20.0
           raytrace_min_range: 0.0
+        # 후방 RGBD 카메라(D435i)의 깊이 영상을 depthimage_to_laserscan이 스캔으로 바꾼 것입니다
+        # (hyper_object_detection/launch/perception.launch.py, rear_scan:=true일 때만 켜짐).
+        # 지면 기준 0.6 m에 수평으로 달려 있으므로 스캔면 자체가 0.6 m 높이의 수평면입니다 --
+        # 즉 "높이가 0.6 m 부근인 것"만 봅니다.
+        #
+        # 라이다가 전방 180도로 좁혀지면서(vehicle.xacro의 lidar_sensor -- 범퍼에 얹혀 차체에
+        # 가려집니다) 이 소스는 "있으면 좋은 것"이 아니라 **차 뒤를 보는 유일한 센서**가
+        # 됐습니다. 후진 주차 스텝에서 local costmap의 뒤쪽을 채우는 게 여기뿐입니다.
+        #
+        # 부수적으로, 두 센서가 서로를 지우는 문제도 같이 사라졌습니다. nav2의 레이캐스팅은
+        # 2D라 높이를 안 보므로, 360도 라이다였을 때는 0.65 m 빔이 이 카메라가 0.6 m에서
+        # 마킹한 셀을 같은 사이클에 지워 버렸습니다. 이제 두 소스의 부채꼴이 겹치지 않습니다.
+        #
+        # 대신 새로 생긴 구멍: 뒤쪽 ±43.5도(이 카메라의 FOV) 바깥은 아무도 레이캐스트로
+        # 지우지 않습니다. obstacle_layer에는 decay가 없으므로, 전진 중 앞에서 마킹된 셀은
+        # 차가 지나간 뒤 rolling window(20 m) 밖으로 밀려날 때까지 남습니다. 후진 경로가
+        # 그 부채꼴 안에 있는 한 카메라가 지워 주니 실전에서는 견딜 만하지만, 옆뒤쪽에
+        # 유령 셀이 보인다면 이게 원인입니다.
+        #
+        # obstacle_max_range 6.0: range_max(8.0)보다 안쪽입니다. 스테레오 깊이 오차는 거리의
+        # 제곱에 비례하므로 D435i의 8 m 근처 값은 코스트맵에 넣을 만큼 안 믿음직합니다.
+        rear_scan:
+          topic: /scan_rear
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          # depthimage_to_laserscan은 무효 픽셀을 NaN으로 통과시킵니다(inf가 아니라).
+          # laser_geometry가 NaN을 버리므로 inf_is_valid는 여기서 아무 일도 하지 않습니다 --
+          # 즉 이 소스는 "아무것도 안 보이는 방향"을 지우지 못합니다. 위 scan이 그 역할을
+          # 계속 합니다.
+          inf_is_valid: false
+          # 높이 선택은 여기가 아니라 카메라 기하가 합니다(수평 마운트 + scan_height 행 대역).
+          # 그래서 z 필터는 위 scan과 같이 느슨하게 둡니다. 좁게 잡으면 안 되는 이유:
+          # min/max_obstacle_height는 *global_frame(odom)* 기준으로 걸리는데 odom의 z=0은
+          # 지면이 아니라 body_link(지면 위 0.3 m)이고, 게다가 ekf_local이 two_d_mode라
+          # tf에 피치가 없어 언덕에서는 이 값이 실제 높이와 어긋납니다. 좁은 대역을 걸면
+          # 어느 날 소스가 통째로 비어도 조용히 지나갑니다.
+          max_obstacle_height: 2.0
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 7.0
+          raytrace_min_range: 0.0
+      # hyper_lane_detection의 색 기반 주행가능영역 분류를 hyper_costmap_plugins가 코스트맵에
+      # 반영합니다. 위 `plugins`에 drivable_area_layer를 넣기 전까지는 아무 일도 하지 않습니다.
+      #
+      # 이건 또 하나의 장애물 소스가 *아닙니다*. 코스 밖 지면(잔디, 런오프, 연석 너머)을
+      # 표시하는데, 그것들은 높이가 없어서 라이다가 아예 못 봅니다. 반대로 콘이나 차량에 대해서는
+      # 아무 말도 하지 않습니다 -- 그건 라이다 몫이고, 두 레이어는 서로 겹치지 않는 실패 모드를
+      # 덮습니다.
+      #
+      # 위 obstacle_layer에 PointCloud2 observation_source로 넣으면 안 되는 이유: `scan`이
+      # clearing: true / raytrace_max_range 20.0으로 돌고, 평평한 지면을 가로지르는 라이다 빔은
+      # 지나가는 셀을 전부 지웁니다 -- 카메라가 방금 찍은 셀까지, 같은 사이클에.
+      drivable_area_layer:
+        plugin: "hyper_costmap_plugins::DrivableAreaLayer"
+        enabled: true
+        topic: /lane/drivable_area
+        # 이 레이어는 "가면 안 되는 곳"을 두 단계로 받을 수 있습니다: kUndrivable(100)과
+        # kOffLimits(60).
+        #
+        # 다만 지금 hyper_lane_detection은 **kOffLimits(60)만 내보냅니다** -- 잔디든 페인트든
+        # 반대 차선이든 전부 같은 세기입니다. 지면 평면 호모그래피에는 높이 정보가 없어서 한
+        # 프레임의 오분류가 충돌 판정을 만들면 안 되기 때문입니다(drivable_area.hpp 참고).
+        # 따라서 아래 cost_value(254)는 현재 도달하지 않는 경로이고, 이 레이어에서 나오는
+        # 실효 코스트는 off_limits_cost(200)뿐입니다. 아래 두 문단은 검출기가 다시
+        # kUndrivable을 내보내게 될 때를 위한 설명입니다.
+        #
+        # cost_value = 254(LETHAL): 코스 밖 지면. 여기서만 두 가지가 켜집니다.
+        #  1. MPPI ObstaclesCritic이 충돌로 판정합니다(consider_footprint: true에서 충돌은
+        #     footprint가 254 셀을 덮을 때만). 즉 코스를 벗어나는 궤적은 벌점이 아니라 폐기.
+        #  2. inflation_layer(radius 1.0)가 전파합니다 -- LETHAL 셀에서만 전파하므로.
+        # 누적기 덕분에 254는 같은 셀을 5프레임 연속 관측해야(60 x 5 > 254) 나옵니다.
+        #
+        # off_limits_cost = 200: 차선 페인트와 반대 차선. 253(INSCRIBED) 미만이라 충돌도
+        # 팽창도 아닙니다 -- 선을 넘는 건 규칙 위반이지 충돌이 아니고, 중앙선에 1 m 팽창이
+        # 붙으면 정작 주행 중인 차로가 막힙니다. 회피는 MPPI가 코스트를 거리로 역산해서
+        # 냅니다: d = 0.405 + ln(253/200)/3.0 = 약 0.48 m 이격.
+        #
+        # 코스 폭이 빠듯해 좁은 구간에서 1500개 궤적이 전부 무효가 되면(= controller_server가
+        # failure_tolerance 1.0초 뒤 abort) cost_value도 200으로 낮추세요. 그러면 코스 이탈도
+        # 충돌이 아니라 강한 선호가 됩니다.
+        cost_value: 200
+        off_limits_cost: 200
+        # 이 값 이상이면 마킹, 미만이면 클리어, 음수(데이터 없음 -- 워프에서 원본 픽셀을 못 읽은
+        # 모서리)는 둘 다 하지 않습니다.
+        mark_threshold: 50
+        # 마킹된 셀 중 이 값 이상이면 cost_value(치명), 미만이면 off_limits_cost로 올라갑니다.
+        # kUndrivable(100)과 kOffLimits(60) 사이를 가르는 값이라 둘을 바꾸려면 여기가 아니라
+        # drivable_area.hpp의 상수를 보세요.
+        lethal_threshold: 100
+        # 관측 1회당 증감량. 마킹은 cost_value(254)까지 5프레임이 걸리므로 한 프레임의 오분류
+        # (글레어, 그림자 경계, 보간된 원거리 행 하나)로는 차 앞에 벽이 생기지 않습니다.
+        # 클리어는 2프레임. 비대칭은 의도한 것입니다: 길이 막혔다고 잘못 믿으면 차가 서고, 길이
+        # 뚫렸다고 잘못 믿으면 피하기만 하므로, 믿음은 늦게 갖고 빨리 버리는 쪽이 안전합니다.
+        mark_step: 60
+        clear_step: 120
+        # 관측 여부와 무관하게 매 사이클(5 Hz) 모든 non-free 셀에 적용됩니다. 차 뒤로 지나간
+        # 셀은 다시 관측되어 지워질 일이 영영 없으므로, 한 바퀴 내내 남는 대신 약 4초에 걸쳐
+        # 흐려집니다. mark_step보다 작아야 계속 관측되는 셀이 cost_value에 도달할 수 있습니다.
+        decay_step: 10
+        # 이보다 오래된 그리드는 재반영하지 않고 무시합니다. 카메라 노드가 죽으면 마지막 프레임이
+        # 구독에 영원히 남는데, 그걸 계속 마킹하면 믿음이 그 상태로 얼어붙습니다 -- 무시하면
+        # decay가 free까지 되돌립니다.
+        message_timeout: 1.0
+        transform_tolerance: 0.2
+
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
