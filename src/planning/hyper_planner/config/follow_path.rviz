@@ -508,6 +508,34 @@ Visualization Manager:
         Reliability Policy: Best Effort
         Value: /perception/object_detection/annotated_image
       Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: BEV (front)
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lane/bev/image_raw
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Rear Camera
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /camera_rear/image_raw
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -573,6 +601,10 @@ Window Geometry:
   Hide Left Dock: false
   Hide Right Dock: false
   Object Detection Camera:
+    collapsed: false
+  BEV (front):
+    collapsed: false
+  Rear Camera:
     collapsed: false
   QMainWindow State: 000000ff00000000fd000000010000000000000246000003b9fc0200000005fb00000012004200450056002000460072006f006e0074000000003d0000012c0000000000000000fb0000001000420045005600200052006500610072000000011c000000d80000000000000000fb000000100044006900730070006c006100790073010000003d00000277000000c900fffffffb0000000a005600690065007700730000000352000000a4000000a400fffffffb0000002e004f0062006a00650063007400200044006500740065006300740069006f006e002000430061006d00650072006101000002ba0000013c0000002800ffffff00000534000003b900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:

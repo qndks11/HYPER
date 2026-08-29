@@ -7,7 +7,7 @@
 ```bash
 colcon build --packages-select hyper_waypoint
 source install/setup.bash
-ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/sim.csv -p min_spacing_m:=0.5
+ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv -p min_spacing_m:=0.5
 ```
 
 - `output_csv` 파라미터를 생략하면 노드를 실행한 위치에 `waypoint_record.csv`로 저장됩니다.

@@ -3,8 +3,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
 # same staggered stage delays apply so odometry/perception/behavior attach
@@ -32,6 +34,19 @@ def generate_launch_description():
             'launch', 'robot_state_publisher.launch.py')),
     )
 
+    # Full nav2 view (costmaps, planner/MPPI paths, footprint) -- same config
+    # hyper_planner's README points at for follow_path debugging, shared here since real.launch.py
+    # runs the same behavior.launch.py stage.
+    rviz = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        arguments=['-d', os.path.join(
+            get_package_share_directory('hyper_planner'),
+            'config', 'follow_path.rviz')],
+        condition=IfCondition(LaunchConfiguration('use_rviz')),
+    )
+
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
@@ -42,7 +57,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'datum_site', default_value='track',
             description='GPS 원점 (datums.yaml의 sim | school | track)'),
+        DeclareLaunchArgument(
+            'use_rviz', default_value='true',
+            description='Launch RViz with the follow_path nav2 view'),
         robot_state_publisher,
+        rviz,
         stage('sensors.launch.py'),
         # use_sim_time=false가 핵심입니다. 실차에는 /clock을 내보내는 노드가 없으므로,
         # dual_ekf_navsat.yaml에 박혀 있는 use_sim_time: true를 그대로 두면 ekf_local /
