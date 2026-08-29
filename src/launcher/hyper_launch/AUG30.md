@@ -36,11 +36,6 @@ GPS 정확도 모니터(hAcc/vAcc/fix/RTK 비트를 큰 글씨로) GUI가 같이
 | 바퀴 오도메트리 | `ros2 topic hz /odom` | 나와야 함. 없으면 아두이노 브리지가 죽은 것 |
 | EKF가 실제로 도는가 | `ros2 topic hz /odometry/filtered_map` | **30 Hz**. 0이면 녹화해 봐야 소용없음 |
 
-`/odom`과 `/odometry/filtered_map`은 GPS만큼 중요합니다. `/odom`이 없으면 ekf_local이 굶고,
-gps_heading의 초기 heading 시드 해제와 후진 판정도 같이 죽습니다. 지난 녹화가 실패한 이유가
-정확히 이것이었습니다 — `real.csv.diag.log`에 `ekf_local ... Actual frequency (Hz)=0.000000`이
-남아 있고, 그래서 `real.csv`에 점이 하나뿐입니다.
-
 명령줄로 직접 보고 싶으면:
 
 ```bash
@@ -150,10 +145,7 @@ ros2 launch hyper_launch real.launch.py \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
 ```
 
-> `datum_site`는 **1·2번과 반드시 같아야 합니다.** 웨이포인트는 위경도가 아니라 map 프레임
-> x,y로 저장되고 그대로 소비되므로(`waypoint_recorder_node.cpp` -> `mission_manager_node.cpp`),
-> 원점이 달라지면 코스 전체가 그 원점 차이만큼 통째로 옮겨집니다. school과 track은 약 30 km
-> 떨어져 있습니다. 대회장에서 녹화했다면 세 명령 모두 `datum_site:=track`으로 맞추세요.
+> `datum_site`는 1·2번과 같아야 합니다. 대회장이면 세 명령 모두 `track`.
 
 ### 출발 전 체크 (차를 세워 둔 채로)
 
