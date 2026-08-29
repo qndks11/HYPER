@@ -255,7 +255,7 @@ mission_manager:
 
   controller_vx_max:
     type: double
-    default_value: 2.22
+    default_value: 1.0
     description: |
       nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
       ratio = speed_limit / vx_max로 vx_max/vx_min/wz를 한꺼번에 곱하므로, vx_max보다 큰

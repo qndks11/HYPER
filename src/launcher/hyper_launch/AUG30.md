@@ -2,53 +2,26 @@
 
 오늘 목표 세 가지. **순서대로** 하세요 — 2번은 1번이 물려야 의미가 있고, 3번은 2번의 결과물을 씁니다.
 
-1. [RTK fix 확인](#1-rtk-fix-확인)
-2. [웨이포인트 기록](#2-웨이포인트-기록) — `joystick_control_real.launch.py` (레코더 + GUI 포함)
+1. [RTK fix 확인](#1-rtk-fix-확인) — `joystick_control_real.launch.py` (1번과 2번은 같은 스택,
+   내렸다 다시 안 띄워도 됨)
+2. [웨이포인트 기록](#2-웨이포인트-기록) — 같은 `joystick_control_real.launch.py` (레코더 + GUI 포함)
 3. [웨이포인트 따라가는지 확인](#3-웨이포인트-따라가는지-확인) — `real.launch.py`
-
-모든 터미널에서 먼저:
-
-```bash
-cd ~/HYPER && source install/setup.bash
-```
-
-> **수동 주행과 미션은 launch가 다릅니다.** `joystick_control_real.launch.py`(수동)와
-> `real.launch.py`(미션)는 **절대 같이 띄우지 마세요.** 둘 다 `/velocity` + `/steering_angle`을
-> 100 Hz로 쏘기 때문에, 스틱 중립(0.0) 명령과 nav2 명령이 번갈아 아두이노에 도착해서
-> 차가 자율주행을 못 합니다. 2번에서 3번으로 넘어갈 때 반드시 2번 트리를 Ctrl-C 하세요.
-
----
-
-## ⚠️ 시작 전에: `track` datum의 `initial_heading_deg`가 아직 `0.0` TODO입니다
-
-[datums.yaml](../../localization/hyper_localization/config/datums.yaml)의 `track:` 블록입니다.
-지자기 yaw를 어디에서도 안 쓰기 때문에 이 상수가 **map 프레임 방위의 유일한 시작 기준**이고,
-여기서 틀린 각도만큼 처음부터 틀어진 채로 출발합니다. 2번 본녹화 전에 채우세요.
-
-측정법(2번 준비 주행 중에 같이 하면 됩니다):
-
-```bash
-# 출발 지점에 차를 세운 뒤, 직선으로 10 m쯤 몰면서
-ros2 topic echo /imu/heading --field orientation
-```
-
-또는 지도에서 출발 방위각을 읽어 ENU(0=East, 90=North, 반시계 +)로 환산해 적습니다.
 
 ---
 
 ## 1. RTK fix 확인
 
-센서만 띄웁니다. EKF도 nav2도 필요 없습니다.
+2번과 같은 명령을 씁니다. `joystick_control_real.launch.py`가 센서(u-blox + NTRIP + IMU +
+라이다) + GPS 정확도 모니터 GUI를 이미 같이 띄우므로, 별도로 `sensors.launch.py`를 따로
+띄울 필요가 없습니다.
 
 ```bash
-# 터미널 1 — u-blox + NTRIP + IMU + 라이다
-ros2 launch hyper_launch sensors.launch.py
+# 터미널 1 — 센서 + TF + EKF + 조이스틱 + GPS 모니터 + RViz + 웨이포인트 레코더
+ros2 launch hyper_launch joystick_control_real.launch.py datum_site:=school
 ```
 
-```bash
-# 터미널 2 — GPS 정확도 모니터 (hAcc/vAcc/fix/RTK 비트를 큰 글씨로)
-ros2 run hyper_localization gps_accuracy_gui.py
-```
+GPS 정확도 모니터(hAcc/vAcc/fix/RTK 비트를 큰 글씨로) GUI가 같이 뜹니다. 아래 확인이 끝나면
+그대로 2번(웨이포인트 기록)으로 이어가면 됩니다 — 스택을 내렸다 다시 띄울 필요 없습니다.
 
 > GUI가 안 뜨고 죽으면 snap GTK 충돌입니다. `unset GTK_PATH GIO_MODULE_DIR` 후 다시 실행하세요.
 
@@ -56,7 +29,7 @@ ros2 run hyper_localization gps_accuracy_gui.py
 
 | 확인 | 명령 | 합격 기준 |
 | --- | --- | --- |
-| fix가 나오는가 | `ros2 topic hz /gps/fix` | **1 Hz** (`rtk.launch.py`의 `rate: 1.0`) |
+| fix가 나오는가 | `ros2 topic hz /gps/fix` | **5 Hz** (`rtk.launch.py`의 `rate: 5.0`) |
 | RTK 등급 | GUI의 우측 상태줄 | `RTK FIXED` (`FLOAT`면 아직 수렴 중) |
 | 수평 정확도 | GUI의 `Horizontal (hAcc)` | **FIXED면 0.02 m 근처**, FLOAT는 0.3~1 m, 단독측위는 1~3 m |
 | NTRIP 보정이 오는가 | `ros2 topic hz /rtcm` | 꾸준히 올라와야 함. 0이면 caster 연결 실패 |
@@ -81,19 +54,17 @@ ros2 topic echo /ublox_gps_node/navpvt --field flags
 
 ## 2. 웨이포인트 기록
 
-터미널 하나로 끝납니다. **nav2는 안 뜹니다** — 그게 이 launch를 따로 만든 이유입니다.
-센서 + TF + EKF + 아두이노 브리지 + 조이스틱 + GPS 모니터 + RViz + **웨이포인트 레코더와
-녹화 조작판 GUI**까지 한 트리입니다. 카메라와 차선/객체 인식은 아예 안 뜹니다(녹화에 쓰지
-않으면서 CPU만 먹습니다).
+1번에서 띄운 스택을 그대로 씁니다 — 내렸다 다시 띄울 필요 없습니다. 터미널 하나로 끝납니다.
+센서 + TF + EKF + 아두이노 브리지 + 조이스틱 + GPS 모니터 + RViz + **웨이포인트 레코더와 녹화 조작판 GUI**까지 한
+트리입니다. 카메라와 차선/객체 인식은 아예 안 뜹니다
 
 ```bash
-ros2 launch hyper_launch joystick_control_real.launch.py datum_site:=track
+ros2 launch hyper_launch joystick_control_real.launch.py datum_site:=school
 ```
 
 | 인자 | 기본값 | 비고 |
 | --- | --- | --- |
 | `datum_site` | `track` | 대회장이 아니면 `school` |
-| `use_rviz` | `true` | 주행 궤적(`/odometry/filtered_map`) 표시 |
 | `waypoint_csv` | `.../waypoints/real.csv` | 녹화 결과를 쓸 파일 |
 | `min_spacing_m` | `0.5` | 이 거리 이상 이동했을 때만 한 점 기록 |
 | `use_record_gui` | `true` | 녹화 조작판 GUI |
@@ -136,7 +107,7 @@ RViz에서 경로를 겹쳐 볼 수도 있습니다.
 ### 녹화 중 별도 터미널에서 같이 볼 것
 
 ```bash
-ros2 topic hz /imu/heading    # 주행 중 1 Hz 근처 (GPS fix rate와 같음)
+ros2 topic hz /imu/heading    # 주행 중 5 Hz 근처 (GPS fix rate와 같음)
 ```
 
 `/imu/heading`이 주행 중에도 계속 10 Hz면 **초기 heading 시드가 안 꺼진 것**이고, 그건 GPS
@@ -172,9 +143,6 @@ ros2 launch hyper_launch real.launch.py \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
 ```
 
-`waypoint_csv`를 **반드시** 주세요. 기본값이 `sim.csv`라 빼먹으면 시뮬레이션 코스가 실차에
-실립니다.
-
 ### 출발 전 체크 (차를 세워 둔 채로)
 
 behavior 스테이지는 9초 뒤에 뜹니다(`BEHAVIOR_DELAY_S`).
@@ -201,23 +169,8 @@ RViz에서 계획 경로가 실제 녹화한 코스와 겹쳐 보이는지 눈�
 ### 출발
 
 미션 매니저는 `auto_start` 기본값이 `false`라 사람이 눌러야 출발합니다.
-
-```bash
-ros2 service call /mission_manager/start std_srvs/srv/Trigger
-```
-
-**손은 항상 비상정지에.** 다른 서비스들:
-
-```bash
-ros2 service call /mission_manager/cancel std_srvs/srv/Trigger    # 취소
-ros2 service call /mission_manager/restart std_srvs/srv/Trigger   # 처음부터
-```
-
-커맨드라인 대신 버튼으로 누르고 싶으면:
-
-```bash
-ros2 run hyper_rqt hyper_panel
-```
+`real.launch.py`가 `use_panel:=true`(기본값)로 HYPER Panel을 behavior 스테이지와 같이
+이미 띄워 두므로, 뜬 창에서 **Start**를 누르세요.
 
 ### 주행 중 볼 것
 

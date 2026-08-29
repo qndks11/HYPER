@@ -144,7 +144,7 @@ controller_server:
       # 이 값을 바꾸면 mission_manager의 controller_vx_max도 반드시 같이 바꾸세요
       # (launch/mission.launch.py, src/mission_manager_parameters.yaml). 다르면
       # setSpeedLimit의 ratio가 1을 넘어 vx_max를 오히려 올려 버립니다.
-      vx_max: 2.22
+      vx_max: 1.0   # 임시 저속 테스트 (원래 2.22)
       vx_min: 0.0
       wz_max: 1.6
       # vx_std는 아래 gamma 주석의 순항 속도 식에 제곱으로 들어갑니다. PathFollowCritic의

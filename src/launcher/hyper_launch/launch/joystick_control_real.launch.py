@@ -3,7 +3,6 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
-from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -84,27 +83,12 @@ def generate_launch_description():
         output='screen',
     )
 
-    # 주행 궤적 확인용. 누적 Path를 내보내는 노드가 이 스택에 없으므로
-    # /odometry/filtered_map을 Keep 수를 크게 준 Odometry 디스플레이로 그립니다
-    # (phone_control_real.launch.py와 같은 설정 파일).
-    rviz = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', os.path.join(
-            hyper_launch_share, 'config', 'phone_control_real.rviz')],
-        condition=IfCondition(LaunchConfiguration('use_rviz')),
-    )
-
     return LaunchDescription([
         # GPS 원점. datums.yaml의 키입니다. 대회장이 아닌 곳에서 돌릴 때는
         # datum_site:=school 처럼 바꾸세요 (real.launch.py와 동일).
         DeclareLaunchArgument(
             'datum_site', default_value='track',
             description='GPS 원점 (datums.yaml의 sim | school | track)'),
-        DeclareLaunchArgument(
-            'use_rviz', default_value='true',
-            description='주행 궤적을 보여주는 RViz를 함께 띄웁니다'),
         DeclareLaunchArgument(
             'joystick_publish_period', default_value='0.0',
             description='/velocity + /steering_angle 발행 주기(초). 0.0이면 노드 기본값 100Hz'),
@@ -124,7 +108,6 @@ def generate_launch_description():
 
         robot_state_publisher,
         gps_accuracy_gui,
-        rviz,
         stage('sensors.launch.py'),
         stage('interface.launch.py'),
         joystick,

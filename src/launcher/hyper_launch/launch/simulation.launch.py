@@ -66,7 +66,7 @@ def generate_launch_description():
         # headless:=true면 Gazebo 3D 창을 띄우지 않습니다. 센서 렌더링은 오프스크린으로
         # 그대로 돌아가므로 카메라/라이다 토픽은 동일하게 나오고, 시각화는 rviz로 하면 됩니다.
         DeclareLaunchArgument(
-            'headless', default_value='false',
+            'headless', default_value='true',
             description='Run Gazebo without the 3D GUI window (sensors still render offscreen)'),
         # 렌더링은 기본이 네이티브 GPU입니다. WSL2에서만 software_rendering:=true가 필요합니다
         # (WSL2 가상 GPU가 ign gazebo를 죽이는 문제 우회 -- vehicle.launch.py 주석 참고).

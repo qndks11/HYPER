@@ -16,7 +16,7 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -51,21 +51,6 @@ def _launch_setup(context, config, datums_yaml):
         'magnetic_declination_radians': math.radians(datum['magnetic_declination_deg']),
         'yaw_offset': math.radians(datum['yaw_offset_deg']),
     }
-
-    # -----------------------------------------------------------------
-    # rviz_satellite 앵커: datum 위경도를 STATUS_FIX로 고정 publish.
-    #   실 GPS(/gps/fix)가 NO_FIX면 rviz_satellite가 타일을 안 그리므로, 위성
-    #   배경만을 위한 별도 고정 fix를 /aerial_map/anchor로 계속 내보낸다.
-    #   frame_id=map -> 타일 격자 중심이 map 원점(=navsat datum)에 놓여 EKF map
-    #   프레임과 정렬된다. ekf_global의 map->odom TF가 있어야 렌더된다.
-    # -----------------------------------------------------------------
-    anchor_msg = (
-        "{header: {frame_id: map}, "
-        "status: {status: 0, service: 1}, "
-        f"latitude: {datum['latitude_deg']}, "
-        f"longitude: {datum['longitude_deg']}, "
-        "altitude: 0.0, position_covariance_type: 0}"
-    )
 
     # 실차 IMU(WitMotion WT901BLE) 드라이버는 센서의 나침반식 각도(yaw가 시계방향 증가,
     # 센서 자체 0점 기준)를 그대로 orientation에 넣어 REP-103 ENU(0=East, 반시계 증가)와
@@ -123,11 +108,6 @@ def _launch_setup(context, config, datums_yaml):
 
     return imu_relay + [
         gps_heading,
-        ExecuteProcess(
-            cmd=['ros2', 'topic', 'pub', '-r', '1',
-                 '/aerial_map/anchor', 'sensor_msgs/msg/NavSatFix', anchor_msg],
-            output='screen',
-        ),
 
         # -----------------------------------------------------------------
         # 노드 1) 로컬 EKF (엔코더 + IMU -> odom)

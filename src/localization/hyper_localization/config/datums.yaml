@@ -65,8 +65,8 @@ datums:
     imu_yaw_sign:  1.0
     imu_yaw_offset_deg: -91.5
     imu_flip_gyro_z: false
-    # TODO(실차): 출발 지점 방위를 실측해서 채우세요. 0 = East.
-    initial_heading_deg: 0.0
+    # 주차선 방위각 196.99°(SSW, 진북 기준 시계방향) -> ENU(0=East, 반시계+) 환산: 90 - 196.99.
+    initial_heading_deg: -106.99
 
   track:
     latitude_deg: 37.2887947

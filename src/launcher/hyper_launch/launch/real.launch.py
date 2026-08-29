@@ -65,6 +65,21 @@ def generate_launch_description():
         output='screen',
     )
 
+    # hyper_rqt의 "HYPER Panel" -- simulation.launch.py와 동일하게 mission_manager
+    # start/cancel/skip/restart 버튼을 띄웁니다. model_service/teleport_service 그룹은
+    # 실차에 없는 서비스라 그냥 비활성(회색)으로 뜰 뿐 문제 없습니다(panel_widget.py의
+    # _poll()이 service_is_ready()로 버튼을 껐다 켰다 합니다).
+    #
+    # name=을 주지 않는 것이 중요합니다: launch_ros가 name을 붙이면 --ros-args -r
+    # __node:=... 가 argv에 끼는데, 이 실행 파일은 rqt_gui의 Main()이 argv를 직접
+    # 파싱하므로 알 수 없는 인자로 보고 죽습니다.
+    mission_panel = Node(
+        package='hyper_rqt',
+        executable='hyper_panel',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('use_panel')),
+    )
+
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
@@ -78,6 +93,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
             description='Launch RViz with the follow_path nav2 view'),
+        DeclareLaunchArgument(
+            'use_panel', default_value='true',
+            description='Launch the hyper_rqt HYPER Panel (mission start/cancel)'),
         # 미션이 실제로 따라갈 코스 CSV. 기본값이 sim.csv라는 점이 중요합니다 --
         # 실차에서는 반드시 녹화한 파일로 덮어쓰세요:
         #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
@@ -123,5 +141,6 @@ def generate_launch_description():
                   # nav2_controller.yaml의 use_sim_time을 덮어쓰므로 인자만 넘기면 됩니다.
                   use_sim_time='false'),
             stage('interface.launch.py'),
+            mission_panel,
         ]),
     ])
