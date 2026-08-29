@@ -58,7 +58,7 @@ class ArduinoInterfaceNode(Node):
     def __init__(self):
         super().__init__('arduino_interface_node')
 
-        self.declare_parameter('serial_port', '/dev/ttyACM0')
+        self.declare_parameter('serial_port', '/dev/ttyUSB0')
         self.declare_parameter('baud_rate', 115200)
         self.declare_parameter('send_rate', 50.0)
         self.declare_parameter('command_timeout', 0.3)

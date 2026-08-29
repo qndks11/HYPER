@@ -1,34 +1,53 @@
 // hyper_motor_interface.ino
 //
 // Receives {velocity [m/s], steering_angle [rad]} commands from
-// hyper_interface arduino_interface_node over USB serial and drives two
-// separate motor drivers with them: a BTS7960 for the drive motor
-// (throttle), an L298N for the steering motor.
+// hyper_interface arduino_interface_node over USB serial and drives THREE
+// motors, all BTS7960-driven: two drive motors (front + rear -- both wired
+// in parallel off the same PI output, see apply_drive(), since this vehicle
+// has only one drive encoder shared between them, not one per motor) and
+// one steering motor. This is an Uno/Nano pin budget squeeze: 3x BTS7960
+// needs 6 PWM pins (RPWM+LPWM each), which is every PWM-capable pin this
+// board has (3, 5, 6, 9, 10, 11) -- see the pin assignment block below for
+// how they're divided up, and don't reassign a pin here without checking
+// it's still PWM-capable and not needed elsewhere.
 //
 // Drive has a magnetic ABI (quadrature) encoder (see ../magnetic_encoder_test)
-// mounted on the drive motor shaft -- upstream of the drivetrain's gear
-// reduction, not on the wheel itself -- so it runs closed loop: a PI
-// controller compares measured wheel velocity (derived from the encoder via
-// DRIVE_GEAR_RATIO and WHEEL_CIRCUMFERENCE_M below) to the commanded
-// velocity and drives DRIVE_RPWM/LPWM toward it.
+// mounted on the (front) drive motor shaft -- upstream of the drivetrain's
+// gear reduction, not on the wheel itself -- so both drive motors run
+// closed loop together off it: a PI controller compares measured wheel
+// velocity (derived from the encoder via DRIVE_GEAR_RATIO and
+// WHEEL_CIRCUMFERENCE_M below) to the commanded velocity and drives both
+// motors' RPWM/LPWM identically toward it (see apply_drive()). There is no
+// independent feedback for the rear motor -- it's assumed to track the
+// front motor closely enough driving the same PWM open-loop between them;
+// if front/rear ever need independently tuned behavior (e.g. one wheel
+// slipping more than the other), this single-encoder/mirrored-PWM scheme
+// can't express that.
 // DRIVE_GEAR_RATIO and WHEEL_DIAMETER_M were measured by hand on this
 // vehicle -- see ../magnetic_encoder_test's README/comments for the
 // measurement procedure (spin the drive wheel a known number of turns,
 // read the raw encoder count delta, divide). Re-measure and update them if
 // the drivetrain, wheels, or this encoder's mounting change.
-// DRIVE_ENCODER_SIGN needs re-checking after this driver swap -- which
-// physical direction RPWM vs. LPWM drives the motor may have changed even
-// if the wiring "looks the same", so don't assume the old sign still holds;
-// re-verify with ../motor_sign_test before trusting the closed loop again.
+// DRIVE_ENCODER_SIGN needs re-checking after any drive motor/driver swap --
+// which physical direction RPWM vs. LPWM drives the motor may have changed
+// even if the wiring "looks the same", so don't assume the old sign still
+// holds; re-verify with ../motor_sign_test before trusting the closed loop
+// again.
 //
 // Steering has a 3-wire analog position sensor (see ../steering_sensor_test)
 // geared to the steering shaft, so it runs closed loop: a simple P
 // controller reads the sensor, compares it to the commanded steering_angle,
-// and drives STEER_EN/IN1/IN2 toward it, stopping once it is within
+// and drives STEER_RPWM/LPWM toward it, stopping once it is within
 // STEER_DEADBAND_RAD. STEER_RAW_RIGHT/STEER_RAW_LEFT below are the raw
 // analogRead() values measured at each steering lock -- if the sensor, its
 // gearing, or its supply voltage change, re-run steering_sensor_test.ino and
-// update those two constants.
+// update those two constants. Steering just moved from an L298N to a
+// BTS7960 (more current/torque, and different electrical noise
+// characteristics) -- STEER_KP/STEER_MIN_PWM/STEER_DEADBAND_RAD below were
+// tuned for the old L298N and will likely need re-tuning the same way the
+// drive motor's did after ITS BTS7960 swap (see that history in this file)
+// -- watch for the same trembling/oscillation symptoms and lower
+// STEER_KP/raise STEER_AVG_SAMPLES first if so.
 //
 // Wire format (11 bytes, little-endian) -- must match _make_packet() in
 // hyper_interface/arduino_interface_node.py:
@@ -38,31 +57,31 @@
 //   byte 6-9  : float32           steering_angle  [rad]
 //   byte 10   : uint8             checksum = XOR of bytes 2-9
 //
-// BTS7960 wiring (drive):
-//   DRIVE_RPWM_PIN (PWM) -> BTS7960 RPWM
-//   DRIVE_LPWM_PIN (PWM) -> BTS7960 LPWM
+// BTS7960 wiring (x3 -- drive front, drive rear, steering; identical
+// pattern for each, just different pins):
+//   *_RPWM_PIN (PWM) -> BTS7960 RPWM
+//   *_LPWM_PIN (PWM) -> BTS7960 LPWM
 //   BTS7960 R_EN, L_EN   -> Arduino 5V directly (not an Arduino pin -- this
 //                           sketch never toggles them, so there's no reason
 //                           to spend a GPIO pin on them)
 // BTS7960 R_IS/L_IS (current sense) are left unconnected -- not read by
-// this sketch. BTS7960 M+/M- go to the drive motor; B+/B- to the drive
-// motor's power supply, VCC/GND to 5V logic.
-// Only one of RPWM/LPWM is ever driven at a time (see set_drive_bts7960()):
-// RPWM > 0 for one direction, LPWM > 0 for the other, both 0 = coast.
-//
-// L298N wiring (steering):
-//   STEER_EN_PIN  (ENB, PWM) -> L298N ENB
-//   STEER_IN1_PIN            -> L298N IN3
-//   STEER_IN2_PIN            -> L298N IN4
-// L298N OUT3/OUT4 go to the steering motor; +12V/GND to the driver motor
-// supply, 5V/GND to its logic side (or jumper off the onboard 5V regulator
-// if the motor supply is 12V or less).
+// this sketch. BTS7960 M+/M- go to that motor; B+/B- to its power supply,
+// VCC/GND to 5V logic.
+// Only one of RPWM/LPWM is ever driven at a time per motor (see
+// set_bts7960()): RPWM > 0 for one direction, LPWM > 0 for the other, both
+// 0 = coast. The two drive motors' BTS7960 units get identical RPWM/LPWM
+// values every tick (see apply_drive()) -- wire drive front and drive rear
+// motors so that "RPWM > 0" means "forward" on BOTH (i.e. check each
+// motor's rotation direction independently with ../motor_sign_test, don't
+// assume they match just because the PWM is identical).
 //
 // Drive encoder wiring (see ../magnetic_encoder_test for the ABI-mode board
-// details -- pin 2 must be interrupt-capable, both free on an Uno/Nano
-// since none of the BTS7960/L298N pins above use them):
+// details -- pin 2 must be interrupt-capable):
 //   encoder A -> Arduino pin 2 (INT0 -- x1 decoding, see on_drive_encoder_edge())
-//   encoder B -> Arduino pin 3 (plain digital read, not an interrupt source)
+//   encoder B -> Arduino pin 4 (plain digital read, not an interrupt source
+//               -- moved off pin 3 when steering's BTS7960 swap needed pin 3
+//               as a 6th PWM output; x1 decoding only needs A to be
+//               interrupt-capable, B can be any free digital pin)
 //   encoder 5V/GND -> Arduino 5V/GND (JP1 set to 5V on the AS5047P board)
 // DRIVE_ENCODER_SIGN below may need flipping: after uploading, command a
 // small positive /velocity and confirm the VEL telemetry line's "current"
@@ -73,18 +92,20 @@
 #include <avr/io.h>   // PIND -- direct port read in on_drive_encoder_edge()
 
 // ---- Pin assignment (change to match your wiring) ----
-// Drive (BTS7960) -- RPWM/LPWM must both be PWM-capable pins. R_EN/L_EN are
-// wired straight to 5V (see the wiring comment above), not to Arduino pins.
-const uint8_t DRIVE_RPWM_PIN = 9;
-const uint8_t DRIVE_LPWM_PIN = 6;
-// Steering (L298N channel B)
-const uint8_t STEER_EN_PIN = 10;  // ENB, must be a PWM-capable pin
-const uint8_t STEER_IN1_PIN = 12;
-const uint8_t STEER_IN2_PIN = 11;
+// All three BTS7960 RPWM/LPWM pins below must be PWM-capable -- on an
+// Uno/Nano that's only pins 3, 5, 6, 9, 10, 11, and all six are spoken for
+// here. R_EN/L_EN on every BTS7960 are wired straight to 5V (see the wiring
+// comment above), not to Arduino pins.
+const uint8_t DRIVE_FRONT_RPWM_PIN = 9;   // unchanged from the single-drive-motor wiring
+const uint8_t DRIVE_FRONT_LPWM_PIN = 6;   // unchanged from the single-drive-motor wiring
+const uint8_t DRIVE_REAR_RPWM_PIN = 5;
+const uint8_t DRIVE_REAR_LPWM_PIN = 3;
+const uint8_t STEER_RPWM_PIN = 10;
+const uint8_t STEER_LPWM_PIN = 11;
 
 // ---- Drive encoder (see ../magnetic_encoder_test) ----
 const uint8_t DRIVE_ENC_A_PIN = 2;  // must be interrupt-capable (INT0 on Uno/Nano)
-const uint8_t DRIVE_ENC_B_PIN = 3;  // read only, not an interrupt source (x1 decoding)
+const uint8_t DRIVE_ENC_B_PIN = 4;  // read only, not an interrupt source (x1 decoding)
 
 // Encoder's rated pulses-per-revolution (see ../magnetic_encoder_test,
 // measured empirically via its index/Z pulse: 1000 PPR on this unit).
@@ -124,15 +145,18 @@ const long DRIVE_COUNTS_PER_REV = DRIVE_ENCODER_PULSES_PER_REV;
 // Rather than fix the actual noise (shielding/filtering the encoder
 // wiring, or debouncing in software), this value was inflated to
 // compensate empirically: 43.46 * (3.5605m odom / 2m actual) = 77.37.
+// Re-corrected again after 77.37 turned out to now UNDER-estimate by
+// ~11% (two repeat runs: 1.775m and 1.778m odom for ~2m actual, quite
+// repeatable) -- 77.37 * (1.7765m avg / 2m actual) = 68.72.
 //
 // This is a BAND-AID, not a real gear ratio, and it also feeds
-// update_measured_drive_velocity() -- inflating it doesn't just fix
-// /odom's displayed distance, it also makes the PI drive loop believe the
-// vehicle is going faster than it actually is at any given encoder count
-// rate, so the real-world speed for a given /velocity command is now
-// SLOWER than commanded by roughly the same ~78% factor. If that's a
-// problem, fix the actual EMI instead and put this back to 43.46.
-const float DRIVE_GEAR_RATIO = 77.37f; // NOT a real gear ratio -- see comment above
+// update_measured_drive_velocity() -- inflating/deflating it doesn't just
+// change /odom's displayed distance, it also changes how fast the PI
+// drive loop believes the vehicle is going at any given encoder count
+// rate, so the real-world speed for a given /velocity command shifts by
+// roughly the same factor. If that's a problem, fix the actual EMI
+// instead and put this back to 43.46 (the direct hand-turn measurement).
+const float DRIVE_GEAR_RATIO = 68.72f; // NOT a real gear ratio -- see comment above
 
 // Drive wheel diameter, measured by hand (tire included).
 const float WHEEL_DIAMETER_M = 0.27f;
@@ -144,13 +168,32 @@ const float WHEEL_CIRCUMFERENCE_M = PI * WHEEL_DIAMETER_M;
 // check it.
 const int8_t DRIVE_ENCODER_SIGN = -1;
 
+// Flips the sign of the PWM actually sent to the drive motors (see
+// apply_drive()) -- separate from DRIVE_ENCODER_SIGN above, which only
+// corrects the FEEDBACK reading; this corrects the OUTPUT direction.
+// Confirmed with ../drive_direction_test: +90 raw PWM (no sign correction
+// applied), motor-driven (not pushed by hand) -- the vehicle drove itself
+// BACKWARD. So a positive controller output needs to be inverted before
+// it reaches the motors for positive /velocity to mean forward -- hence
+// -1. (A separate hand-push test, done to check DRIVE_ENCODER_SIGN, showed
+// forward motion gives a negative raw encoder count regardless of what
+// turned the wheel -- that one's unaffected by this constant and still
+// correctly implies DRIVE_ENCODER_SIGN=-1 above.) Re-verify with
+// ../drive_direction_test (letting the sketch itself drive the motor, not
+// pushing by hand) after any future drive motor/driver/wiring change.
+const int8_t DRIVE_MOTOR_SIGN = -1;
+
 // ---- Steering position sensor (see ../steering_sensor_test) ----
 const uint8_t STEER_SENSOR_PIN = A0;
 
 // Raw analogRead() values measured at each physical steering lock (5V supply).
 // Re-measure with steering_sensor_test.ino if the sensor or its wiring changes.
-const int STEER_RAW_RIGHT = 34;  // -MAX_STEERING_ANGLE
-const int STEER_RAW_LEFT = 654;  // +MAX_STEERING_ANGLE
+// Re-measured after the L298N->BTS7960 steering swap (also caught and fixed
+// a ~100-count center offset from a first pass at this remeasurement --
+// this final pass's center (~520 raw) lines up with the geometric midpoint
+// ((18+1018)/2 = 518) within noise, so that's resolved).
+const int STEER_RAW_RIGHT = 18;   // -MAX_STEERING_ANGLE
+const int STEER_RAW_LEFT = 1018;  // +MAX_STEERING_ANGLE
 
 // P-controller gain: PWM duty per radian of (target - current) error. Tuned by
 // trial -- start low and raise it until the steering responds promptly
@@ -205,7 +248,7 @@ const int16_t DRIVE_MIN_PWM = 60;
 const unsigned long BAUD_RATE = 115200;
 
 // ---- Command scaling -- keep in sync with hyper_interface parameters.yaml ----
-const float MAX_VELOCITY = 5.0f;          // [m/s] -- not read by the PI drive loop
+const float MAX_VELOCITY = 1.0f;          // [m/s] -- not read by the PI drive loop
                                            // (see apply_drive()), kept only as a
                                            // doc reference matching hyper_control /
                                            // hyper_interface's parameters.yaml.
@@ -242,16 +285,18 @@ volatile long drive_encoder_count = 0;
 // handler should stay as fast as possible since it still fires often (up
 // to ~250k/s at this encoder's resolution/gear ratio at higher drive
 // speeds -- 1/4 of x4's rate, but still a lot). PIND is a direct register
-// read of pins 0-7, and DRIVE_ENC_B_PIN (3) is bit 3 of it on an Uno/Nano
-// (ATmega328P) -- if this pin or the board changes, this must be updated
-// to match.
+// read of pins 0-7, and DRIVE_ENC_B_PIN (4, moved from 3 when steering's
+// BTS7960 swap needed pin 3 as a PWM output -- see this file's header
+// comment) is bit 4 of it on an Uno/Nano (ATmega328P) -- if this pin or the
+// board changes, this must be updated to match.
 //
 // Which raw sign means "forward" doesn't matter here -- DRIVE_ENCODER_SIGN
 // corrects for it, and was verified to still hold for this decode scheme
 // (see ../encoder_x1_test: forward/backward hand-spins gave the same sign
-// convention as x4 did).
+// convention as x4 did) -- re-verify again after moving B to pin 4, since
+// that verification predates the pin move.
 void on_drive_encoder_edge() {
-  if ((PIND >> 3) & 0x1) {
+  if ((PIND >> 4) & 0x1) {
     drive_encoder_count--;
   } else {
     drive_encoder_count++;
@@ -286,11 +331,12 @@ float target_steering_angle = 0.0f;
 void setup() {
   Serial.begin(BAUD_RATE);
 
-  pinMode(DRIVE_RPWM_PIN, OUTPUT);
-  pinMode(DRIVE_LPWM_PIN, OUTPUT);
-  pinMode(STEER_EN_PIN, OUTPUT);
-  pinMode(STEER_IN1_PIN, OUTPUT);
-  pinMode(STEER_IN2_PIN, OUTPUT);
+  pinMode(DRIVE_FRONT_RPWM_PIN, OUTPUT);
+  pinMode(DRIVE_FRONT_LPWM_PIN, OUTPUT);
+  pinMode(DRIVE_REAR_RPWM_PIN, OUTPUT);
+  pinMode(DRIVE_REAR_LPWM_PIN, OUTPUT);
+  pinMode(STEER_RPWM_PIN, OUTPUT);
+  pinMode(STEER_LPWM_PIN, OUTPUT);
 
   pinMode(DRIVE_ENC_A_PIN, INPUT_PULLUP);
   pinMode(DRIVE_ENC_B_PIN, INPUT_PULLUP);
@@ -378,29 +424,22 @@ void process_packet() {
   last_packet_ms = millis();
 }
 
-// Drives one L298N channel: pwm > 0 -> IN1 HIGH/IN2 LOW (forward),
-// pwm < 0 -> IN1 LOW/IN2 HIGH (reverse), pwm == 0 -> both LOW (coast/stop).
-// Used for steering only -- see set_drive_bts7960() for the drive motor.
-void set_channel(uint8_t en_pin, uint8_t in1_pin, uint8_t in2_pin, int16_t pwm) {
-  digitalWrite(in1_pin, pwm > 0 ? HIGH : LOW);
-  digitalWrite(in2_pin, pwm < 0 ? HIGH : LOW);
-  analogWrite(en_pin, abs(pwm));
-}
-
-// Drives the BTS7960: pwm > 0 -> RPWM=pwm/LPWM=0 (one direction),
+// Drives one BTS7960: pwm > 0 -> RPWM=pwm/LPWM=0 (one direction),
 // pwm < 0 -> RPWM=0/LPWM=-pwm (the other), pwm == 0 -> both 0 (coast/stop).
 // Only one of RPWM/LPWM is ever nonzero at a time -- driving both
-// simultaneously is invalid for this driver (shoot-through risk).
-void set_drive_bts7960(int16_t pwm) {
+// simultaneously is invalid for this driver (shoot-through risk). Shared by
+// all three BTS7960 units (drive front, drive rear, steering) -- see
+// apply_drive()/apply_steering() for how each calls this with its own pins.
+void set_bts7960(uint8_t rpwm_pin, uint8_t lpwm_pin, int16_t pwm) {
   if (pwm > 0) {
-    analogWrite(DRIVE_RPWM_PIN, pwm);
-    analogWrite(DRIVE_LPWM_PIN, 0);
+    analogWrite(rpwm_pin, pwm);
+    analogWrite(lpwm_pin, 0);
   } else if (pwm < 0) {
-    analogWrite(DRIVE_RPWM_PIN, 0);
-    analogWrite(DRIVE_LPWM_PIN, -pwm);
+    analogWrite(rpwm_pin, 0);
+    analogWrite(lpwm_pin, -pwm);
   } else {
-    analogWrite(DRIVE_RPWM_PIN, 0);
-    analogWrite(DRIVE_LPWM_PIN, 0);
+    analogWrite(rpwm_pin, 0);
+    analogWrite(lpwm_pin, 0);
   }
 }
 
@@ -500,7 +539,14 @@ void apply_drive(float velocity_target) {
     }
   }
 
-  set_drive_bts7960(pwm);
+  // Both drive motors get the identical PWM -- see this file's header
+  // comment for why there's no independent front/rear feedback.
+  // DRIVE_MOTOR_SIGN applied here (not earlier) so drive_integral/pwm still
+  // reflect the controller's own view of the error -- only the final motor
+  // command direction is corrected.
+  int16_t motor_pwm = (int16_t)(DRIVE_MOTOR_SIGN * pwm);
+  set_bts7960(DRIVE_FRONT_RPWM_PIN, DRIVE_FRONT_LPWM_PIN, motor_pwm);
+  set_bts7960(DRIVE_REAR_RPWM_PIN, DRIVE_REAR_LPWM_PIN, motor_pwm);
 }
 
 // Number of analogRead() samples averaged together in read_steering_angle().
@@ -543,11 +589,12 @@ void apply_steering(float steering_angle_target) {
     }
   }
 
-  set_channel(STEER_EN_PIN, STEER_IN1_PIN, STEER_IN2_PIN, pwm);
+  set_bts7960(STEER_RPWM_PIN, STEER_LPWM_PIN, pwm);
 }
 
 void stop_all() {
   drive_integral = 0.0f; // don't carry windup across a stop into the next command
-  set_drive_bts7960(0);
-  set_channel(STEER_EN_PIN, STEER_IN1_PIN, STEER_IN2_PIN, 0);
+  set_bts7960(DRIVE_FRONT_RPWM_PIN, DRIVE_FRONT_LPWM_PIN, 0);
+  set_bts7960(DRIVE_REAR_RPWM_PIN, DRIVE_REAR_LPWM_PIN, 0);
+  set_bts7960(STEER_RPWM_PIN, STEER_LPWM_PIN, 0);
 }
