@@ -3,7 +3,11 @@
     # USB serial link to the Arduino. Check with `ls /dev/serial/by-id/` -- prefer a
     # by-id symlink over /dev/ttyACM0 / /dev/ttyUSB0 if more than one USB serial
     # device is ever plugged in, since the ttyACM/ttyUSB number is not stable.
-    serial_port: "/dev/ttyACM0"
+    # This board uses a CH340 USB-serial chip, which shows up as /dev/ttyUSB*,
+    # NOT /dev/ttyACM* (that's for boards with native USB or an FTDI chip) --
+    # confirm with `lsusb` (look for "QinHeng Electronics CH340") if this
+    # stops matching after swapping boards.
+    serial_port: "/dev/ttyUSB0"
     baud_rate: 115200
 
     # Rate at which /velocity + /steering_angle are packed and sent to the Arduino.
@@ -20,7 +24,7 @@
     # hyper_planner's max_velocity / max_steering_angle so the Arduino never sees
     # a command outside what it was tuned for. These also define the ROS-side end
     # of the linear mapping to PWM duty on the Arduino (see hyper_motor_interface.ino).
-    max_velocity: 5.0 # 실차 테스트용으로 하향, hyper_control과 동일하게 맞춤 [m/s]
+    max_velocity: 1.0 # 저속 테스트용으로 하향. hyper_control과 동일하게 맞춤 [m/s]
     max_steering_angle: 0.5235988 # ~30 deg [rad]
 
     # Front-to-rear axle distance, used for the bicycle-model yaw rate

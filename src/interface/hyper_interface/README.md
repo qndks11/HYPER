@@ -62,12 +62,14 @@ L298N 보드의 5V 레귤레이터 점퍼를 꽂아 별도 5V 없이 로직 전�
 
 1. Arduino IDE로 `arduino/hyper_motor_interface/hyper_motor_interface.ino`를 보드에 업로드합니다.
 2. `python3-serial` 설치 확인: `sudo apt install python3-serial` (또는 `pip install pyserial`).
-3. 연결된 포트 확인: `ls /dev/serial/by-id/` (포트 번호가 밀릴 수 있으니 `/dev/ttyACM0`보다
-   `by-id` 심볼릭 링크 사용을 권장합니다).
+3. 연결된 포트 확인: `ls /dev/serial/by-id/` (포트 번호가 밀릴 수 있으니 `/dev/ttyUSB0`보다
+   `by-id` 심볼릭 링크 사용을 권장합니다). 이 보드는 CH340 칩셋이라 `/dev/ttyUSB*`로 잡힙니다
+   (네이티브 USB나 FTDI 보드는 `/dev/ttyACM*`) -- `lsusb`로 "QinHeng Electronics CH340"이
+   보이는지 확인.
 4. 노드 실행:
 
 ```bash
-ros2 launch hyper_interface interface.launch.py serial_port:=/dev/ttyACM0
+ros2 launch hyper_interface interface.launch.py serial_port:=/dev/ttyUSB0
 ```
 
 `/velocity`, `/steering_angle`에 직접 퍼블리시하거나(`ros2 topic pub ...`), 조이스틱

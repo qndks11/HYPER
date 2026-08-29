@@ -15,7 +15,7 @@
     max_steering_angle: 0.5235988 # 최대 조향각 약 30도 (실차 주행 및 서보 보호용) [rad]
     max_steering_angular_velocity: 2.0 # 고성능 조향 모터/서보 반영으로 상향 [rad/s]
     max_steering_effort: 15.0 # 대형 차체를 돌리기 위한 조향 토크 상향 [Nm]
-    max_velocity: 5.0 # 실차 테스트용으로 하향 (원래 T8 Sport 순정 최고 속도는 약 16km/h=10.0) [m/s]
+    max_velocity: 1.0 # 저속 테스트용으로 하향 (원래 T8 Sport 순정 최고 속도는 약 16km/h=10.0) [m/s]
     max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
 
     # Camera and image params (ELP 2MP Global Shutter Fisheye AR0234, 153-degree hfov)
