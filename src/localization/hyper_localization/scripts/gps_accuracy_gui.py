@@ -6,11 +6,20 @@
 #   /ublox_gps_node/navpvt   (ublox_msgs/NavPVT)  -> hAcc/vAcc, fix, RTK, 위성수
 #   /odometry/gps            (nav_msgs/Odometry)  -> GPS만으로 푼 map 좌표 x/y
 #   /odometry/filtered_map   (nav_msgs/Odometry)  -> EKF 융합 map 좌표 x/y + yaw
+#   /imu/raw                 (sensor_msgs/Imu)    -> WitMotion WT901BLE의 BLE 링크 상태
 #
 # x/y를 두 벌 다 띄우는 이유: navsat_transform이 내는 /odometry/gps는 GPS만의
 # 답이고 ekf_global이 내는 /odometry/filtered_map은 IMU/엔코더까지 섞은 답이라,
 # 둘이 벌어지는 정도가 곧 추측항법 드리프트다. 한쪽만 보면 EKF가 발산해도
 # 눈치채기 어렵다.
+#
+# BLE 상태는 witmotion_ros2가 따로 토픽으로 내주지 않는다(연결/끊김을 로그로만
+# 찍는다). 게다가 그 드라이버는 deps.repos로 가져오는 별도 저장소라 여기서 상태
+# publisher를 심어도 다음 vcs import 때 사라진다. 그래서 "드라이버가 내는 원본
+# 토픽이 지금 흐르고 있는가"로 링크 상태를 대신 본다 -- BLE가 끊기면 드라이버는
+# 재연결될 때까지 아무것도 publish하지 않으므로 실질적으로 같은 신호다.
+# /imu(relay 출력)가 아니라 /imu/raw를 보는 이유: relay가 죽은 것과 BLE가 끊긴
+# 것을 구분하기 위해서다.
 #
 # hAcc/vAcc는 NavPVT에서만 온다. NavSatFix(/gps/fix)의 position_covariance로
 # hAcc는 역산되지만(covariance = hAcc^2) vAcc/fix_type/num_sv/RTK 비트는 없다.
@@ -24,11 +33,15 @@ import math
 import signal
 import sys
 import threading
+import time
+
+from collections import deque
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu
 from ublox_msgs.msg import NavPVT
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
@@ -63,6 +76,16 @@ COLOR_GPS = '#58a6ff'    # /odometry/gps 계열
 COLOR_EKF = '#bc8cff'    # /odometry/filtered_map 계열
 
 STALE_MS = 2000
+
+# IMU 링크는 GPS보다 훨씬 빠르게(수십~수백 Hz) 도는 토픽이라 잠깐만 끊겨도 바로
+# 티가 난다. 1초면 재연결 대기(reconnect_wait_seconds 기본 5초)보다 짧아서
+# 끊김을 곧바로 잡아내면서도 BLE 알림 지터에 오탐하지 않는다.
+IMU_STALE_S = 1.0
+IMU_POLL_MS = 500
+# Hz는 여러 폴링 구간에 걸쳐 평균낸다. 드라이버가 BLE notify 한 번에 들어온
+# 샘플을 한꺼번에 publish하기 때문에, 500ms 창 하나만 보면 같은 50Hz 센서가
+# 27Hz -> 144Hz로 튄다.
+IMU_RATE_WINDOW = 4
 
 
 def format_accuracy(metres):
@@ -170,6 +193,42 @@ class CompassWidget(QWidget):
         p.drawLine(QPointF(cx, cy), tail)
 
 
+class ImuLinkMonitor:
+    """드라이버 원본 IMU 토픽의 수신 유무/주기를 센다.
+
+    Imu 메시지는 초당 수십~수백 개가 오므로 위젯 갱신을 메시지마다 signal로
+    던지면 Qt 이벤트 루프가 그것만 처리하게 된다. ROS 콜백에서는 카운터만
+    올리고, Qt 쪽 QTimer가 IMU_POLL_MS마다 여기서 값을 꺼내 그린다.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._count = 0
+        self._last_rx = None          # 마지막 수신 시각 (monotonic)
+        self._window_start = time.monotonic()
+        self._buckets = deque(maxlen=IMU_RATE_WINDOW)   # (개수, 구간 길이)
+
+    def on_message(self):
+        now = time.monotonic()
+        with self._lock:
+            self._count += 1
+            self._last_rx = now
+
+    def sample(self):
+        """(hz, age_s) 반환. 한 번도 못 받았으면 age_s는 None."""
+        now = time.monotonic()
+        with self._lock:
+            elapsed = now - self._window_start
+            self._buckets.append((self._count, elapsed))
+            self._count = 0
+            self._window_start = now
+            last_rx = self._last_rx
+            total = sum(c for c, _ in self._buckets)
+            span = sum(e for _, e in self._buckets)
+        hz = total / span if span > 0.0 else 0.0
+        return hz, (None if last_rx is None else now - last_rx)
+
+
 class GpsAccuracyWindow(QWidget):
     """ROS 콜백은 rclpy 스레드에서 오므로 위젯을 직접 못 만진다.
     pyqtSignal로 넘겨 Qt 메인 스레드에서만 갱신한다."""
@@ -192,7 +251,10 @@ class GpsAccuracyWindow(QWidget):
         self._gps_xy = QLabel('--')
         self._ekf_xy = QLabel('--')
         self._delta = QLabel('--')
+        self._imu_link = QLabel('--')
         self._source = QLabel('')
+
+        self._imu_monitor = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 18, 24, 16)
@@ -214,6 +276,19 @@ class GpsAccuracyWindow(QWidget):
         self._detail.setAlignment(Qt.AlignCenter)
         self._detail.setStyleSheet(f'color: {COLOR_STALE};')
         root.addWidget(self._detail)
+
+        root.addWidget(self._divider())
+
+        imu_row = QHBoxLayout()
+        imu_row.setSpacing(10)
+        imu_caption = self._caption('IMU link  WitMotion WT901BLE (BLE)')
+        imu_caption.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        imu_row.addWidget(imu_caption)
+        self._imu_link.setFont(QFont('DejaVu Sans Mono', 11, QFont.Bold))
+        self._imu_link.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._imu_link.setStyleSheet(f'color: {COLOR_STALE};')
+        imu_row.addWidget(self._imu_link, 1)
+        root.addLayout(imu_row)
 
         root.addWidget(self._divider())
 
@@ -268,6 +343,11 @@ class GpsAccuracyWindow(QWidget):
             'ekf': self._stale_timer(self._ekf_stale),
         }
 
+        self._imu_timer = QTimer(self)
+        self._imu_timer.timeout.connect(self._render_imu_link)
+        self._imu_timer.setInterval(IMU_POLL_MS)
+        self._imu_timer.start()
+
     # ---------- 위젯 헬퍼 ----------
     def _caption(self, text):
         label = QLabel(text)
@@ -296,8 +376,11 @@ class GpsAccuracyWindow(QWidget):
         timer.start()
         return timer
 
-    def set_topics(self, navpvt, gps, ekf):
-        self._source.setText(f'{navpvt}   |   {gps}   |   {ekf}')
+    def set_topics(self, navpvt, gps, ekf, imu):
+        self._source.setText(f'{navpvt}   |   {gps}   |   {ekf}   |   {imu}')
+
+    def set_imu_monitor(self, monitor):
+        self._imu_monitor = monitor
 
     # ---------- stale ----------
     def _navpvt_stale(self):
@@ -377,6 +460,22 @@ class GpsAccuracyWindow(QWidget):
         self._yaw_text.setStyleSheet(f'color: {COLOR_EKF};')
         self._update_delta()
 
+    def _render_imu_link(self):
+        if self._imu_monitor is None:
+            return
+        hz, age = self._imu_monitor.sample()
+        if age is None:
+            self._imu_link.setText('NO DATA -- never received')
+            self._imu_link.setStyleSheet(f'color: {COLOR_STALE};')
+        elif age > IMU_STALE_S:
+            # 드라이버가 살아 있어도 BLE가 끊기면 publish가 멈춘다. 재연결까지는
+            # reconnect_wait_seconds(기본 5초) + 스캔 시간이 걸린다.
+            self._imu_link.setText(f'DISCONNECTED -- silent {age:.1f} s')
+            self._imu_link.setStyleSheet(f'color: {COLOR_BAD};')
+        else:
+            self._imu_link.setText(f'CONNECTED   {hz:5.1f} Hz')
+            self._imu_link.setStyleSheet(f'color: {COLOR_GOOD};')
+
     def _update_delta(self):
         if self._gps_pos is None or self._ekf_pos is None:
             self._delta.setText('--')
@@ -400,6 +499,9 @@ class GpsAccuracyNode(Node):
         self.navpvt_topic = param('navpvt_topic', '/ublox_gps_node/navpvt')
         self.gps_topic = param('gps_odom_topic', '/odometry/gps')
         self.ekf_topic = param('ekf_odom_topic', '/odometry/filtered_map')
+        # witmotion_ros2가 내는 원본 토픽. sensors.launch.py에서 topic:=/imu/raw로
+        # 띄우고, imu_enu_relay가 이걸 받아 /imu로 다시 낸다.
+        self.imu_topic = param('imu_topic', '/imu/raw')
 
         # ublox_firmware7plus.hpp는 create_publisher<NavPVT>("~/navpvt", 1) --
         # 기본 QoS(RELIABLE/KEEP_LAST)라 여기서도 기본값으로 맞춘다.
@@ -410,8 +512,15 @@ class GpsAccuracyNode(Node):
         self.create_subscription(
             Odometry, self.ekf_topic, lambda m: window.ekf_odom.emit(m), 10)
 
+        # 드라이버는 create_publisher<Imu>(topic, 10) -- 기본 RELIABLE이라 여기도
+        # 기본 QoS로 맞춘다. 콜백은 카운터만 올린다(ImuLinkMonitor 주석 참고).
+        self.imu_monitor = ImuLinkMonitor()
+        self.create_subscription(
+            Imu, self.imu_topic, lambda _m: self.imu_monitor.on_message(), 10)
+
         self.get_logger().info(
-            f'GPS GUI: {self.navpvt_topic} | {self.gps_topic} | {self.ekf_topic}')
+            f'GPS GUI: {self.navpvt_topic} | {self.gps_topic} | {self.ekf_topic} | '
+            f'{self.imu_topic}')
 
 
 def main():
@@ -422,7 +531,9 @@ def main():
 
     window = GpsAccuracyWindow()
     node = GpsAccuracyNode(window)
-    window.set_topics(node.navpvt_topic, node.gps_topic, node.ekf_topic)
+    window.set_topics(node.navpvt_topic, node.gps_topic, node.ekf_topic,
+                      node.imu_topic)
+    window.set_imu_monitor(node.imu_monitor)
     window.show()
 
     # rclpy는 별도 스레드에서 spin하고 Qt가 메인 스레드를 잡는다.

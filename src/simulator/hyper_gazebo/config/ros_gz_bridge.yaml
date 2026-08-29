@@ -16,34 +16,6 @@
   gz_type_name: "gz.msgs.CameraInfo"
   direction: "GZ_TO_ROS"
 
-# Rear camera is an rgbd_camera (D435i-equivalent -- see vehicle.xacro), so its <topic>
-# camera_rear is a prefix, not a topic: ign publishes camera_rear/image, /depth_image,
-# /points and /camera_info under it. The colour stream keeps the ROS name
-# /camera_rear/image_raw its existing subscribers already use.
-- ros_topic_name: "camera_rear/image_raw"
-  gz_topic_name: "camera_rear/image"
-  ros_type_name: "sensor_msgs/msg/Image"
-  gz_type_name: "gz.msgs.Image"
-  direction: "GZ_TO_ROS"
-
-- ros_topic_name: "camera_rear/depth/image_raw"
-  gz_topic_name: "camera_rear/depth_image"
-  ros_type_name: "sensor_msgs/msg/Image"
-  gz_type_name: "gz.msgs.Image"
-  direction: "GZ_TO_ROS"
-
-- ros_topic_name: "camera_rear/depth/points"
-  gz_topic_name: "camera_rear/points"
-  ros_type_name: "sensor_msgs/msg/PointCloud2"
-  gz_type_name: "gz.msgs.PointCloudPacked"
-  direction: "GZ_TO_ROS"
-
-- ros_topic_name: "camera_rear/camera_info"
-  gz_topic_name: "camera_rear/camera_info"
-  ros_type_name: "sensor_msgs/msg/CameraInfo"
-  gz_type_name: "gz.msgs.CameraInfo"
-  direction: "GZ_TO_ROS"
-
 - ros_topic_name: "camera_object/image_raw"
   gz_topic_name: "camera_object"
   ros_type_name: "sensor_msgs/msg/Image"

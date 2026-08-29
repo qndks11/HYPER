@@ -5,12 +5,17 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
 # same staggered stage delays apply so odometry/perception/behavior attach
-# once sensor drivers (RTK fix lock, D435i firmware init, etc.) are up.
+# once sensor drivers (RTK fix lock, USB camera enumeration, etc.) are up.
+#
+# 이 파일은 **미션(자율주행) 전용**입니다. 사람이 스틱으로 모는 수동 주행은
+# joystick_control_real.launch.py로 분리했습니다. 둘을 한 트리에 담으면
+# joystick_controller_node와 cmd_vel_to_ackermann_node가 /velocity +
+# /steering_angle을 동시에 100Hz로 쏘면서 차가 자율주행을 못 합니다.
 ODOMETRY_DELAY_S = 5.0
 PERCEPTION_DELAY_S = 7.0
 BEHAVIOR_DELAY_S = 9.0
@@ -47,7 +52,8 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_rviz')),
     )
 
-    # GPS 정확도 모니터. /ublox_gps_node/navpvt의 hAcc/vAcc를 큰 글씨로 띄웁니다.
+    # GPS 정확도 모니터. /ublox_gps_node/navpvt의 hAcc/vAcc를 큰 글씨로 띄우고,
+    # WitMotion WT901BLE의 BLE 링크 상태(/imu/raw 수신 여부와 Hz)도 같이 보여줍니다.
     # 조건 없이 항상 뜹니다 -- 어떤 토픽도 publish하지 않는 순수 구독자라 nav2든
     # 조이스틱이든 아무것과도 충돌하지 않고, 실차에서 "지금 GPS를 믿어도 되는가"는
     # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node)보다 먼저
@@ -72,17 +78,17 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
             description='Launch RViz with the follow_path nav2 view'),
-        # 수동 주행용 조이스틱. 기본값 false인 이유가 있습니다: joystick_controller_node는
-        # 스틱을 안 건드려도 100Hz로 /velocity + /steering_angle을 계속 내보내는데, 이는
-        # behavior 스테이지의 cmd_vel_to_ackermann이 쓰는 토픽과 똑같습니다. 둘을 같이
-        # 띄우면 스틱 중립(0.0) 명령이 nav2의 명령과 번갈아 arduino_interface에 도착해
-        # 차가 자율주행을 못 합니다. 수동으로 몰 때만 켜세요:
-        #   ros2 launch hyper_launch real.launch.py use_joystick:=true
-        # (이때 nav2도 같이 도는 게 싫으면 mission 스테이지를 따로 내리거나, 조이스틱
-        #  단독으로 sensors + interface만 띄우는 편이 낫습니다.)
+        # 미션이 실제로 따라갈 코스 CSV. 기본값이 sim.csv라는 점이 중요합니다 --
+        # 실차에서는 반드시 녹화한 파일로 덮어쓰세요:
+        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
+        # 이 인자를 여기서 선언하고 behavior 스테이지로 넘겨주지 않으면, 넘긴 값이
+        # 조용히 무시된 채 시뮬레이션 코스가 실차에 실립니다.
         DeclareLaunchArgument(
-            'use_joystick', default_value='false',
-            description='Xbox/joy 수동 조작 노드를 함께 띄웁니다 (nav2와 /velocity 충돌 주의)'),
+            'waypoint_csv',
+            default_value=PathJoinSubstitution([
+                EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
+                'waypoints', 'sim.csv']),
+            description='미션이 따를 웨이포인트 CSV (실차는 real.csv로 덮어쓰세요)'),
         robot_state_publisher,
         rviz,
         gps_accuracy_gui,
@@ -112,16 +118,10 @@ def generate_launch_description():
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             stage('behavior.launch.py',
                   mission=LaunchConfiguration('mission'),
+                  waypoint_csv=LaunchConfiguration('waypoint_csv'),
                   # 위와 같은 이유. 이쪽은 nav2_controller.launch.py가 RewrittenYaml로
                   # nav2_controller.yaml의 use_sim_time을 덮어쓰므로 인자만 넘기면 됩니다.
                   use_sim_time='false'),
             stage('interface.launch.py'),
-            # interface.launch.py와 같은 타이밍에 올립니다. 조이스틱 명령이 가는 곳이
-            # arduino_interface_node이므로, 그보다 먼저 떠 있어 봐야 받을 노드가 없습니다.
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(
-                    get_package_share_directory('hyper_control'),
-                    'launch', 'joystick.launch.py')),
-                condition=IfCondition(LaunchConfiguration('use_joystick'))),
         ]),
     ])

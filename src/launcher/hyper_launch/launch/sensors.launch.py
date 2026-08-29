@@ -17,19 +17,13 @@ from launch_ros.actions import Node
 #                                          logitech_camera_publisher_node
 #                                          (object_input_backend:=usb_camera, plain topic -- see
 #                                          perception.launch.py)
-#   RealSense D435i (rear)              -> owned by realsense2_camera's RealSenseNodeFactory
-#                                          component, loaded into the same container as the ELP
-#                                          publisher and LaneDetection and configured by
-#                                          hyper_camera's params_d435i.yaml -- see
-#                                          perception.launch.py. Colour only; its built-in IMU is
-#                                          off, /imu belongs to the WitMotion below.
 #   WitMotion WT901BLE (witmotion_ros2) -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
 #
 # No camera is launched here at all -- usb_cam has been removed from this workspace entirely
 # (see deps.repos); hyper_camera now provides both USB cameras' driver nodes (see
-# perception.launch.py) plus every camera's calibration/config files, the D435i's included.
+# perception.launch.py) plus every camera's calibration/config files.
 
 
 def generate_launch_description():

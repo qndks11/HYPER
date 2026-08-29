@@ -33,32 +33,3 @@
     object_camera_pitch: 0.0 # 원근 왜곡 없이 정면을 보도록 수평 장착 (차선 카메라처럼 아래로 숙이지 않음) [rad]
     object_camera_setback: 0.5 # 차량 앞쪽 끝에서 뒤로 이동한 거리 [m]
     object_camera_fov: 1.2217305 # 70 deg hfov (일반 렌즈, 어안 왜곡 없음)
-
-    # Rear camera params (RGBD, Intel RealSense D435i 제원 기준 -- 실차에 이미 달려 있는 그 카메라)
-    # Gazebo의 rgbd_camera는 컬러/깊이가 렌즈 하나를 공유하므로 hfov는 D435i의 depth FOV(87도)를
-    # 씁니다. RGB FOV(69도)가 아닌 이유는 이 센서를 RGBD로 바꾼 목적 자체가 깊이이기 때문입니다.
-    #
-    # 마운트는 "깊이 영상을 유사 라이다로 쓴다"는 목적에 맞춰 잡았습니다. depthimage_to_laserscan은
-    # 높이 대역이 아니라 cy 중심의 *픽셀 행* 대역을 잘라내므로(DepthImageToLaserScan.hpp의
-    # `offset = cy - scan_height/2`), 광축이 수평일 때만 그 대역이 "지면에서 일정 높이의 수평면"이
-    # 됩니다. 아래로 숙이면 중심 행이 곧 노면을 때리고, 열마다 최단거리가 이기는 규칙 때문에
-    # 스캔 전체가 그 노면 거리의 링으로 무너집니다(15도/1.5 m였을 때 4.5 m 지점).
-    #
-    # 높이는 body_link 기준입니다. body_link는 지면에서 wheel_radius * 1.5 = 0.3 m 위에 있으므로
-    # 0.3 -> 지면 기준 0.6 m입니다. 0.6 m을 고른 이유:
-    #   - construction_cone 0.762 m(메시 4.287 in * 0.0254 * scale 7), hatchback 지붕 0.778 m
-    #     보다 낮아야 스캔면이 실제로 장애물을 때립니다.
-    #   - lidar_link(지면 기준 0.65 m)보다 5 cm 아래라 두 센서가 서로 다른 높이를 봅니다.
-    # setback 0.0은 카메라 하우징 뒷면을 차체 뒷면(x = -0.67)에 맞춥니다. 필수입니다 -- 0.6 m
-    # 높이에서 이전 setback 0.5(x = -0.145)를 쓰면 차체 박스 윗면(지면 기준 0.5 m)이 카메라
-    # 뒤로 0.525 m 뻗어 있어 10.8도보다 가파른 모든 하향 광선을 가로막고, 후방 BEV가 3 m
-    # 안쪽 지면을 통째로 잃습니다.
-    rear_camera_height: 0.3 # body_link 기준 -- 지면 기준 0.6 m [m]
-    rear_camera_pitch: 0.0 # 수평. 위 참고 -- 숙이면 유사 라이다가 성립하지 않습니다 [rad]
-    rear_camera_setback: 0.0 # 범퍼 장착(차체 뒷면과 flush) [m]
-    rear_camera_fov: 1.5184364 # 87 deg hfov (D435i depth FOV 87x58)
-    rear_camera_fps: 30 # [Hz] (D435i는 이 해상도에서 90Hz까지 가능하지만 소프트웨어 렌더링 부담 고려)
-    rear_image_width: 848 # D435i depth 모드 848x480 -- 이 종횡비여야 수직 FOV가 스펙(58도)에 맞음 [pixels]
-    rear_image_height: 480 # [pixels]
-    rear_depth_near: 0.2 # D435i min-Z 약 0.2m [m]
-    rear_depth_far: 10.0 # D435i 최대 측정 거리 약 10m [m]

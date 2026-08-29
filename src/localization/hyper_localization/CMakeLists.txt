@@ -11,6 +11,7 @@ install(
 install(
   PROGRAMS
     scripts/imu_enu_relay.py
+    scripts/gps_heading.py
     scripts/gps_accuracy_gui.py
   DESTINATION lib/${PROJECT_NAME}
 )

@@ -35,10 +35,11 @@ struct CameraIntrinsics
 
 /// Where the camera sits relative to the flat ground plane and the vehicle frame the BEV is
 /// published in, expressed along the camera's own looking direction rather than the vehicle's
-/// +x -- so the rear camera, which looks backward, describes its mounting with the same positive
+/// +x -- so a rearward-facing camera would describe its mounting with the same positive
 /// numbers the front one does and needs no sign conventions of its own here. Converting that
-/// looking-direction frame back to the vehicle's is a single 180 deg yaw, applied downstream
-/// where the ground overlay is emitted (see LaneDetection::publish_bev_cloud's `facing`).
+/// looking-direction frame back to the vehicle's would be a single 180 deg yaw applied where the
+/// ground overlay is emitted; the vehicle carries only the forward-facing camera today, so
+/// LaneDetection::publish_bev_cloud does not apply one.
 struct CameraExtrinsics
 {
   /// Height of the camera's optical center above the ground plane [m].

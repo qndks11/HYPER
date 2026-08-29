@@ -10,9 +10,7 @@
     instead of the consumer node opening the device itself, so lane_detection
     can load the ELP publisher into the same component container for
     zero-copy intra-process delivery. Also the distribution point for every
-    real camera's calibration/config files, including the rear RealSense
-    D435i's -- that one needs no driver node here, since realsense2_camera
-    already ships an intra-process-capable component.
+    real camera's calibration/config files.
   </description>
   <maintainer email="qndks11@gmail.com">kim</maintainer>
   <license>MIT</license>

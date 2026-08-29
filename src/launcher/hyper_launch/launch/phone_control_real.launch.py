@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import FrontendLaunchDescriptionSource, PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 # Real-car equivalent of phone_control_sim.launch.py: same rosbridge_websocket bridge so a phone
@@ -21,7 +21,7 @@ from launch_ros.actions import Node
 # fight over the same two topics. Odometry itself doesn't touch either topic, so it's safe to
 # run alongside phone control.
 ODOMETRY_DELAY_S = 5.0  # same delay real.launch.py uses, so sensor drivers are up first
-PERCEPTION_DELAY_S = 7.0  # same delay real.launch.py uses, so D435i/camera firmware init finishes
+PERCEPTION_DELAY_S = 7.0  # same delay real.launch.py uses, so USB camera enumeration finishes
 
 
 def generate_launch_description():
@@ -80,6 +80,21 @@ def generate_launch_description():
         }.items(),
     )
 
+    # 웨이포인트 레코더 + 조작판 GUI. joystick_control_real.launch.py와 같은 구성입니다
+    # -- 폰으로 몰든 스틱으로 몰든 수동 주행의 목적은 코스를 따는 것이라, 녹화가 따라붙는
+    # 게 맞습니다. auto_start:=false라 GUI의 Record를 누를 때까지 기다립니다: 기록 시작이
+    # 곧 CSV truncate이므로 스택을 띄우는 것만으로 지난 녹화본이 날아가지 않습니다.
+    waypoint_record = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_waypoint'),
+            'launch', 'record.launch.py')),
+        launch_arguments={
+            'waypoint_csv': LaunchConfiguration('waypoint_csv'),
+            'min_spacing_m': LaunchConfiguration('min_spacing_m'),
+            'use_record_gui': LaunchConfiguration('use_record_gui'),
+        }.items(),
+    )
+
     # Shows the robot's current position (RobotModel/TF) and the trail it has driven so far
     # (an Odometry display on /odometry/filtered_map with a large Keep count, since nothing in
     # this stack publishes an accumulated nav_msgs/Path). Fixed Frame is map, so the trail stays
@@ -106,6 +121,19 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
             description='Launch RViz showing robot position + driven trail'),
+        # 녹화 인자는 hyper_waypoint/record.launch.py로 그대로 넘어갑니다.
+        DeclareLaunchArgument(
+            'waypoint_csv',
+            default_value=PathJoinSubstitution([
+                EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
+                'waypoints', 'real.csv']),
+            description='녹화 결과를 쓸 CSV (Record를 누르는 순간 truncate)'),
+        DeclareLaunchArgument(
+            'min_spacing_m', default_value='0.5',
+            description='이 거리(m) 이상 이동했을 때만 한 점 기록'),
+        DeclareLaunchArgument(
+            'use_record_gui', default_value='true',
+            description='녹화 조작판 GUI를 함께 띄웁니다'),
 
         robot_state_publisher,
         arduino_interface,
@@ -114,4 +142,5 @@ def generate_launch_description():
         TimerAction(period=PERCEPTION_DELAY_S, actions=[perception]),
         rosbridge_launch,
         rviz,
+        waypoint_record,
     ])

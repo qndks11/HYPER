@@ -2,7 +2,48 @@
 
 `odometry/filtered_map`을 구독해서 `idx, x, y, yaw, frame_id`를 CSV로 기록하는 웨이포인트 레코더 패키지입니다.
 
-## 실행
+## 실행 (권장) — GUI로 조작
+
+실차 수동 주행 launch(`joystick_control_real.launch.py`, `phone_control_real.launch.py`)가
+레코더와 조작판 GUI를 이미 포함합니다. 따로 띄우고 싶을 때만:
+
+```bash
+ros2 launch hyper_waypoint record.launch.py \
+  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
+```
+
+레코더가 `auto_start:=false`로 떠서 **GUI의 `● Record`를 누를 때까지 기다립니다.**
+기록 시작이 곧 CSV truncate이므로, 스택을 띄우는 것만으로 지난 녹화본이 날아가지 않습니다.
+`■ Stop`을 누르면 파일이 닫히고, 다시 `Record`를 누르면 idx 0부터 새로 녹화합니다.
+
+GUI가 보여주는 것:
+
+| 항목 | 의미 |
+| --- | --- |
+| `● REC` / `IDLE` | 기록 중인지 |
+| 기록된 점 / 누적 거리 | 지금까지 몇 점, 몇 m |
+| 다음 점까지 | 마지막 기록 지점에서 얼마나 왔는지 (`min_spacing_m`까지 남은 거리) |
+| 현재 위치 (map) | `/odometry/filtered_map`의 x, y. 값이 없으면 EKF가 안 도는 것 |
+| 속도 | `/odom`의 바퀴 속도 |
+| GPS 상태 | `/gps/fix`의 status. **`RTK / GBAS`(초록)여야 쓸 만한 녹화**입니다 |
+| EKF 공분산 xx / yy | 융합 위치의 불확실도 |
+| 미니맵 | 지금까지 찍힌 점(파랑)과 현재 위치(보라)를 위에서 본 그림 |
+
+같은 내용이 토픽으로도 나가므로 RViz에서도 볼 수 있습니다:
+
+- `/waypoint_recorder/status` (`std_msgs/String`) — `key=value` 한 줄, 5Hz + 점이 찍힐 때마다
+- `/waypoint_recorder/path` (`nav_msgs/Path`) — 지금까지 찍힌 점 전부
+
+둘 다 `transient_local`이라 GUI나 RViz를 나중에 띄워도 현재 상태를 그대로 받습니다.
+
+서비스로 직접 조작할 수도 있습니다:
+
+```bash
+ros2 service call /waypoint_recorder/start std_srvs/srv/Trigger
+ros2 service call /waypoint_recorder/stop  std_srvs/srv/Trigger
+```
+
+## 실행 — 노드만 단독으로
 
 ```bash
 colcon build --packages-select hyper_waypoint
@@ -10,10 +51,10 @@ source install/setup.bash
 ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv -p min_spacing_m:=0.5
 ```
 
+- `auto_start` 파라미터의 기본값이 `true`라 이렇게 띄우면 **즉시 기록을 시작**합니다(기존 사용법 그대로). `Ctrl-C`로 원하는 시점에 종료하세요.
 - `output_csv` 파라미터를 생략하면 노드를 실행한 위치에 `waypoint_record.csv`로 저장됩니다.
 - `min_spacing_m` 파라미터(기본값 `0.5`)는 직전 기록 지점으로부터 이 거리(m) 이상 이동했을 때만 새 줄을 기록합니다. 시간 간격이 아니라 이동 거리 기준으로 웨이포인트가 샘플링됩니다.
-- 노드가 실행 중인 동안 `odometry/filtered_map`으로 들어오는 메시지 중 `min_spacing_m` 이상 이동한 시점마다 한 줄씩 기록됩니다. 필요한 구간만 남기려면 `Ctrl-C`로 원하는 시점에 종료하세요.
-- 파일은 `idx,x,y,yaw,frame_id` 헤더로 시작하며, 매 기록마다 flush되므로 중간에 종료해도 그때까지 기록된 내용은 남아 있습니다.
+- 파일은 `idx,stamp_sec,x,y,yaw,frame_id,...` 헤더로 시작하며, 매 기록마다 flush되므로 중간에 종료해도 그때까지 기록된 내용은 남아 있습니다.
 
 ## 스크립트
 

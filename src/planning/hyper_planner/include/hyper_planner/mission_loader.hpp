@@ -232,8 +232,30 @@ private:
     for (const auto & entry : labels) {
       const auto name = entry.first.as<std::string>();
       const YAML::Node & point = entry.second;
+
+      // `이름: last` -- 좌표 대신 "CSV의 마지막 웨이포인트"를 가리키는 센티널입니다.
+      // 코스 끝은 좌표로 적는 순간 그 CSV 전용이 되어버립니다(simple.yaml의 course_end가
+      // sim.csv 좌표라 real.csv로는 스냅 허용치를 넘겨 로드가 거부되던 문제). "끝까지
+      // 간다"는 뜻은 어느 코스에서나 같으므로, 좌표가 아니라 의도를 적게 합니다.
+      // 이벤트 지점(정지선/신호등/주차)은 여전히 좌표여야 합니다 -- 코스 중간의 특정
+      // 물리적 위치라 label_waypoints.py가 찍어 주는 x/y가 곧 정의입니다.
+      if (point.IsScalar() && point.as<std::string>() == "last") {
+        if (waypoints_.points.empty()) {
+          RCLCPP_ERROR(
+            logger_, "Label '%s' is 'last', but '%s' has no waypoints.",
+            name.c_str(), config_.waypoint_csv.c_str());
+          return false;
+        }
+        label_index_[name] = waypoints_.points.size() - 1;
+        RCLCPP_INFO(
+          logger_, "Label '%s' -> last waypoint #%zu (좌표 스냅 생략).",
+          name.c_str(), waypoints_.points.size() - 1);
+        continue;
+      }
+
       if (!point["x"] || !point["y"]) {
-        RCLCPP_ERROR(logger_, "Label '%s' has no x/y.", name.c_str());
+        RCLCPP_ERROR(
+          logger_, "Label '%s' has neither x/y nor the 'last' sentinel.", name.c_str());
         return false;
       }
       const double x = point["x"].as<double>();

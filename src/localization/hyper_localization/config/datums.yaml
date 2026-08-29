@@ -1,20 +1,50 @@
-# navsat_transform 원점(datum) 후보 목록.
+# navsat_transform 원점(datum) 목록 + 사이트별 IMU/heading 보정값.
 # odometry.launch.py 실행 시 `datum_site:=sim|school|track` 인자로 선택합니다.
 #
-# heading_deg: ENU 프레임 X축(East)이 진북(true north) 대비 얼마나 회전해 있는지(도, 시계방향).
-#              보통 0으로 둡니다 -- world/실측 좌표계가 이미 East-North으로 정렬돼 있다면 그대로 둡니다.
+# ── heading_deg ────────────────────────────────────────────────────────────
+# navsat_transform datum의 세 번째 값(robot_localization의 datum[2]). 0으로 둡니다.
+# wait_for_datum: true일 때 navsat_transform은 "datum 지점에서 차량의 map 프레임
+# yaw가 0"이라고 못박고 map<-UTM 회전을 datum[2]로 정합니다(navsat_transform.cpp의
+# setManualDatum + computeTransform). 즉 이 값은 차량의 초기 방위가 아니라 map 축을
+# ENU 대비 얼마나 돌릴지입니다. 0이면 map X=East, Y=North로 ENU와 완전히 정렬되고,
+# rviz_satellite 앵커/위경도 웨이포인트 계산과도 그대로 맞습니다. 건드리지 마세요.
 #
-# magnetic_declination_deg/yaw_offset_deg: navsat_transform이 datum의 heading에 얹어 더하는
-# IMU 보정값 (robot_localization의 magnetic_declination_radians/yaw_offset과 동일, 여기서는
-# 도 단위로 적어서 launch가 라디안으로 변환). IMU가 실제로 참북 기준 ENU(동쪽=0 yaw)를 직접
-# 보고한다면(Gazebo 시뮬레이션처럼 지자기 모델이 없는 경우) 둘 다 0으로 둡니다. 실제 자기
-# 나침반 기반 IMU를 쓴다면 자편각(NOAA 계산기 등)과 IMU 장착/컨벤션에 맞는 offset을 채우세요.
+# ── initial_heading_deg  (실차에서 매번 확인해야 하는 값) ──────────────────
+# 스택을 켜는 순간 차가 향하고 있는 ENU 방위(도). 0=East, 90=North, 180=West,
+# -90=South, 반시계 방향이 +.
+# hyper_localization의 gps_heading 노드가 ekf_global에 넣는 절대 yaw의 "초기값"입니다.
+# 지자기 yaw를 어디에서도 안 쓰기 때문에(아래 참조) 이 상수가 유일한 시작 기준이고,
+# 여기서 틀린 각도만큼 map 프레임 heading이 처음부터 틀어진 채로 출발합니다.
+# 차가 충분히 움직이기 시작하면 GPS 진행방향이 이어받아 스스로 교정됩니다.
+# 확인법: 출발 지점에 차를 세운 방향의 방위각을 지도에서 읽거나, 직선으로 10m쯤
+# 몰아 본 뒤 `ros2 topic echo /imu/heading`이 수렴하는 값을 그대로 적습니다.
+#
+# ── 지자기(자기 나침반) yaw를 쓰지 않는 이유 ───────────────────────────────
+# WitMotion WT901BLE가 6축(자이로+가속도) 모드로 동작 중이라 yaw가 자북이 아니라
+# 전원 인가 시점 자세를 기준으로 적분되고, 실측 드리프트가 +0.18deg/20s = 약
+# +0.5deg/min (시간당 30deg 이상)입니다. 전원을 다시 넣으면 원점이 달라지고 주행
+# 중에도 계속 밀립니다. 그래서 ekf_local/ekf_global 어느 쪽도 IMU yaw를 절대 방위로
+# 먹지 않습니다(dual_ekf_navsat.yaml의 imu0_config 인덱스 5 = false). 대신:
+#   초기값 = initial_heading_deg,  전파 = 자이로 z,  보정 = GPS 진행방향.
+# navsat_transform도 wait_for_datum: true면 /imu를 아예 구독하지 않으므로
+# magnetic_declination_deg/yaw_offset_deg는 어디에도 영향을 주지 않습니다(0 유지).
+#
+# ── imu_yaw_sign / imu_yaw_offset_deg / imu_flip_gyro_z ────────────────────
+# imu_enu_relay가 WitMotion 드라이버 원본(/imu/raw)을 ENU로 고쳐 /imu로 내보낼 때 쓰는 값.
+#   out_yaw = imu_yaw_sign * in_yaw + radians(imu_yaw_offset_deg)
+# 이제 이 yaw를 EKF가 안 먹으므로 sign/offset은 RViz 표시용 참고값일 뿐입니다.
+#
+# imu_flip_gyro_z는 반대로 **가장 중요한 값이 되었습니다**. yaw를 자이로 z 적분이
+# 통째로 짊어지므로 부호가 반대면 차가 좌회전할 때 추정 heading이 우회전합니다.
+# GPS가 없는 구간에서는 이걸 잡아줄 보정원이 하나도 없습니다.
+# 실측 결과 false로 확정했습니다 -- WT901BLE의 gyro z는 이미 반시계가 양수이고,
+# imu_yaw_sign(1.0, "raw yaw가 이미 반시계 증가")과도 이제 일관됩니다.
+# 재확인법: ros2 topic echo /imu --field angular_velocity  # 차를 반시계로 돌린다
+# 반시계 회전에서 z가 양수여야 합니다. 음수면 imu_flip_gyro_z를 뒤집으세요.
 #
 # sim의 latitude_deg/longitude_deg/heading_deg는 hyper_gazebo/worlds/track.world의
 # <spherical_coordinates>와 반드시 일치해야 시뮬레이션 GPS 좌표와 EKF 추정치가 어긋나지
-# 않습니다. magnetic_declination_deg/yaw_offset_deg는 Gazebo IMU에 지자기 모델이 없으므로
-# 0/0 -- 0이 아니면 GPS 기반 위치가 datum 원점을 축으로 회전해 실제 오도메트리와 어긋나며
-# ekf_global이 발산합니다.
+# 않습니다.
 datums:
   sim:
     latitude_deg: 37.5665
@@ -22,25 +52,21 @@ datums:
     heading_deg: 0.0
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
+    # hyper_gazebo/vehicle.launch.py의 스폰 yaw 기본값 Y=1.64 rad. 스폰 인자를
+    # 바꿔서 띄우면 여기도 같이 바꿔야 ekf_global이 맞는 방위로 시작합니다.
+    initial_heading_deg: 93.96
 
-  # imu_yaw_sign / imu_yaw_offset_deg / imu_flip_gyro_z: hyper_localization의 imu_enu_relay가
-  # WitMotion 드라이버 원본(/imu/raw)을 ENU로 고쳐 /imu로 내보낼 때 쓰는 값.
-  #   out_yaw = imu_yaw_sign * in_yaw + radians(imu_yaw_offset_deg)
-  # 캘리브레이션: 차를 정북으로 세우고 `ros2 topic echo /imu` yaw가 +1.5708(=pi/2)이 되도록
-  # imu_yaw_offset_deg를 맞춘다. 반시계로 돌릴 때 yaw가 감소하면 imu_yaw_sign을 +1.0으로.
-  # 아래 값은 "정북인데 서쪽으로 표시"(raw yaw≈180) + "회전 반대" 증상 기준의 시작 추정값이다.
-  # relay가 /imu를 정북 기준 ENU로 맞춰 주므로(캘리브레이션 목표가 정북=+pi/2), 여기서
-  # navsat_transform의 magnetic_declination_deg/yaw_offset_deg는 0으로 둔다. 둘 다 relay가
-  # 이미 흡수한 상수라 다시 얹으면 GPS 오도메트리가 그만큼 더 돌아가 ekf_global이 발산한다.
   school:
     latitude_deg: 37.555047
     longitude_deg: 127.045522
     heading_deg: 0.0
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
-    imu_yaw_sign:   1.0
-    imu_yaw_offset_deg: -90.0
-    imu_flip_gyro_z: true
+    imu_yaw_sign:  1.0
+    imu_yaw_offset_deg: -91.5
+    imu_flip_gyro_z: false
+    # TODO(실차): 출발 지점 방위를 실측해서 채우세요. 0 = East.
+    initial_heading_deg: 0.0
 
   track:
     latitude_deg: 37.2887947
@@ -48,6 +74,8 @@ datums:
     heading_deg: 0.0
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
-    imu_yaw_sign: -1.0
-    imu_yaw_offset_deg: -90.0
-    imu_flip_gyro_z: true
+    imu_yaw_sign: 1.0
+    imu_yaw_offset_deg: -91.5
+    imu_flip_gyro_z: false
+    # TODO(실차): 출발 지점 방위를 실측해서 채우세요. 0 = East.
+    initial_heading_deg: 0.0

@@ -7,16 +7,24 @@ the sensor's own zero, not REP-103 ENU (0 = East, growing counter-clockwise).
 That gives a heading in RViz that is both mirrored (turning left turns the arrow
 right) and rotated by a constant.
 
-navsat_transform's yaw_offset/declination cannot fix this -- they only rotate the
-GPS odometry, while ekf_global fuses the IMU's absolute yaw directly. So the fix
-belongs upstream of the EKF, here:
+The correction applied here is:
 
     out_yaw = yaw_sign * in_yaw + yaw_offset_rad
 
-Calibrate on the car: point the vehicle due North, echo /imu, and adjust
-yaw_offset_rad until the reported yaw is +pi/2 (1.5708). Check the sign by
-rotating the car counter-clockwise -- yaw must increase. roll, pitch, accel and
-the covariances are passed through untouched.
+Note that no EKF fuses this yaw as an absolute heading any more: the WT901BLE
+runs in 6-axis mode, so its yaw drifts ~0.5 deg/min from wherever it was powered
+on (see config/datums.yaml). Absolute heading now comes from gps_heading.py
+instead, and imu0_config index 5 is false in both filters. The yaw fixed up here
+is only for display and sanity checks.
+
+What still matters a great deal is flip_angular_velocity_z. With the
+magnetometer gone, yaw is *propagated* purely by integrating the z gyro, so a
+flipped sign turns every left turn into an estimated right turn. Verify on the
+car: rotate it counter-clockwise and check that
+`ros2 topic echo /imu --field angular_velocity` reports positive z. If it is
+negative, flip imu_flip_gyro_z in datums.yaml.
+
+roll, pitch, accel and the covariances are passed through untouched.
 """
 
 import math
@@ -57,7 +65,7 @@ class ImuEnuRelay(Node):
         super().__init__('imu_enu_relay')
         self.yaw_sign = self.declare_parameter('yaw_sign', -1.0).value
         self.yaw_offset_rad = self.declare_parameter('yaw_offset_rad', 0.0).value
-        self.flip_gyro_z = self.declare_parameter('flip_angular_velocity_z', True).value
+        self.flip_gyro_z = self.declare_parameter('flip_angular_velocity_z', False).value
         self.pub = self.create_publisher(Imu, 'imu', 10)
         self.sub = self.create_subscription(Imu, 'imu/raw', self._on_imu, 10)
 

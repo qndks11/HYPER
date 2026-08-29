@@ -121,8 +121,17 @@ ekf_global:
     odom1_relative: false
 
     imu0: imu
+    # yaw(인덱스 5)는 ekf_local과 마찬가지로 false. WT901BLE는 6축 모드로 돌아
+    # yaw가 자북이 아니라 "전원 인가 시점 자세" 기준으로 적분되고 분당 0.5도씩
+    # 밀린다. 이걸 절대 방위로 먹이면 map 프레임 heading이 서서히 통째로 돌아가고,
+    # RTK 위치해와 싸운다. 그래서 지자기/드라이버 yaw는 어느 필터에도 안 넣는다.
+    # 대신 절대 yaw는 imu1(gps_heading 노드)에서만 온다:
+    #   초기값 = datums.yaml의 initial_heading_deg (측량한 상수)
+    #   전파   = 아래 vyaw(자이로 z)
+    #   보정   = 주행 중 GPS 진행방향(course over ground)
+    # roll/pitch는 중력으로 관측되므로 그대로 신뢰한다.
     imu0_config: [false, false, false,
-                  true,  true,  true,
+                  true,  true,  false,
                   false, false, false,
                   true,  true,  true,
                   true,  true,  true]
@@ -131,6 +140,24 @@ ekf_global:
     imu0_relative: false
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
+
+    # gps_heading 노드(hyper_localization/scripts/gps_heading.py)가 내보내는
+    # yaw 전용 Imu. 이 필터의 유일한 절대 방위 기준이다. 정지 중에는 초기 heading
+    # 상수를, 주행 중에는 GPS 진행방향을 (u-blox headAcc에서 뽑은 공분산과 함께)
+    # 실을 때만 publish한다 -- 느릴 때는 아예 안 나오므로 자이로가 yaw를 잇는다.
+    # ekf_local에는 넣지 않는다: odom 프레임은 연속이어야 하므로 절대 방위 점프가
+    # 들어가면 안 된다 (map->odom이 흡수하도록 여기 global에만 넣는다).
+    imu1: imu/heading
+    imu1_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, false,
+                  false, false, false]
+    imu1_nodelay: true
+    imu1_differential: false
+    imu1_relative: false
+    imu1_queue_size: 10
+    imu1_remove_gravitational_acceleration: false
 
     use_control: false
 

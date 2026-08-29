@@ -51,33 +51,6 @@ constexpr double kSimFrontFarM = 7.6;
 constexpr double kSimFrontHalfWidthM = 9.0;
 constexpr double kSimFrontMetersPerPixel = 0.028125;
 
-// Default BEV geometry for the simulated rear camera (D435i-equivalent RGBD: 87 deg HFOV,
-// 848x480). Unlike the front, this region is NOT a reproduction of the old one -- the old rear ROI
-// reached 24 m backward with a scale that was 64% too wide laterally and 54% too short
-// longitudinally at the same time, so there was no coherent tuning to preserve. It is sized for
-// the job the rear camera has instead: the close, slow parking maneuver.
-//
-// The mount is bumper-level and horizontal (0.6 m above ground, 0 deg pitch, 0.645 m behind
-// body_link), which is what parameters.yaml's rear_camera_* now describe -- see that file for why
-// the pitch has to be zero: the depth stream doubles as a pseudo-laser scan, and
-// depthimage_to_laserscan slices a *pixel row* band around cy, which is only a constant-height
-// horizontal plane when the optical axis is level. Height is stated here from the GROUND, so it is
-// parameters.yaml's rear_camera_height (body_link-relative) plus body_link's own 0.3 m.
-//
-// near_m stays 1.8 m across that change, which is a coincidence worth writing down rather than a
-// tuning: the old 1.5 m / 15 deg mount saw its first ground 1.74 m behind body_link, and the new
-// 0.6 m / 0 deg one sees it at 1.76 m (0.6 / tan(28.24 deg) = 1.12 m ahead of a camera that sits
-// 0.645 m back). Halving the height bought back exactly what removing the pitch cost. The blind
-// zone is still a mounting property that no warp can recover.
-constexpr double kSimRearHorizontalFovRad = 1.5184364;
-constexpr double kSimRearCameraHeightM = 0.6;
-constexpr double kSimRearCameraPitchRad = 0.0;
-constexpr double kSimRearCameraOffsetM = 0.645;
-constexpr double kSimRearNearM = 1.8;
-constexpr double kSimRearFarM = 5.0;
-constexpr double kSimRearHalfWidthM = 2.5;
-constexpr double kSimRearMetersPerPixel = 0.01;
-
 }  // namespace
 
 LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
@@ -95,7 +68,7 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   }
   input_backend_ = *backend;
 
-  // Both cameras' BEV geometry. The defaults describe the simulated cameras; a real vehicle
+  // The front camera's BEV geometry. The defaults describe the simulated camera; a real vehicle
   // overrides them (notably with explicit fx/fy/cx/cy, since a rectified real lens has neither a
   // centered principal point nor equal focal lengths -- see hyper_camera's ELP calibration).
   BevSettings front_defaults;
@@ -105,14 +78,6 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   front_defaults.region = GroundRegion{
     kSimFrontNearM, kSimFrontFarM, kSimFrontHalfWidthM, kSimFrontMetersPerPixel};
   front_bev_settings_ = declare_bev_settings("bev", front_defaults);
-
-  BevSettings rear_defaults;
-  rear_defaults.horizontal_fov_rad = kSimRearHorizontalFovRad;
-  rear_defaults.extrinsics = CameraExtrinsics{
-    kSimRearCameraHeightM, kSimRearCameraPitchRad, kSimRearCameraOffsetM};
-  rear_defaults.region = GroundRegion{
-    kSimRearNearM, kSimRearFarM, kSimRearHalfWidthM, kSimRearMetersPerPixel};
-  rear_bev_settings_ = declare_bev_settings("bev_rear", rear_defaults);
 
   bev_cloud_frame_id_ = declare_parameter<std::string>("bev_cloud_frame_id", "body_link");
   bev_cloud_stride_ = std::max(1, static_cast<int>(declare_parameter<int>("bev_cloud_stride", 2)));
@@ -134,24 +99,13 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   bev_cloud_publisher_ =
     create_publisher<sensor_msgs::msg::PointCloud2>("/lane/bev/points", debug_image_qos);
 
-  // Front camera: a plain sensor_msgs/Image subscription either way -- under ros_raw this is
+  // A plain sensor_msgs/Image subscription either way -- under ros_raw this is
   // Gazebo's bridged sim frame; under intra_process it's hyper_camera's ElpCameraPublisherNode
   // component, loaded into the same ComposableNodeContainer as this node (see
   // hyper_object_detection's perception.launch.py), so the frame arrives by pointer instead of
   // over a serialized topic. Same callback either way.
   raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
     "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
-
-  // Rear camera: same deal as the front one under either backend -- Gazebo's bridged RGBD sensor
-  // under ros_raw, realsense2_camera's D435i component sharing this container under intra_process.
-  raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-    "/rear_image_raw", 10,
-    std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
-
-  rear_bev_image_publisher_ =
-    create_publisher<sensor_msgs::msg::Image>("/lane/rear_bev/image_raw", debug_image_qos);
-  rear_bev_cloud_publisher_ =
-    create_publisher<sensor_msgs::msg::PointCloud2>("/lane/rear_bev/points", debug_image_qos);
 
   // ---- Drivable-area classification (see drivable_area.hpp) ----
   // Off unless a launch file asks for it: unlike this node's other outputs, this one is consumed
@@ -228,12 +182,11 @@ LaneDetection::BevSettings LaneDetection::declare_bev_settings(
   return settings;
 }
 
-const GroundProjection * LaneDetection::projection_for(CameraSide side, const cv::Size & source)
+const GroundProjection * LaneDetection::projection_for(const cv::Size & source)
 {
-  const bool is_rear = side == CameraSide::kRear;
-  auto & cached = is_rear ? rear_projection_ : front_projection_;
-  auto & cached_source = is_rear ? rear_projection_source_ : front_projection_source_;
-  const BevSettings & settings = is_rear ? rear_bev_settings_ : front_bev_settings_;
+  auto & cached = front_projection_;
+  auto & cached_source = front_projection_source_;
+  const BevSettings & settings = front_bev_settings_;
 
   if (cached && cached_source == source) {
     return &cached.value();
@@ -252,8 +205,8 @@ const GroundProjection * LaneDetection::projection_for(CameraSide side, const cv
   if (!projection) {
     RCLCPP_ERROR_THROTTLE(
       get_logger(), *get_clock(), kProjectionErrorThrottleMs,
-      "%s camera has no usable ground projection for a %dx%d frame: %s -- frames dropped",
-      is_rear ? "Rear" : "Front", source.width, source.height, error.c_str());
+      "Front camera has no usable ground projection for a %dx%d frame: %s -- frames dropped",
+      source.width, source.height, error.c_str());
     cached.reset();
     return nullptr;
   }
@@ -261,16 +214,16 @@ const GroundProjection * LaneDetection::projection_for(CameraSide side, const cv
   cached = std::move(projection);
   cached_source = source;
   RCLCPP_INFO(
-    get_logger(), "%s camera BEV projection (%dx%d source): %s", is_rear ? "Rear" : "Front",
+    get_logger(), "Front camera BEV projection (%dx%d source): %s",
     source.width, source.height, cached->describe(source).c_str());
   return &cached.value();
 }
 
 void LaneDetection::publish_bev_cloud(
   const cv::Mat & view, const std_msgs::msg::Header & header,
-  const GroundProjection & projection, bool is_rear)
+  const GroundProjection & projection)
 {
-  const auto & publisher = is_rear ? rear_bev_cloud_publisher_ : bev_cloud_publisher_;
+  const auto & publisher = bev_cloud_publisher_;
   if (!publisher || publisher->get_subscription_count() == 0) {
     return;
   }
@@ -280,9 +233,6 @@ void LaneDetection::publish_bev_cloud(
   // before any pixel is sampled.
   const double meters_per_pixel = projection.meters_per_pixel();
   const cv::Point2d origin = projection.origin_px();
-  // Rear camera: the top of its BEV is *behind* the vehicle, and image-left is the vehicle's
-  // right -- both axes flip, i.e. a 180 deg rotation about z.
-  const double facing = is_rear ? -1.0 : 1.0;
 
   sensor_msgs::msg::PointCloud2 cloud;
   cloud.header = header;
@@ -309,8 +259,8 @@ void LaneDetection::publish_bev_cloud(
       if (bgr[0] == 0 && bgr[1] == 0 && bgr[2] == 0) {
         continue;
       }
-      *iter_x = static_cast<float>((origin.y - row) * meters_per_pixel * facing);
-      *iter_y = static_cast<float>((origin.x - col) * meters_per_pixel * facing);
+      *iter_x = static_cast<float>((origin.y - row) * meters_per_pixel);
+      *iter_y = static_cast<float>((origin.x - col) * meters_per_pixel);
       *iter_z = static_cast<float>(bev_cloud_z_m_);
       // PointCloud2's packed "rgb" float is byte-ordered b, g, r -- the same order cv::Vec3b
       // already holds a BGR pixel in, so this copies straight across.
@@ -426,31 +376,18 @@ void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstShare
     RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
     return;
   }
-  process_frame(cv_ptr->image, msg->header, CameraSide::kFront);
-}
-
-void LaneDetection::raw_rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
-{
-  cv_bridge::CvImageConstPtr cv_ptr;
-  try {
-    cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
-  } catch (const cv_bridge::Exception & e) {
-    RCLCPP_ERROR(get_logger(), "cv_bridge exception (rear): %s", e.what());
-    return;
-  }
-  process_frame(cv_ptr->image, msg->header, CameraSide::kRear);
+  process_frame(cv_ptr->image, msg->header);
 }
 
 void LaneDetection::process_frame(
-  const cv::Mat & image, const std_msgs::msg::Header & header, CameraSide side)
+  const cv::Mat & image, const std_msgs::msg::Header & header)
 {
-  const bool is_rear = side == CameraSide::kRear;
-  const auto & bev_image_publisher = is_rear ? rear_bev_image_publisher_ : bev_image_publisher_;
+  const auto & bev_image_publisher = bev_image_publisher_;
 
-  // The warp is this camera's own ground projection rather than a set of ROI corner ratios picked
+  // The warp is the camera's own ground projection rather than a set of ROI corner ratios picked
   // per camera model: the same code path serves the sim and the real vehicle, and the difference
   // between them lives entirely in parameters.
-  const GroundProjection * projection = projection_for(side, image.size());
+  const GroundProjection * projection = projection_for(image.size());
   if (!projection) {
     return;  // reason already logged (throttled) by projection_for()
   }
@@ -458,9 +395,9 @@ void LaneDetection::process_frame(
   cv::Mat warped;
   cv::warpPerspective(image, warped, projection->homography(), projection->bev_size());
 
-  publish_bev_cloud(warped, header, *projection, is_rear);
+  publish_bev_cloud(warped, header, *projection);
 
-  if (drivable_enabled_ && !is_rear) {
+  if (drivable_enabled_) {
     publish_drivable_area(warped, header, *projection);
   }
 

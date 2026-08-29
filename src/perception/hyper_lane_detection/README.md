@@ -8,19 +8,18 @@
 
 카메라 영상이 어디서 들어오는지는 `input_backend` 파라미터로 고릅니다.
 
-- `intra_process` — 실차용. `hyper_camera`의 `ElpCameraPublisherNode` 컴포넌트(`/dev/video_elp`를 열어 MJPEG 캡처·디코드하고 `ELP-USBGS1200P01-KL170.yaml` 보정값으로 rectify)가 이 노드와 같은 `ComposableNodeContainer`에 함께 로드되어 `image_raw`를 발행합니다. rclcpp의 intra-process 매니저가 그 프레임을 직렬화 없이 포인터로 바로 넘겨주므로, 별도 DDS 토픽 왕복이 없습니다. 후방 카메라 경로는 없습니다(실물이 없어도 실패하지 않음).
-- `ros_raw` — 시뮬레이션(Gazebo)용. `/camera/image_raw`, `/camera_rear/image_raw`를 평범한 `sensor_msgs/Image`로 구독합니다. 시뮬레이션 카메라 영상은 이미 보정된 입력으로 취급하므로 rectify하지 않습니다.
+- `intra_process` — 실차용. `hyper_camera`의 `ElpCameraPublisherNode` 컴포넌트(`/dev/video_elp`를 열어 MJPEG 캡처·디코드하고 `ELP-USBGS1200P01-KL170.yaml` 보정값으로 rectify)가 이 노드와 같은 `ComposableNodeContainer`에 함께 로드되어 `image_raw`를 발행합니다. rclcpp의 intra-process 매니저가 그 프레임을 직렬화 없이 포인터로 바로 넘겨주므로, 별도 DDS 토픽 왕복이 없습니다.
+- `ros_raw` — 시뮬레이션(Gazebo)용. `/camera/image_raw`를 평범한 `sensor_msgs/Image`로 구독합니다. 시뮬레이션 카메라 영상은 이미 보정된 입력으로 취급하므로 rectify하지 않습니다.
 
-두 백엔드 모두 노드 자체는 `/image_raw`, `/rear_image_raw`(둘 다 remap 대상)를 구독할 뿐이며, ELP 카메라를 여는 파라미터(`video_device`, `image_width`/`image_height`, `framerate`, `calibration_file`)는 이제 `hyper_camera`의 `ElpCameraPublisherNode`가 선언합니다.
+두 백엔드 모두 노드 자체는 `/image_raw`(remap 대상)를 구독할 뿐이며, ELP 카메라를 여는 파라미터(`video_device`, `image_width`/`image_height`, `framerate`, `calibration_file`)는 이제 `hyper_camera`의 `ElpCameraPublisherNode`가 선언합니다.
 
 ## 입출력
 
 - 입력: `input_backend`에 따라 다름 (위 참고)
 - 출력: `/lane/center`, `/stopline/detection`
-- 후방 출력: `/lane/rear_center`, `/stopline/rear_detection` (`intra_process`에서는 발행되지 않음)
 - 주행가능영역: `/lane/drivable_area` (`nav_msgs/OccupancyGrid`, `drivable.enabled` 필요 -- 아래 참고)
-- 디버그 영상: `/lane/bev/image_raw`, `/lane/rear_bev/image_raw`, `/lane/drivable/image_raw` (`sensor_msgs/Image`, BGR8)
-- 지면 투영 디버그: `/lane/bev/points`, `/lane/rear_bev/points` (`sensor_msgs/PointCloud2`, XYZRGB)
+- 디버그 영상: `/lane/bev/image_raw`, `/lane/drivable/image_raw` (`sensor_msgs/Image`, BGR8)
+- 지면 투영 디버그: `/lane/bev/points` (`sensor_msgs/PointCloud2`, XYZRGB)
 
 ## 디버그 뷰 (BEV / IPM)
 
@@ -148,9 +147,11 @@ BEV 워프는 이미지 위에서 고른 사다리꼴 ROI가 아니라, **카메
 스케일이 두 축에서 같고(등방), 원점 위치가 계산 가능하며, FOV·해상도·장착 높이/각도를 바꾸면
 호모그래피가 따라 바뀝니다.
 
-전방은 `bev.*`, 후방은 `bev_rear.*` 접두사를 씁니다. 기본값은 **시뮬레이터** 카메라 기준입니다
-(`hyper_control/config/parameters.yaml`의 값과 일치). 실차 전방 카메라는 렌즈 모델이 달라
-`config/bev_real.yaml`이 `intra_process` 경로에서 자동으로 덮어씁니다.
+접두사는 `bev.*` 하나입니다(후방 카메라는 배터리 절약을 위해 제거되었습니다 — `bev_rear.*`는
+더 이상 없습니다). 기본값은 **시뮬레이터** 카메라 기준입니다 (`hyper_control/config/parameters.yaml`의
+값과 일치). 실차 카메라는 렌즈 모델이 달라 `config/bev_real.yaml`이 `intra_process` 경로에서
+자동으로 덮어씁니다 — 그 파일의 `fx/fy/cx/cy`는 ELP 보정값(1280x720 측정)을 실제 캡처 해상도
+640x360에 맞춰 0.5배한 값입니다.
 
 | 파라미터 | `bev` 기본값 | 설명 |
 | --- | --- | --- |
@@ -158,23 +159,14 @@ BEV 워프는 이미지 위에서 고른 사다리꼴 ROI가 아니라, **카메
 | `fx`, `fy`, `cx`, `cy` | `0.0` (미사용) | rectify된 실제 렌즈용 명시적 내부 파라미터. 실렌즈는 `fx != fy`이고 주점도 중앙이 아니라서 화각만으로는 표현되지 않습니다. `fx > 0`이면 `horizontal_fov`보다 우선합니다. |
 | `camera_height` | `1.5` | 광학 중심의 **지면** 위 높이 [m]. `parameters.yaml`의 `camera_height`(1.2)와 기준면이 다릅니다 — 그쪽은 `body_link` 기준 카메라 조인트 z이고, `body_link`는 바퀴 위에 0.3 m 떠 있습니다(`vehicle.xacro`가 바퀴 조인트를 `-wheel_radius/2`에 달고 바퀴 반지름이 0.2). 1.2를 그대로 옮겨 쓰면 오버레이 전체가 실제 거리의 0.80배로 그려집니다. |
 | `camera_pitch` | `0.2617994` | 아래로 숙인 각 [rad]. **세 값 중 오차에 가장 민감합니다.** |
-| `camera_longitudinal_offset` | `0.145` | 차량 프레임 원점에서 카메라까지, **카메라가 보는 방향으로** 잰 거리 [m]. 후방 카메라도 같은 부호 규약이라 음수를 넣지 않습니다. |
+| `camera_longitudinal_offset` | `0.145` | 차량 프레임 원점에서 카메라까지, **카메라가 보는 방향으로** 잰 거리 [m]. |
 | `near` / `far` | `0.3` / `7.6` | BEV 맨 아래/맨 위 행이 보여줄 지면 거리 [m]. `near`를 카메라가 볼 수 있는 것보다 가깝게 잡으면 그 행들은 그냥 검게 남습니다. |
 | `half_width` | `9.0` | 좌우로 각각 얼마나 넓게 볼지 [m]. |
 | `meters_per_pixel` | `0.028125` | BEV 픽셀 하나가 덮는 지면 거리 [m/px]. 양 축 공통 — 이 값이 곧 발행되는 `offset_m`/`distance_m`의 환산 계수입니다. |
 
-시작할 때 카메라별로 실제 만들어진 형상이 로그로 한 줄 남습니다(지면 범위, BEV 크기, 원점 위치,
+시작할 때 실제 만들어진 형상이 로그로 한 줄 남습니다(지면 범위, BEV 크기, 원점 위치,
 지평선 행, 원본 프레임 밖으로 나간 꼭짓점 수). 장착 파라미터가 틀리면 RViz를 보기 전에 이 줄에서
 먼저 드러납니다.
-
-> `bev_rear` 기본값은 전방과 달리 예전 설정을 계승하지 않았습니다. 예전 후방 ROI는 24 m 뒤까지
-> 잡으면서 스케일이 가로로 64% 넓고 세로로 54% 짧아 보존할 튜닝 자체가 없었기 때문에, 주차
-> 기동에 맞춰 다시 잡았습니다(`near` 1.8 m는 이 카메라가 실제로 볼 수 있는 가장 가까운 지면입니다
-> — 1.5 m 높이에 15도만 숙이면 화면 맨 아랫줄이 차량 뒤 1.74 m에 떨어집니다. 이 사각지대는 워프로
-> 복구할 수 없고, 주차용 후방 카메라라면 더 낮게 달거나 훨씬 더 숙여야 합니다).
-
-후방 카메라(`/lane/rear_bev/points`)는 뒤를 보므로 이미지 전체가 -x/-y로 매핑됩니다(차량 z축
-기준 180도 회전).
 
 ```bash
 ros2 run hyper_lane_detection lane_detection_node --ros-args -p input_backend:=ros_raw

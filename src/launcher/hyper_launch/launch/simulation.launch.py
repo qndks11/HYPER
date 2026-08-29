@@ -3,8 +3,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 # Stages are staggered to give Gazebo time to come up before the nodes that
 # depend on it attach -- mirrors run_all.sh's sleep 5 / sleep 2 / sleep 2 gaps
@@ -22,6 +24,40 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(hyper_launch_share, 'launch', name)),
             launch_arguments=launch_arguments.items())
+
+    # real.launch.py의 rviz와 같은 설정(costmap, planner/MPPI 경로, footprint)을 씁니다.
+    # headless:=true로 Gazebo 3D 창을 끈 채 이걸 켜면 한 명령으로 "창 없는 시뮬 + rviz"가
+    # 됩니다. real.launch.py와 마찬가지로 기본값 true입니다 -- 별도 터미널에서 rviz2를
+    # 직접 띄우고 싶으면 use_rviz:=false로 끄세요.
+    rviz = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        arguments=['-d', os.path.join(
+            get_package_share_directory('hyper_planner'),
+            'config', 'follow_path.rviz')],
+        condition=IfCondition(LaunchConfiguration('use_rviz')),
+    )
+
+    # hyper_rqt의 "HYPER Panel" -- mission_manager의 start/cancel/skip/restart,
+    # model_service의 spawn/remove, teleport_service를 버튼으로 모아 둔 창입니다
+    # (버튼 목록은 hyper_rqt/config/panel.yaml). auto_start가 false라 미션은 사람이
+    # Start를 눌러야 출발하므로, headless 시뮬에서는 이 패널이 사실상 조작 창입니다.
+    #
+    # name=을 주지 않는 것이 중요합니다: launch_ros가 name을 붙이면 --ros-args -r
+    # __node:=... 가 argv에 끼는데, 이 실행 파일은 rqt_gui의 Main()이 argv를 직접
+    # 파싱하므로 알 수 없는 인자로 보고 죽습니다.
+    #
+    # behavior 스테이지와 같은 타이밍에 띄웁니다. panel.yaml의 select들이
+    # apply_on_start로 /model_service와 /teleport_service의 파라미터를 건드리고
+    # 상단 상태줄은 /mission_manager/status를 읽으므로, 그 노드들보다 먼저 떠 봐야
+    # 대상이 없습니다.
+    mission_panel = Node(
+        package='hyper_rqt',
+        executable='hyper_panel',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('use_panel')),
+    )
 
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
@@ -44,12 +80,16 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'drivable_area', default_value='false',
             description="Publish the camera drivable-area grid for nav2's DrivableAreaLayer"),
-        # 후방 RGBD 카메라의 깊이 영상을 유사 라이다(/scan_rear)로 변환해 local costmap의 두 번째
-        # 관측 소스로 씁니다. 기본은 off. 카메라가 수평(rear_camera_pitch 0.0)이라는 전제 위에
-        # 서 있으니 마운트를 바꿀 거면 perception.launch.py의 주석을 먼저 읽으세요.
+        # headless:=true와 짝지어 쓰는 인자. Gazebo 창 대신 rviz로 봅니다. 끄려면 false.
         DeclareLaunchArgument(
-            'rear_scan', default_value='false',
-            description="Publish /scan_rear from the rear camera's depth stream"),
+            'use_rviz', default_value='true',
+            description='Launch RViz with the follow_path nav2 view'),
+        # 미션 조작 GUI (hyper_rqt HYPER Panel). Start를 눌러야 미션이 출발하므로, 이 패널이
+        # 없으면 서비스 콜을 직접 해야 합니다 -- 그래서 기본값 true. 끄려면 false.
+        DeclareLaunchArgument(
+            'use_panel', default_value='true',
+            description='Launch the hyper_rqt HYPER Panel (mission start/cancel, teleport)'),
+        rviz,
         stage('sim.launch.py',
               headless=LaunchConfiguration('headless'),
               software_rendering=LaunchConfiguration('software_rendering')),
@@ -60,8 +100,8 @@ def generate_launch_description():
         # already ros_raw, so no override needed for it.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage('perception.launch.py', lane_input_backend='ros_raw',
-                  drivable_area=LaunchConfiguration('drivable_area'),
-                  rear_scan=LaunchConfiguration('rear_scan'))]),
+                  drivable_area=LaunchConfiguration('drivable_area'))]),
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
-            stage('behavior.launch.py', mission=LaunchConfiguration('mission'))]),
+            stage('behavior.launch.py', mission=LaunchConfiguration('mission')),
+            mission_panel]),
     ])

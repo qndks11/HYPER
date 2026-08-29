@@ -25,12 +25,6 @@ def generate_launch_description():
         # be enabled separately for this to change what the vehicle does.
         DeclareLaunchArgument('drivable_area', default_value='false'),
 
-        # Forwarded to the depthimage_to_laserscan node that turns the rear camera's depth
-        # stream into /scan_rear. Off by default -- see the argument's own comment in
-        # hyper_object_detection's perception.launch.py. Only the sim publishes rear depth
-        # today, so only simulation.launch.py has a reason to pass this true.
-        DeclareLaunchArgument('rear_scan', default_value='false'),
-
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('hyper_object_detection'),
@@ -39,7 +33,6 @@ def generate_launch_description():
                 'lane_input_backend': LaunchConfiguration('lane_input_backend'),
                 'object_input_backend': LaunchConfiguration('object_input_backend'),
                 'drivable_area': LaunchConfiguration('drivable_area'),
-                'rear_scan': LaunchConfiguration('rear_scan'),
             }.items(),
         ),
     ])

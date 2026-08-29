@@ -1,6 +1,6 @@
-# Bird's-eye-view geometry for the REAL vehicle's cameras (input_backend:=intra_process).
+# Bird's-eye-view geometry for the REAL vehicle's front camera (input_backend:=intra_process).
 #
-# The node's built-in defaults describe the *simulated* cameras, so this file exists to override
+# The node's built-in defaults describe the *simulated* camera, so this file exists to override
 # the one thing that genuinely differs: the lens. Everything else -- the ground region and the
 # metric scale -- is deliberately left at the sim's values, so the BEV raster has identical
 # geometry in sim and on the car and the detectors' pixel-denominated constants (LaneDetector's
@@ -11,20 +11,27 @@
 /**:
   ros__parameters:
     bev:
-      # Rectified intrinsics of the ELP front camera, copied from the leading 3x3 block of the
+      # Rectified intrinsics of the ELP front camera, derived from the leading 3x3 block of the
       # projection_matrix in hyper_camera/config/ELP-USBGS1200P01-KL170.yaml -- which is exactly
       # the camera matrix ElpCameraCapture remaps every frame into (cv::fisheye::
       # initUndistortRectifyMap with P's 3x3 as newK), so it is the model that describes the
       # pixels this node actually receives.
       #
+      # !! Scaled by 0.5. The calibration file is measured at 1280x720, but the camera is now
+      # captured at 640x360 to save power (ElpCameraPublisherNode's image_width/image_height),
+      # and ElpCameraCapture rescales K/P by the capture/calibration ratio before building its
+      # rectify map. These four numbers describe the pixels this node receives, so they carry the
+      # same 0.5. If you ever change the capture resolution, rescale these by the same factor --
+      # a stale copy here silently mis-scales every distance the BEV reports.
+      #
       # These must be given explicitly rather than as a horizontal_fov, because neither
       # assumption behind the FOV shortcut holds for this lens: fx != fy, and the principal point
-      # (563.4, 369.0) is nowhere near the image center (640, 360). Setting fx > 0 makes these
+      # (281.7, 184.5) is nowhere near the image center (320, 180). Setting fx > 0 makes these
       # win over bev.horizontal_fov.
-      fx: 124.82206099
-      fy: 124.78824450
-      cx: 563.43493975
-      cy: 368.99783301
+      fx: 62.41103050
+      fy: 62.39412225
+      cx: 281.71746988
+      cy: 184.49891651
 
       # !! UNMEASURED -- these are the intended mounting pose from hyper_control's
       # parameters.yaml (camera_height / camera_pitch, and camera_setback resolved against
@@ -49,25 +56,3 @@
       far: 7.6
       half_width: 9.0
       meters_per_pixel: 0.028125
-
-    bev_rear:
-      # The rear D435i's COLOUR stream, which is the only stream LaneDetection consumes. The sim
-      # models this camera with the D435i's 87 deg DEPTH FOV, because Gazebo's rgbd_camera shares
-      # one lens between the two streams and depth won that trade (see vehicle.xacro). The real
-      # camera has no such constraint: its RGB imager is a separate 69 x 42 deg lens, so leaving
-      # the node's sim default in place here would over-state the horizontal FOV by 18 deg and
-      # stretch every rear distance this node reports.
-      #
-      # Given as an FOV rather than fx/fy/cx/cy because, unlike the ELP, this camera is not
-      # calibrated in-repo -- the D435i ships factory-calibrated and realsense2_camera delivers
-      # an already-rectified colour image, which the centered-pinhole FOV shortcut describes well
-      # enough. Add explicit intrinsics here (from ~/color/camera_info) if the rear lane fit ever
-      # needs to be tighter than that.
-      horizontal_fov: 1.2043  # [rad] 69 deg, D435i RGB
-
-      # !! UNMEASURED -- same caveat as the front camera above, and for the same reason: these are
-      # the intended rear mount, not a measurement of the built car. Measure camera_height from
-      # the GROUND, not from body_link.
-      camera_height: 1.2              # [m] optical center above the ground
-      camera_pitch: 0.2617994         # [rad] downward tilt (15 deg)
-      camera_longitudinal_offset: 0.145   # [m] behind body_link's origin

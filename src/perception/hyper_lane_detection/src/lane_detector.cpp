@@ -25,15 +25,14 @@ constexpr double kTopRowMargin = 20.0;
 // A few points of slack past the minimum a well-conditioned line-direction fit needs (2 points
 // determine a direction exactly; more give the weighted eigen solve something to average over).
 constexpr int kMinLanePoints = 3;
-// fit_lane_curve() needs more points than fit_lane() -- estimating a curvature term (2 unknowns:
-// a, b) from noisy pixel data needs more spread than estimating a direction alone.
-constexpr int kMinCurveFitPoints = 5;
 // Floor on the fitted line direction's weighted variance (see fit_lane): below this the chain is
 // numerically degenerate (points effectively coincident), so the eigen solve isn't trustworthy.
 constexpr double kMinLineFitVariance = 1e-6;
-// A straight-line fit has zero curvature everywhere; this sentinel radius is reported in its
-// place rather than infinity, so downstream consumers (e.g. the controller's curvature-based
-// speed throttle) see "very straight" instead of a non-finite value.
+// fit_lane() models the lane as a straight line, which has zero curvature everywhere; this
+// sentinel radius is reported in its place rather than infinity, so downstream consumers (e.g.
+// the controller's curvature-based speed throttle) see "very straight" instead of a non-finite
+// value. It is the only value Fit::curvature_radius_px ever takes now that the rear camera's
+// quadratic fit is gone with the camera itself.
 constexpr double kMaxCurvatureRadiusPx = 1e6;
 
 constexpr double kArrowLength = 100.0;
@@ -46,13 +45,6 @@ constexpr double kArrowLength = 100.0;
 // figure, while the course this drives is built with 3.0 m lanes, so every published lane offset
 // stood 0.35 m off center in whichever direction the tracked line happened to be on.
 constexpr double kLaneCenterOffsetBiasM = kLaneWidthMeters / 2.0;
-
-// Rear camera equivalent of kLaneCenterOffsetBiasM: while backing into a parking bay, only one
-// side line is visible and it is not the near side of a same-width paired lane, so the
-// lane-center assumption above doesn't apply. Instead the target is a fixed standoff from that
-// one line, measured to the vehicle's own centerline -- body_width/2 (~0.5m, see vehicle.xacro)
-// plus a small margin, so the body's near-side edge clears the line instead of crossing it.
-constexpr double kRearParkingLineStandoffM = 0.85;
 
 // Empirical gain [m per degree] converting a tracked lane line's own outward lean --
 // steering_angle_deg's magnitude, in the direction that means the line is angling away from the
@@ -281,98 +273,10 @@ LaneDetector::Fit LaneDetector::fit_lane(
   return result;
 }
 
-LaneDetector::Fit LaneDetector::fit_lane_curve(
-  const std::vector<cv::Point> & points, const cv::Point2d & origin, double meters_per_pixel,
-  Side side, double center_bias_m) const
-{
-  Fit result;
-  if (static_cast<int>(points.size()) < kMinCurveFitPoints) {
-    return result;
-  }
-
-  const int n = static_cast<int>(points.size());
-  const cv::Point2d p0(points[0].x, points[0].y);
-
-  // Same near-field-weighted arc length as fit_lane(), and the same anchor-at-p0 shift (x', y') --
-  // fitting x' = a*y'^2 + b*y' (no free constant term) forces the curve through p0 exactly.
-  std::vector<double> s(n);
-  s[0] = 0.0;
-  for (int i = 1; i < n; ++i) s[i] = s[i - 1] + cv::norm(points[i] - points[i - 1]);
-  const double s_far = s.back();
-
-  double sy2 = 0.0, sy3 = 0.0, sy4 = 0.0, sxy = 0.0, sxy2 = 0.0;
-  for (int i = 0; i < n; ++i) {
-    const double w = (s_far - s[i]) + 1.0;
-    const double yp = points[i].y - p0.y;
-    const double xp = points[i].x - p0.x;
-    const double yp2 = yp * yp;
-    sy2 += w * yp2;
-    sy3 += w * yp2 * yp;
-    sy4 += w * yp2 * yp2;
-    sxy += w * xp * yp;
-    sxy2 += w * xp * yp2;
-  }
-  // Degenerate if the chain barely spreads away from its own anchor -- same conceptual role as
-  // fit_lane()'s eigenvalue floor, just measured directly on y' spread here instead.
-  if (sy2 < kMinLineFitVariance) {
-    return result;
-  }
-
-  const cv::Mat normal_matrix = (cv::Mat_<double>(2, 2) << sy4, sy3, sy3, sy2);
-  const cv::Mat rhs = (cv::Mat_<double>(2, 1) << sxy2, sxy);
-  cv::Mat solution;
-  // DECOMP_SVD degrades gracefully on a near-singular system (e.g. too few distinct depths to
-  // pin down curvature confidently) instead of failing outright the way a strict LU solve would.
-  cv::solve(normal_matrix, rhs, solution, cv::DECOMP_SVD);
-  const double a = solution.at<double>(0);
-  const double b = solution.at<double>(1);
-
-  // Tangent at the near point (y'=0): dx/dy = b. A step of dy<0 (away from the vehicle, up the
-  // image) gives dx = b*dy, so the direction vector is proportional to (-b, -1) -- matching
-  // fit_lane()'s convention that direction.y is negative when pointing away from the vehicle.
-  const double direction_norm = std::sqrt(b * b + 1.0);
-  const cv::Point2d direction(-b / direction_norm, -1.0 / direction_norm);
-
-  // Sampled across the chain's actual observed reach (p0 down to the farthest point), for drawing
-  // a real curve instead of fit_lane()'s two-point straight segment.
-  constexpr int kCurveDrawSamples = 12;
-  const cv::Point2d p_far(points[n - 1].x, points[n - 1].y);
-  result.curve_points.reserve(kCurveDrawSamples + 1);
-  for (int i = 0; i <= kCurveDrawSamples; ++i) {
-    const double t = static_cast<double>(i) / kCurveDrawSamples;
-    const double yp = t * (p_far.y - p0.y);
-    const double xp = a * yp * yp + b * yp;
-    result.curve_points.push_back(cv::Point(
-      static_cast<int>(std::lround(p0.x + xp)), static_cast<int>(std::lround(p0.y + yp))));
-  }
-
-  result.steering_angle_deg = -std::atan2(direction.x, -direction.y) * 180.0 / CV_PI;
-
-  // Curvature from the second derivative at the near point (f''(0) = 2a): kappa = f'' / (1+f'^2)^1.5,
-  // radius = 1/kappa. Clamped to the same flat-line sentinel fit_lane() always reports, since a
-  // near-zero `a` (an essentially straight chain) would otherwise blow up toward infinity.
-  const double curvature = std::abs(2.0 * a) / std::pow(1.0 + b * b, 1.5);
-  result.curvature_radius_px = curvature > 1.0 / kMaxCurvatureRadiusPx ?
-    1.0 / curvature : kMaxCurvatureRadiusPx;
-
-  // Same perpendicular-distance-to-tangent-line formula as fit_lane(), just fed this curve's
-  // near-point tangent direction instead of the global straight-line direction (standard
-  // Frenet-style local approximation for lateral offset to a curve).
-  const double perp_px = (origin.x - p0.x) * direction.y - (origin.y - p0.y) * direction.x;
-  const double signed_bias_m = side == Side::kRight ? -center_bias_m : center_bias_m;
-  result.offset_m = perp_px * meters_per_pixel + signed_bias_m;
-
-  result.valid = true;
-  return result;
-}
-
 LaneDetector::Result LaneDetector::detect_and_draw(
-  const cv::Mat & yellow, const cv::Point2d & origin, double meters_per_pixel, bool is_rear,
+  const cv::Mat & yellow, const cv::Point2d & origin, double meters_per_pixel,
   cv::Mat & view) const
 {
-  const bool use_curve_fit = is_rear;
-  const double center_bias_m = is_rear ? kRearParkingLineStandoffM : kLaneCenterOffsetBiasM;
-
   std::vector<cv::Point> yellow_points;
   cv::findNonZero(yellow, yellow_points);
   std::vector<cv::Point> right_points = walk_lane_chain(yellow_points, origin, Side::kRight);
@@ -388,12 +292,10 @@ LaneDetector::Result LaneDetector::detect_and_draw(
   for (const auto & p : left_points) cv::circle(view, p, 3, cv::Scalar(255, 0, 0), -1);
 
   Result result;
-  result.right = use_curve_fit ?
-    fit_lane_curve(right_points, origin, meters_per_pixel, Side::kRight, center_bias_m) :
-    fit_lane(right_points, origin, meters_per_pixel, Side::kRight, center_bias_m);
-  result.left = use_curve_fit ?
-    fit_lane_curve(left_points, origin, meters_per_pixel, Side::kLeft, center_bias_m) :
-    fit_lane(left_points, origin, meters_per_pixel, Side::kLeft, center_bias_m);
+  result.right =
+    fit_lane(right_points, origin, meters_per_pixel, Side::kRight, kLaneCenterOffsetBiasM);
+  result.left =
+    fit_lane(left_points, origin, meters_per_pixel, Side::kLeft, kLaneCenterOffsetBiasM);
 
   // Each side is published as its own independent estimate now (no more width-based decision
   // between left-only / right-only / averaged-both). If a line is angling outward -- away from

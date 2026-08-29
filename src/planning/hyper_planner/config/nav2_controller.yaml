@@ -406,9 +406,15 @@ local_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
-        observation_sources: scan rear_scan
+        observation_sources: scan
         # 전방 180도만 옵니다(vehicle.xacro: min/max_angle -pi/2..+pi/2, 360 samples).
         # 따라서 아래 raytrace_max_range 20.0이 지우는 것도 앞쪽 절반뿐입니다.
+        #
+        # 후방 카메라를 걷어낸 뒤로 이것이 obstacle_layer의 유일한 관측 소스입니다. 차 뒤를
+        # 보는 센서가 없으므로, 후진 구간에서 local costmap의 뒤쪽은 "전진하며 마킹해 둔 것"과
+        # 빈 칸뿐입니다 -- 그리고 그 셀들을 지워 줄 빔도 없습니다(obstacle_layer에는 decay가
+        # 없고, rolling window 20 m 밖으로 밀려나야 사라집니다). 후진 주차에서 유령 셀이
+        # 문제가 되면 라이다를 360도로 되돌리는 쪽이 카메라를 되살리는 것보다 쌉니다.
         scan:
           topic: /scan
           data_type: "LaserScan"
@@ -437,48 +443,6 @@ local_costmap:
           obstacle_max_range: 9.0
           obstacle_min_range: 0.0
           raytrace_max_range: 20.0
-          raytrace_min_range: 0.0
-        # 후방 RGBD 카메라(D435i)의 깊이 영상을 depthimage_to_laserscan이 스캔으로 바꾼 것입니다
-        # (hyper_object_detection/launch/perception.launch.py, rear_scan:=true일 때만 켜짐).
-        # 지면 기준 0.6 m에 수평으로 달려 있으므로 스캔면 자체가 0.6 m 높이의 수평면입니다 --
-        # 즉 "높이가 0.6 m 부근인 것"만 봅니다.
-        #
-        # 라이다가 전방 180도로 좁혀지면서(vehicle.xacro의 lidar_sensor -- 범퍼에 얹혀 차체에
-        # 가려집니다) 이 소스는 "있으면 좋은 것"이 아니라 **차 뒤를 보는 유일한 센서**가
-        # 됐습니다. 후진 주차 스텝에서 local costmap의 뒤쪽을 채우는 게 여기뿐입니다.
-        #
-        # 부수적으로, 두 센서가 서로를 지우는 문제도 같이 사라졌습니다. nav2의 레이캐스팅은
-        # 2D라 높이를 안 보므로, 360도 라이다였을 때는 0.65 m 빔이 이 카메라가 0.6 m에서
-        # 마킹한 셀을 같은 사이클에 지워 버렸습니다. 이제 두 소스의 부채꼴이 겹치지 않습니다.
-        #
-        # 대신 새로 생긴 구멍: 뒤쪽 ±43.5도(이 카메라의 FOV) 바깥은 아무도 레이캐스트로
-        # 지우지 않습니다. obstacle_layer에는 decay가 없으므로, 전진 중 앞에서 마킹된 셀은
-        # 차가 지나간 뒤 rolling window(20 m) 밖으로 밀려날 때까지 남습니다. 후진 경로가
-        # 그 부채꼴 안에 있는 한 카메라가 지워 주니 실전에서는 견딜 만하지만, 옆뒤쪽에
-        # 유령 셀이 보인다면 이게 원인입니다.
-        #
-        # obstacle_max_range 6.0: range_max(8.0)보다 안쪽입니다. 스테레오 깊이 오차는 거리의
-        # 제곱에 비례하므로 D435i의 8 m 근처 값은 코스트맵에 넣을 만큼 안 믿음직합니다.
-        rear_scan:
-          topic: /scan_rear
-          data_type: "LaserScan"
-          marking: true
-          clearing: true
-          # depthimage_to_laserscan은 무효 픽셀을 NaN으로 통과시킵니다(inf가 아니라).
-          # laser_geometry가 NaN을 버리므로 inf_is_valid는 여기서 아무 일도 하지 않습니다 --
-          # 즉 이 소스는 "아무것도 안 보이는 방향"을 지우지 못합니다. 위 scan이 그 역할을
-          # 계속 합니다.
-          inf_is_valid: false
-          # 높이 선택은 여기가 아니라 카메라 기하가 합니다(수평 마운트 + scan_height 행 대역).
-          # 그래서 z 필터는 위 scan과 같이 느슨하게 둡니다. 좁게 잡으면 안 되는 이유:
-          # min/max_obstacle_height는 *global_frame(odom)* 기준으로 걸리는데 odom의 z=0은
-          # 지면이 아니라 body_link(지면 위 0.3 m)이고, 게다가 ekf_local이 two_d_mode라
-          # tf에 피치가 없어 언덕에서는 이 값이 실제 높이와 어긋납니다. 좁은 대역을 걸면
-          # 어느 날 소스가 통째로 비어도 조용히 지나갑니다.
-          max_obstacle_height: 2.0
-          obstacle_max_range: 6.0
-          obstacle_min_range: 0.0
-          raytrace_max_range: 7.0
           raytrace_min_range: 0.0
       # hyper_lane_detection의 색 기반 주행가능영역 분류를 hyper_costmap_plugins가 코스트맵에
       # 반영합니다. 위 `plugins`에 drivable_area_layer를 넣기 전까지는 아무 일도 하지 않습니다.
