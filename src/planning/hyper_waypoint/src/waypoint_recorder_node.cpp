@@ -128,6 +128,12 @@ private:
       return false;
     }
 
+    // output_csv는 실행 중에 바꿀 수 있습니다 -- GUI가 파일 이름 칸에 적은 값을
+    // 파라미터로 밀어 넣고 ~/start를 부르는 흐름(waypoint_record_gui.py). 여기서
+    // 다시 읽어 두면 매 녹화가 그 시점의 파라미터 값으로 갑니다.
+    output_csv_ = get_parameter("output_csv").as_string();
+    diag_log_path_ = output_csv_ + ".diag.log";
+
     csv_.open(output_csv_, std::ios::out | std::ios::trunc);
     if (!csv_.is_open()) {
       message = "failed to open '" + output_csv_ + "' for writing";

@@ -151,6 +151,16 @@ mission_manager:
     validation:
       gt<>: [0.0]
 
+  lead_in_tangent_gain:
+    type: double
+    default_value: 1.0
+    description: |
+      진입 경로(3차 Hermite 곡선)의 접선 크기 배율. 양 끝 접선 크기가
+      gain * (차량-첫점 거리)입니다. 크게 하면 양 끝 헤딩을 더 오래 유지하며 완만하게
+      휘고, 작게 하면 직선에 가까워집니다.
+    validation:
+      gt<>: [0.0]
+
   path_resample_spacing_m:
     type: double
     default_value: 0.25

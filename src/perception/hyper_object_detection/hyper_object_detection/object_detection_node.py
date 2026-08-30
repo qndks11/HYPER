@@ -18,6 +18,10 @@ class ObjectDetection(Node):
     # 신호등: red / green / left_arrow
     # 차선 안내: ban / allow  -- 코스 끝의 갈림길에서 어느 차선으로 갈지 알려 주는 표지.
     #            mission.yaml의 branch 스텝이 이 값을 보고 두 갈래 중 하나를 고릅니다.
+    # 차선 안내(상대 위치): allow_left / allow_right  -- 'allow'와 'ban' 표지가 한 프레임에
+    #            같이 보일 때, 'allow'가 'ban'보다 화면에서 왼쪽에 있으면 allow_left,
+    #            오른쪽에 있으면 allow_right. "허용 차선으로 가라"를 어느 쪽 차선인지까지
+    #            알려 주는 갈림길에서 branch 스텝이 이 값을 봅니다.
     # none:    유효한 신호를 못 봤다.
     VALID_SIGNS = frozenset({
         'red',
@@ -25,6 +29,8 @@ class ObjectDetection(Node):
         'left_arrow',
         'ban',
         'allow',
+        'allow_left',
+        'allow_right',
         'none',
     })
 
@@ -230,10 +236,14 @@ class ObjectDetection(Node):
         result = results[0]
         annotated_frame = result.plot()
 
-        self.publish_center_sign(
-            result,
-            frame.shape[1]
-        )
+        # 'allow'와 'ban'이 한 프레임에 같이 보이면 둘의 좌우 배치가 곧 신호이므로
+        # (allow_left / allow_right) 중앙 선택보다 먼저 본다. 둘 중 하나만 보이거나
+        # 아예 없으면 False를 돌려주고 평소의 중앙 선택으로 넘어간다.
+        if not self.publish_lane_fork_sign(result):
+            self.publish_center_sign(
+                result,
+                frame.shape[1]
+            )
 
         annotated_msg = self.bridge.cv2_to_imgmsg(
             annotated_frame,
@@ -260,6 +270,43 @@ class ObjectDetection(Node):
                 f'{raw_class_name}:ban\']").'
             )
         return sign_name
+
+    def publish_lane_fork_sign(self, result):
+        """
+        'allow'와 'ban' 표지가 한 프레임에 같이 보이면 좌우 배치를 신호로 낸다.
+
+        allow가 ban보다 왼쪽이면 'allow_left', 오른쪽이면 'allow_right'를 publish하고
+        True를 돌려준다. 둘 중 하나만 보이거나 아예 없으면 아무것도 안 하고 False --
+        그러면 호출부가 평소의 publish_center_sign으로 넘어간다.
+
+        중앙 50% 제한을 두지 않는다: 갈림길 표지는 보통 나란히 붙어 있어 한쪽이 중앙
+        밖으로 밀리기 쉽고, 여기서 중요한 건 화면 어디에 있느냐가 아니라 둘의 상대
+        위치이기 때문이다. 같은 클래스가 여러 개면 신뢰도가 가장 높은 박스를 쓴다.
+        """
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            return False
+
+        best = {'allow': None, 'ban': None}  # sign -> (confidence, box_center_x)
+        for box in boxes:
+            raw_class_name = str(self.model.names[int(box.cls[0])])
+            sign_name = self._map_class(raw_class_name)
+            if sign_name not in ('allow', 'ban'):
+                continue
+
+            confidence = float(box.conf[0])
+            x1, _, x2, _ = box.xyxy[0].tolist()
+            box_center = (x1 + x2) / 2.0
+            if best[sign_name] is None or confidence > best[sign_name][0]:
+                best[sign_name] = (confidence, box_center)
+
+        if best['allow'] is None or best['ban'] is None:
+            return False
+
+        allow_x = best['allow'][1]
+        ban_x = best['ban'][1]
+        self.publish_sign('allow_left' if allow_x < ban_x else 'allow_right')
+        return True
 
     def publish_center_sign(self, result, image_width):
         """

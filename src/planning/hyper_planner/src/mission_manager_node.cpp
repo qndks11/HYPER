@@ -1199,12 +1199,14 @@ private:
         path.poses.begin(), path.poses.begin() + static_cast<std::ptrdiff_t>(dropped));
     }
 
-    // 진입 경로는 차량 헤딩과 회전 반경을 무시한 직선이라, 후진 세그먼트에 붙이면
-    // RPP가 방향을 반대로 읽습니다. 전진 세그먼트에서만 씁니다.
+    // 진입 경로는 차량 헤딩에서 출발하는 곡선이라, 후진 세그먼트에 붙이면 RPP가
+    // 방향을 반대로 읽습니다. 전진 세그먼트에서만 씁니다.
     std::size_t lead_in = 0;
     if (!reverse) {
       lead_in = hyper_planner::insert_lead_in(
-        path, robot.pose.position.x, robot.pose.position.y, params_.lead_in_spacing_m);
+        path, robot.pose.position.x, robot.pose.position.y,
+        hyper_planner::yaw_from_quaternion(robot.pose.orientation),
+        params_.lead_in_spacing_m, params_.lead_in_tangent_gain);
     }
 
     // 진입 경로까지 붙인 다음에 다시 깝니다 -- 그래야 경로 전체가 균일한 간격이 됩니다.

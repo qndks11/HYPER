@@ -125,7 +125,7 @@ struct Step
 
   // wait_signal
   std::vector<std::string> accepted;
-  double timeout_s{60.0};
+  double timeout_s{120.0};
   int debounce_frames{3};
 
   // branch. timeout_s / debounce_frames / prearm_distance_m를 wait_signal과 같이 씁니다.
@@ -550,7 +550,7 @@ private:
         step.type = StepType::kWaitSignal;
         step.accepted = split_values(
           node["value"] ? node["value"].as<std::string>() : std::string("green"));
-        step.timeout_s = node["timeout_s"] ? node["timeout_s"].as<double>() : 60.0;
+        step.timeout_s = node["timeout_s"] ? node["timeout_s"].as<double>() : 120.0;
         step.debounce_frames = node["debounce_frames"]
           ? node["debounce_frames"].as<int>() : 3;
         step.prearm_distance_m = node["prearm_distance_m"]
@@ -676,7 +676,7 @@ private:
   //
   // wait_signal과 결정적으로 다른 점은 "확인 실패"의 안전한 답이 없다는 것입니다.
   // 신호등은 못 보면 서 있으면 되지만(그게 안전), 갈림길은 어디로든 가야 합니다.
-  // 그래서 default가 필수이고, timeout_s는 신호등의 60초와 달리 짧아야 합니다 --
+  // 그래서 default가 필수이고, timeout_s는 신호등의 120초와 달리 짧아야 합니다 --
   // 어차피 기다린다고 더 나은 답이 나오지 않습니다.
   bool parse_branch_step(const YAML::Node & node, std::size_t index, Step & step)
   {

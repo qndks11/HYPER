@@ -23,6 +23,8 @@ import threading
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import SetParameters
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
 from nav_msgs.msg import Path
@@ -32,8 +34,8 @@ from std_srvs.srv import Trigger
 from PyQt5.QtCore import Qt, QPointF, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen
 from PyQt5.QtWidgets import (
-    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QVBoxLayout, QWidget)
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QVBoxLayout, QWidget)
 
 # gps_accuracy_gui.py와 같은 팔레트를 씁니다 -- 실차에서 두 창을 나란히 띄우므로.
 COLOR_TEXT = '#c9d1d9'
@@ -150,6 +152,11 @@ class PathView(QWidget):
 class RecorderGui(QWidget):
     status_arrived = pyqtSignal(str)
     path_arrived = pyqtSignal(object)
+    # 아래 둘은 서비스/파라미터 콜백에서 emit됩니다 -- 그 콜백은 rclpy executor
+    # 스레드에서 도는데, Qt 위젯과 QTimer는 GUI 스레드에서만 안전하므로 시그널로
+    # 넘겨 받습니다. (QTimer.singleShot을 executor 스레드에서 부르면 조용히 무시됩니다.)
+    param_applied = pyqtSignal()
+    message_arrived = pyqtSignal(str, str)
 
     def __init__(self, node):
         super().__init__()
@@ -172,6 +179,26 @@ class RecorderGui(QWidget):
         self._file.setStyleSheet(f'color: {COLOR_STALE};')
         self._file.setWordWrap(True)
         root.addWidget(self._file)
+
+        # 저장할 CSV 경로. Record를 누르는 순간 레코더의 output_csv 파라미터로
+        # 밀어 넣은 뒤 start를 부릅니다. 비워 두면 레코더가 이미 들고 있는 값을
+        # 그대로 씁니다.
+        name_row = QHBoxLayout()
+        name_label = QLabel('저장 파일')
+        name_label.setStyleSheet(f'color: {COLOR_STALE};')
+        name_row.addWidget(name_label)
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText('waypoint_record.csv')
+        initial_name = getattr(node, 'initial_filename', '')
+        if initial_name:
+            self._name_edit.setText(initial_name)
+        self._name_edit.setFont(QFont('DejaVu Sans Mono', 12))
+        self._name_edit.setStyleSheet(
+            f'background-color: {COLOR_PANEL}; color: {COLOR_TEXT}; '
+            f'border: 1px solid {COLOR_STALE}; border-radius: 4px; padding: 4px;')
+        self._name_edit.returnPressed.connect(lambda: self._call('start'))
+        name_row.addWidget(self._name_edit, stretch=1)
+        root.addLayout(name_row)
 
         buttons = QHBoxLayout()
         self._record_button = QPushButton('● Record')
@@ -219,6 +246,8 @@ class RecorderGui(QWidget):
         # 있으므로 시그널로 넘깁니다(gps_accuracy_gui.py와 같은 구조).
         self.status_arrived.connect(self._on_status)
         self.path_arrived.connect(self._view.set_points)
+        self.param_applied.connect(self._start_after_param)
+        self.message_arrived.connect(self._show_message)
 
         # status가 한동안 끊기면 stale로 표시하기 위한 워치독.
         self._stale_timer = QTimer(self)
@@ -229,24 +258,50 @@ class RecorderGui(QWidget):
     def _call(self, which):
         client = self._node.start_client if which == 'start' else self._node.stop_client
         if not client.service_is_ready():
-            self._message.setText(f'{which} 서비스가 아직 없습니다 (레코더 노드 확인)')
-            self._message.setStyleSheet(f'color: {COLOR_BAD};')
+            self._show_message(f'{which} 서비스가 아직 없습니다 (레코더 노드 확인)', COLOR_BAD)
             return
+        if which == 'start':
+            name = self._name_edit.text().strip()
+            if name:
+                # 파일 이름을 레코더 파라미터로 밀어 넣고, 반영되면 param_applied
+                # 시그널을 통해 GUI 스레드에서 start를 부릅니다.
+                if not self._node.set_output_csv(name, self._on_param_done):
+                    self._show_message(
+                        'set_parameters 서비스가 아직 없습니다 (레코더 노드 확인)', COLOR_BAD)
+                return
         future = client.call_async(Trigger.Request())
         future.add_done_callback(self._on_service_done)
 
+    # executor 스레드에서 불립니다 -- Qt는 시그널로만 건드립니다.
+    def _on_param_done(self, future):
+        try:
+            results = future.result().results
+        except Exception as exc:                       # noqa: BLE001 - 표시가 목적
+            self.message_arrived.emit(f'파일 이름 설정 실패: {exc}', COLOR_BAD)
+            return
+        if results and not results[0].successful:
+            self.message_arrived.emit(
+                f'파일 이름 거부됨: {results[0].reason or "rejected"}', COLOR_BAD)
+            return
+        self.param_applied.emit()
+
+    def _start_after_param(self):
+        future = self._node.start_client.call_async(Trigger.Request())
+        future.add_done_callback(self._on_service_done)
+
+    # executor 스레드에서 불립니다 -- Qt는 시그널로만 건드립니다.
     def _on_service_done(self, future):
         try:
             response = future.result()
         except Exception as exc:                      # noqa: BLE001 - 표시가 목적
-            text, color = f'서비스 실패: {exc}', COLOR_BAD
-        else:
-            text = response.message
-            color = COLOR_GOOD if response.success else COLOR_OK
-        # 시그널을 하나 더 만들지 않고 QTimer로 GUI 스레드에 태웁니다.
-        QTimer.singleShot(0, lambda: (
-            self._message.setText(text),
-            self._message.setStyleSheet(f'color: {color};')))
+            self.message_arrived.emit(f'서비스 실패: {exc}', COLOR_BAD)
+            return
+        self.message_arrived.emit(
+            response.message, COLOR_GOOD if response.success else COLOR_OK)
+
+    def _show_message(self, text, color):
+        self._message.setText(text)
+        self._message.setStyleSheet(f'color: {color};')
 
     # ------------------------------------------------------------- 표시
     def _mark_stale(self):
@@ -334,6 +389,11 @@ class RecorderGuiNode(Node):
         recorder = self.declare_parameter('recorder', '/waypoint_recorder').value
         recorder = recorder.rstrip('/')
 
+        # 저장 파일 칸의 초기값. 보통 launch가 넘긴 waypoint_csv와 같은 값을 넣어,
+        # 창이 뜨자마자 어디로 녹화되는지 보이게 합니다. 비어 있으면 칸도 비어 있고,
+        # 그 경우 Record는 레코더가 이미 들고 있는 output_csv로 갑니다.
+        self.initial_filename = self.declare_parameter('filename', '').value
+
         # 레코더의 status/path는 transient_local이라, 이 창을 나중에 띄워도
         # 마지막 상태와 지금까지 찍힌 경로를 그대로 받습니다.
         latched = QoSProfile(
@@ -349,7 +409,25 @@ class RecorderGuiNode(Node):
         self.start_client = self.create_client(Trigger, f'{recorder}/start')
         self.stop_client = self.create_client(Trigger, f'{recorder}/stop')
 
+        # 레코더 노드의 output_csv 파라미터를 GUI에서 바꾸기 위한 클라이언트.
+        # recorder 네임스페이스가 곧 레코더 노드의 완전한 이름입니다.
+        self.param_client = self.create_client(
+            SetParameters, f'{recorder}/set_parameters')
+
         self.get_logger().info(f'watching {recorder}/status, {recorder}/path')
+
+    def set_output_csv(self, path, done_callback):
+        """레코더의 output_csv를 path로 설정. 서비스가 없으면 False."""
+        if not self.param_client.service_is_ready():
+            return False
+        request = SetParameters.Request()
+        request.parameters = [Parameter(
+            name='output_csv',
+            value=ParameterValue(
+                type=ParameterType.PARAMETER_STRING, string_value=path))]
+        future = self.param_client.call_async(request)
+        future.add_done_callback(done_callback)
+        return True
 
     def _on_status(self, msg):
         if self.gui is not None:

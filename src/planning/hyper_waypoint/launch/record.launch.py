@@ -44,7 +44,12 @@ def generate_launch_description():
             executable='waypoint_record_gui.py',
             name='waypoint_record_gui',
             output='screen',
-            parameters=[{'recorder': '/waypoint_recorder'}],
+            parameters=[{
+                'recorder': '/waypoint_recorder',
+                # 저장 파일 칸을 레코더와 같은 기본 경로로 채워 둡니다. GUI에서
+                # 그대로 Record하면 이 값으로, 바꿔서 누르면 그 값으로 갑니다.
+                'filename': LaunchConfiguration('waypoint_csv'),
+            }],
             condition=IfCondition(LaunchConfiguration('use_record_gui')),
         ),
     ])

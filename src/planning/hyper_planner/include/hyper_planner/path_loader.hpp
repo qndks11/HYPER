@@ -314,34 +314,91 @@ inline void resample_path(nav_msgs::msg::Path & path, double spacing_m)
   path.poses = std::move(out);
 }
 
-// 차량에서 경로 첫 점까지 직선 진입 경로를 spacing 간격으로 깔아 줍니다.
-// 차량 헤딩과 회전 반경을 무시하므로 전진 세그먼트에서만 쓰세요.
+// 차량에서 경로 첫 점까지 부드러운 진입 경로를 spacing 간격으로 깔아 줍니다.
+//
+// 예전에는 차량 위치와 첫 점을 잇는 직선이었습니다. 첫 점이 멀리(또는 옆으로) 있으면
+// 그 직선은 차량의 현재 헤딩과 경로 시작 헤딩 어느 쪽과도 어긋나, RPP/MPPI가 진입
+// 초입에서 큰 조향 스텝을 한 번에 넣거나 경로를 가로질러 따라붙습니다.
+//
+// 대신 양 끝에서 각각 차량 헤딩(yaw0)과 경로 시작 헤딩(yaw1)에 접하는 3차 Hermite
+// 곡선을 깝니다. 접선 크기는 tangent_gain * (두 점 사이 거리)라, 멀수록 완만하게 휩니다.
+// 차량 헤딩을 쓰므로 전진 세그먼트에서만 쓰세요(후진 세그먼트에 붙이면 RPP가 방향을
+// 반대로 읽습니다).
 inline std::size_t insert_lead_in(
-  nav_msgs::msg::Path & path, double robot_x, double robot_y, double spacing_m)
+  nav_msgs::msg::Path & path, double robot_x, double robot_y, double robot_yaw,
+  double spacing_m, double tangent_gain = 1.0)
 {
   if (path.poses.empty() || spacing_m <= 0.0) {
     return 0;
   }
   const auto target = path.poses.front().pose.position;
-  const double dx = target.x - robot_x;
-  const double dy = target.y - robot_y;
-  const double distance = std::hypot(dx, dy);
+  const double distance = std::hypot(target.x - robot_x, target.y - robot_y);
   if (distance <= spacing_m) {
     return 0;
   }
 
-  const auto orientation = quaternion_from_yaw(std::atan2(dy, dx));
-  const auto steps = static_cast<std::size_t>(std::ceil(distance / spacing_m));
+  const double yaw1 = yaw_from_quaternion(path.poses.front().pose.orientation);
+  const double scale = tangent_gain * distance;
+  const double m0x = scale * std::cos(robot_yaw);
+  const double m0y = scale * std::sin(robot_yaw);
+  const double m1x = scale * std::cos(yaw1);
+  const double m1y = scale * std::sin(yaw1);
 
+  const auto eval = [&](double t, double & x, double & y) {
+    const double t2 = t * t;
+    const double t3 = t2 * t;
+    const double h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    const double h10 = t3 - 2.0 * t2 + t;
+    const double h01 = -2.0 * t3 + 3.0 * t2;
+    const double h11 = t3 - t2;
+    x = h00 * robot_x + h10 * m0x + h01 * target.x + h11 * m1x;
+    y = h00 * robot_y + h10 * m0y + h01 * target.y + h11 * m1y;
+  };
+
+  // 곡선 길이를 촘촘히 근사해 점 개수를 정합니다(현(chord)보다 길므로 직선일 때보다 많음).
+  constexpr int kDense = 100;
+  double curve_len = 0.0;
+  double px = robot_x;
+  double py = robot_y;
+  for (int i = 1; i <= kDense; ++i) {
+    double cx = 0.0;
+    double cy = 0.0;
+    eval(static_cast<double>(i) / kDense, cx, cy);
+    curve_len += std::hypot(cx - px, cy - py);
+    px = cx;
+    py = cy;
+  }
+
+  const auto steps = static_cast<std::size_t>(std::ceil(curve_len / spacing_m));
+  if (steps == 0) {
+    return 0;
+  }
+
+  // 마지막 점(t == 1)은 넣지 않습니다 -- path.poses.front()이 이미 그 점입니다.
   std::vector<geometry_msgs::msg::PoseStamped> lead_in;
   lead_in.reserve(steps);
   for (std::size_t i = 0; i < steps; ++i) {
     const double t = static_cast<double>(i) / static_cast<double>(steps);
+    double x = 0.0;
+    double y = 0.0;
+    eval(t, x, y);
+
+    // 접선 방향을 헤딩으로 씁니다(t를 살짝 앞서 평가한 차분).
+    double xn = 0.0;
+    double yn = 0.0;
+    eval(std::min(1.0, t + 0.5 / static_cast<double>(steps)), xn, yn);
+    double hx = xn - x;
+    double hy = yn - y;
+    if (std::hypot(hx, hy) < 1e-6) {
+      hx = std::cos(robot_yaw);
+      hy = std::sin(robot_yaw);
+    }
+
     geometry_msgs::msg::PoseStamped pose;
     pose.header = path.header;
-    pose.pose.position.x = robot_x + t * dx;
-    pose.pose.position.y = robot_y + t * dy;
-    pose.pose.orientation = orientation;
+    pose.pose.position.x = x;
+    pose.pose.position.y = y;
+    pose.pose.orientation = quaternion_from_yaw(std::atan2(hy, hx));
     lead_in.push_back(pose);
   }
 
