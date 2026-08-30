@@ -11,6 +11,8 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>std_srvs</depend>
+  <depend>python3-opencv</depend>
 
   <!-- This package's perception.launch.py launches hyper_lane_detection (both backends) and
        reads its bev_real.yaml from that package's share directory. -->

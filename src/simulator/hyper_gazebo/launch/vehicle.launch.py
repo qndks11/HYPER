@@ -304,6 +304,13 @@ def generate_launch_description():
         output='screen'
     )
 
+    # 두 차로 제어 표지판(초록 화살표 / 빨간 X)의 위치를 맞바꾸는 테스트용 서비스.
+    lane_sign_service_node = Node(
+        package='hyper_gazebo',
+        executable='lane_sign_service.py',
+        output='screen'
+    )
+
     joint_state, forward_velocity, forward_position = start_vehicle_control()
 
     vehicle_controller_node = Node(
@@ -370,6 +377,7 @@ def generate_launch_description():
         camera_compressed_republisher_node,
         model_service_node,
         teleport_service_node,
+        lane_sign_service_node,
     ])
 
     return launch_description

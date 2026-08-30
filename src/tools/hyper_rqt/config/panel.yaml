@@ -117,5 +117,25 @@ groups:
           EKF도 리셋하지 않으므로, ekf_global이 점프한 GPS를 물고 자리를 잡을 때까지
           몇 초 기다린 뒤에 미션을 시작하세요.
 
+  - name: 차로 제어 표지판 (lane_sign_service, sim 전용)
+    buttons:
+      - label: Swap signs
+        service: /lane_sign_service/swap
+        style: warn
+        tooltip: |
+          초록 화살표(lane_sign_arrow_1)와 빨간 X(lane_sign_x_1)의 위치를 서로
+          맞바꿉니다. 지금 시뮬레이터에 있는 pose를 읽어 교환하므로, GUI에서
+          표지판을 옮겨 놓았어도 그 자리 기준으로 바뀝니다. 두 번 누르면 원위치.
+
+  - name: 카메라 캡처 (image_saver_service)
+    buttons:
+      - label: Save frame
+        service: /image_saver_service/save
+        style: go
+        tooltip: |
+          지금 /camera_object/image_raw 의 최신 프레임을 ~/Pictures/object_detection
+          에 PNG로 저장합니다. 파일 이름은 objdet_날짜_시각.png 로 자동으로 붙고,
+          같은 초에 여러 번 눌러도 _001, _002 … 가 붙어 겹치지 않습니다.
+
 # 서비스를 새로 만들면 위와 같은 그룹을 하나 더 적으면 됩니다. 코드는 건드리지
 # 않습니다.

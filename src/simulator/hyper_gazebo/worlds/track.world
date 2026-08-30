@@ -273,6 +273,20 @@
       </plugin>
     </include>
 
+    <!-- Lane control sign prototypes, mounted ahead of the vehicle spawn,
+         facing back toward the car (panel normal along -Y). -->
+    <include>
+      <uri>model://lane_sign_arrow</uri>
+      <name>lane_sign_arrow_1</name>
+      <pose>22.0435 -39.3746 3.2269 0 0 1.5211</pose>
+    </include>
+
+    <include>
+      <uri>model://lane_sign_x</uri>
+      <name>lane_sign_x_1</name>
+      <pose>18.7546 -39.2717 3.1832 0 0 1.5211</pose>
+    </include>
+
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
       <world_frame_orientation>ENU</world_frame_orientation>

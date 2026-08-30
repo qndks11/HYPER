@@ -129,6 +129,17 @@ def generate_launch_description():
         output='screen'
     )
 
+    # On-demand frame grabber: subscribes to the same /camera_object/image_raw the detector
+    # sees and writes the latest frame to ~/Pictures/object_detection (auto-named, no
+    # collisions) whenever its `~/save` std_srvs/Trigger service is called. Handy for building
+    # up a labelling set from live runs:
+    #   ros2 service call /image_saver_service/save std_srvs/srv/Trigger
+    image_saver_service_node = Node(
+        package='hyper_object_detection',
+        executable='image_saver_service',
+        output='screen',
+    )
+
     return LaunchDescription([
         lane_input_backend_arg,
         object_input_backend_arg,
@@ -137,4 +148,5 @@ def generate_launch_description():
         lane_detection_node,
         logitech_camera_publisher_node,
         object_detection_node,
+        image_saver_service_node,
     ])
