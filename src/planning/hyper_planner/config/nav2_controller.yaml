@@ -91,13 +91,28 @@ controller_server:
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
 
-      # 예측 구간: 56 * 0.05 = 2.8초 = 2.22 m/s에서 6.2 m. model_dt는
-      # controller_frequency(20 Hz)와 맞춥니다.
-      # vx_max를 6.0 -> 2.22로 내리면서 지평선도 16.8 m -> 6.2 m로 줄었지만, 이건 오히려
-      # 정상입니다: local costmap의 obstacle_max_range가 6.0 m라 그보다 먼 구간은 어차피
-      # 빈 공간으로 평가됐습니다(6.0 m/s 시절에는 지평선의 2/3가 안 보이는 영역이었습니다).
-      # 이제 지평선(6.2 m)과 시야(6.0 m)가 거의 맞습니다.
-      time_steps: 100
+      # 예측 구간: 56 * 0.05 = 2.8초. model_dt는 controller_frequency(20 Hz)와 맞춥니다.
+      # 거리로는 vx_max에 비례합니다 -- 2.22 m/s면 6.2 m, 지금의 1.0 m/s면 2.8 m입니다.
+      # obstacle_max_range(6.0 m)보다 짧은 건 정상입니다: 지평선이 시야보다 길면 그 구간은
+      # 어차피 빈 공간으로 평가됩니다(6.0 m/s 시절에는 지평선의 2/3가 안 보이는 영역이었습니다).
+      #
+      # 100 -> 56으로 되돌렸습니다. 이 값을 올리면 안 되는 이유가 두 가지 있습니다.
+      #  1. 코너 컷이 커집니다. PathFollow/PathAngle critic의 목표점은
+      #     "궤적 끝점에 가장 가까운 경로 점(= 지평선 도달거리) + offset_from_furthest"이고,
+      #     비용은 그 점까지의 *직선* 거리입니다. 즉 목표는 호(arc) 길이로 앞에 있는데
+      #     점수는 현(chord)으로 매기므로, lookahead가 길수록 "코너를 잘라야 가까워지는" 폭이
+      #     커집니다(nav2 헤더의 shortcutting 서술 그대로). 100스텝에서는 이 lookahead가
+      #     5.0 + 1.5 = 6.5 m였고, 56스텝에서는 2.8 + 0.75 = 3.55 m입니다.
+      #  2. 연산량이 그대로 비례합니다. PathAlignCritic만 해도
+      #     batch(1000) x (time_steps / trajectory_point_step) x 경로 점 개수라
+      #     100스텝에서는 20 Hz를 못 지킬 수 있습니다. 실차에서 `ros2 topic hz /cmd_vel`로
+      #     반드시 확인하세요 -- 20 Hz를 못 지키면 model_dt(0.05) 가정이 깨져서 첫 제어가
+      #     계획보다 오래 적용되고, 계획보다 크고 이르게 돕니다. 시뮬은 use_sim_time이라
+      #     RTF가 떨어지며 자동으로 가려지고 실차에서만 드러납니다.
+      #
+      # 순항 속도에는 영향이 없습니다: 아래 gamma 주석의 식은 PathFollow의 전진 유인과
+      # 제어비용이 둘 다 time_steps에 비례해 상쇄되므로 지평선 길이와 무관합니다.
+      time_steps: 56
       model_dt: 0.05
       batch_size: 1000
       iteration_count: 1
@@ -110,18 +125,28 @@ controller_server:
       #
       # nav2 기본값(cost_weight 5, gamma 0.015)은 vx_max 0.5인 차동구동 로봇 기준이라
       # 이 식으로 0.67 m/s가 나옵니다 -- 실제로 vx_max를 2.5로 올려도 0.86 m/s로 기어갔습니다.
-      # 현재값(8 * 0.05 * 0.42^2 / 0.010)은 7.1 m/s입니다.
+      # 현재값(8 * 0.05 * 0.21^2 / 0.0025)은 7.1 m/s입니다.
       #
       # vx_max를 2.5로 내린 뒤에도 이 값들은 일부러 그대로 둡니다. 순항 목표(7.1)가 상한
       # (2.5)보다 한참 위라 MPPI는 직선에서 늘 상한에 붙어 달립니다 -- 위에 적힌 "vx_max
       # 2.5에서 0.86 m/s로 기어가던" 증상이 바로 이 목표치가 낮아서 생긴 것이므로, 상한을
       # 내렸다고 gamma를 같이 올리면 그 증상이 그대로 돌아옵니다.
-      # gamma는 vx뿐 아니라 wz의 제어비용도 같이 정합니다. 건드리면 공들여 맞춘 코너 컷/
-      # 회피 균형(PathAlign 14.0 vs PathFollow 8.0)까지 흔들리므로 손대지 마세요.
+      # gamma는 vx뿐 아니라 wz의 제어비용도 같이 정합니다. nav2가 실제로 더하는 항은
+      # 각각 gamma/vx_std^2, gamma/wz_std^2 계수를 가진 두 개입니다(Optimizer의
+      # updateControlSequence). 그래서 gamma를 혼자 바꾸면 코너 컷/회피 균형
+      # (PathAlign 14.0 vs PathFollow 8.0)까지 흔들립니다 -- std와 *함께* 바꾸세요.
+      #
+      # 0.010 -> 0.0025 (1/4). vx_std 0.42 -> 0.21, wz_std 0.40 -> 0.20으로 함께 반씩
+      # 줄였으므로 std^2이 1/4이 되어 두 계수가 정확히 그대로입니다:
+      #     gamma/vx_std^2 : 0.010/0.42^2 = 0.0567 -> 0.0025/0.21^2 = 0.0567
+      #     gamma/wz_std^2 : 0.010/0.40^2 = 0.0625 -> 0.0025/0.20^2 = 0.0625
+      # 순항 속도(7.1 m/s)도 vx_std^2/gamma가 불변이라 그대로입니다. 즉 이 세 값은
+      # "제어 균형은 건드리지 않고 샘플링 폭만 절반으로 줄인" 한 묶음이며, 하나만
+      # 따로 바꾸면 안 됩니다.
       # (이전에는 cost_weight 36 / vx_std 0.2로 7.2 m/s였습니다 -- 순항 속도는 그대로 두고
       #  코너 컷을 만드는 쪽 항만 줄인 것입니다.)
       # 즉 직선에서는 vx_max로 달리고, 곡선/장애물에서는 critic들이 알아서 감속시킵니다.
-      gamma: 0.010
+      gamma: 0.0025
       reset_period: 1.0
       regenerate_noises: false
       transform_tolerance: 0.2
@@ -133,12 +158,25 @@ controller_server:
 
       # vx_min = 0 = 후진 금지. MPPI가 후진 궤적을 아예 샘플링하지 않습니다.
       # (후진이 필요한 주차 구간은 별도의 ReverseFollowPath(RPP)가 담당합니다.)
-      # wz_max는 최고속에서의 최소 회전 반경 제약(2.22 / 1.30 = 1.71 rad/s)보다 살짝 위로
-      # 두고, 실제 제한은 아래 AckermannConstraints가 매 스텝 걸어줍니다.
-      # 휠베이스·최대조향각 실측(0.72 m, 29도)으로 회전반경이 1.74 -> 1.30 m로 줄면서 이
-      # 제약이 wz_max(1.6)보다 커졌습니다 -- 지금은 vx_max를 1.0으로 낮춰 둬서
-      # (요구값 1.0/1.30=0.77) 문제가 안 보이지만, vx_max를 2.22로 되돌리면 wz_max도
-      # 1.71 이상으로 같이 올려야 합니다.
+      # wz_max는 반드시 vx_max / min_turning_r로 두세요. 지금은 1.0 / 1.30 = 0.77입니다.
+      #
+      # 1.6 -> 0.77. 1.6은 vx_max 2.22 시절 값이라 지금은 물리적으로 불가능한 샘플을
+      # 만들었습니다: vx 1.0에 wz 1.6이면 회전반경 0.63 m로, 최소 회전반경(1.30 m)의
+      # 절반입니다. 이런 샘플은 급커브에서 "제자리에서 홱 돈다"는 이유로 PathAlign/
+      # PathAngle 점수를 잘 받는데, 실제로는 못 하는 기동입니다. nav2가 아커만 제약을
+      # 거는 곳은 두 군데뿐이고 둘 다 이걸 못 막습니다:
+      #   - AckermannMotionModel::applyConstraints()는 1000개 샘플이 아니라
+      #     *최종 평균 제어 시퀀스 하나*에만 걸리고, |vx|/|wz| < min_turning_r이면
+      #     wz를 vx/min_turning_r로 깎습니다 -- vx를 올려 주지는 않습니다.
+      #   - ConstraintCritic이 max(min_turning_r - |vx|/|wz|, 0)을 벌하지만
+      #     weight 4.0 x min_turning_r x 지평선시간으로 상한이 있어 약합니다.
+      # 결국 "느리게 + 많이 꺾는" 샘플이 이기고, 그 평균에 applyConstraints가 걸려
+      # 속도는 낮은 채 조향만 깎인 상태가 됩니다 -- 급커브에서 0에 가깝게 기어가는 증상.
+      # 애초에 그런 샘플을 못 뽑게 하는 게 이 값입니다.
+      #
+      # 이렇게 두면 /speed_limit(setSpeedLimit)이 vx_max와 wz에 같은 ratio를 곱해도
+      # 최소 회전반경이 그대로 보존된다는 이점도 있습니다(감속 프로파일 구간에서 조향
+      # 여력만 따로 줄어들지 않습니다).
       #
       # 6.0 -> 2.5 -> 2.22(= 8 km/h 상한). 6 m/s(= 21.6 km/h)에서는 obstacle_max_range(6.0 m)가 1.0초치 시야밖에
       # 안 됐고, 거기서 센서/costmap/컨트롤러 지연 약 0.3초를 빼면 실제 반응 거리가 4 m
@@ -148,17 +186,29 @@ controller_server:
       # 이 값을 바꾸면 mission_manager의 controller_vx_max도 반드시 같이 바꾸세요
       # (launch/mission.launch.py, src/mission_manager_parameters.yaml). 다르면
       # setSpeedLimit의 ratio가 1을 넘어 vx_max를 오히려 올려 버립니다.
+      # !! vx_max를 바꾸면 아래 네 값을 반드시 같이 바꾸세요 !!
+      #      wz_max = vx_max / 1.30
+      #      vx_std = vx_max * 0.21,  wz_std = wz_max * 0.26
+      #      gamma  = vx_std^2 * 0.0567   (= 순항속도 7.1 m/s 유지)
+      #    2.22로 되돌릴 때: wz_max 1.71, vx_std 0.47, wz_std 0.44, gamma 0.0125.
       vx_max: 1.0   # 임시 저속 테스트 (원래 2.22)
       vx_min: 0.0
-      wz_max: 1.6
-      # vx_std는 아래 gamma 주석의 순항 속도 식에 제곱으로 들어갑니다. PathFollowCritic의
-      # 가중치를 코너 컷 때문에 36 -> 8로 낮췄으므로(4.5배), 순항 속도를 유지하려고 여기서
-      # 0.2 -> 0.42로 올렸습니다(제곱하면 4.4배). vx_max 2.22에 비하면 19%로, 감속이
-      # 필요할 때 아래쪽을 탐색하기에 충분하면서 스로틀이 거칠어지지는 않는 폭입니다.
-      # (decel_profile_min_speed 0.4보다 커야 프로파일 하한에서 샘플이 계속 잘리지
-      #  않습니다 -- mission_manager_parameters.yaml의 그 항목 주석 참고)
-      vx_std: 0.42
-      wz_std: 0.4
+      wz_max: 0.77
+      # vx_std/wz_std는 위 gamma 주석의 한 묶음입니다(gamma와 함께만 바꾸세요).
+      #
+      # 0.42 -> 0.21. 0.42는 vx_max 2.22 기준으로 고른 값(19%)인데 vx_max가 1.0으로
+      # 내려가면서 42%가 되어 있었습니다. 이 폭이 넓으면 두 가지가 나빠집니다:
+      #  1. 샘플의 상당수가 vx_max를 넘어 ConstraintCritic(4.0, 지평선 전체 합산)에
+      #     걸리고, 그 벌점이 평균을 상한 아래로 끌어내립니다.
+      #  2. 샘플의 상당수가 0 근처/음수로 갑니다. vx_min(0.0)과 vx_max 클립은
+      #     applyControlSequenceConstraints()에서 *최종 시퀀스에만* 걸리고 샘플에는
+      #     안 걸리며, 막아 주는 건 PreferForwardCritic(2.0 x model_dt)뿐입니다.
+      # vx_max 대비 21%로 되돌리면 원래 설계 의도(19%)와 같아집니다.
+      #
+      # wz_std 0.40 -> 0.20: wz_max를 1.6 -> 0.77로 낮췄으므로 같은 상대 폭(25%)을
+      # 유지한 것입니다. gamma/wz_std^2도 그대로입니다(위 gamma 주석 참고).
+      vx_std: 0.21
+      wz_std: 0.20
       # 아커만은 비홀로노믹이라 vy는 모델에서 무시되지만 파라미터는 선언해야 합니다.
       vy_max: 0.5
       vy_std: 0.2
@@ -167,7 +217,8 @@ controller_server:
       AckermannConstraints:
         min_turning_r: 1.30
 
-      # 예측 구간(16.8 m)보다 길게 잡아야 critic이 지평선 끝까지 참조 경로를 봅니다.
+      # 예측 구간(vx_max 1.0에서 2.8 m, 2.22로 되돌리면 6.2 m)보다 길게 잡아야 critic이
+      # 지평선 끝까지 참조 경로를 봅니다. 넉넉하므로 vx_max를 바꿔도 손댈 필요는 없습니다.
       prune_distance: 19.0
       # 매 틱 "경로에서 차량과 가장 가까운 점"을 찾을 때, 경로 앞머리에서 이 거리(누적 경로
       # 길이)까지만 뒤집니다. 기본값은 local costmap 반지름(= 10 m)입니다. 여기서 찾은 점부터
@@ -233,11 +284,10 @@ controller_server:
         cost_power: 1
         cost_weight: 14.0
         max_path_occupancy_ratio: 0.05
-        # 4 -> 2: 궤적 56점 중 14점만 보던 것을 28점으로 늘려 정렬 신호를 촘촘하게 합니다.
-        # 이 critic의 비용은 batch(1500) x (56 / 이 값) x 참조 경로 점 개수에 비례하는데,
-        # 경로를 0.25 m로 다시 깔면서 점 개수도 32 -> 76으로 늘었습니다. 합쳐서 약 5배입니다.
-        # controller_frequency(20 Hz)를 못 지키면 여기를 3으로 되돌리거나 batch_size를
-        # 1000으로 낮추세요. (`ros2 topic hz /cmd_vel`로 확인)
+        # 이 critic의 비용은 batch(1000) x (time_steps / 이 값) x 참조 경로 점 개수에
+        # 비례합니다. time_steps 56 기준으로 궤적 56점 중 14점을 봅니다.
+        # controller_frequency(20 Hz)를 못 지키면 여기를 6으로 올리거나 batch_size를
+        # 600으로 낮추세요. (`ros2 topic hz /cmd_vel`로 확인)
         trajectory_point_step: 4
         threshold_to_consider: 0.5
         # 이 critic에서 offset_from_furthest는 사실상
@@ -253,9 +303,22 @@ controller_server:
       # point further ahead, creating some shortcutting."
       #
       # 36.0 -> 8.0. 다만 이 값은 순항 속도도 같이 정하므로(위 gamma 주석) 그냥 낮추면
-      # 차가 기어갑니다. 속도는 vx_std를 0.2 -> 0.42로 올려 되찾았습니다.
-      # offset 5 -> 6: 경로를 0.25 m로 다시 깔았으므로 5점 = 1.25 m입니다.
-      # 예전 5점(0.59 m 간격)은 3.0 m였는데, 그 앞당김 자체가 코너 컷을 키웠습니다.
+      # 차가 기어갑니다. 속도는 vx_std/gamma 쪽에서 유지합니다.
+      #
+      # offset_from_furthest는 "경로 점 개수"입니다(0.25 m 간격이므로 6점 = 1.5 m).
+      # 이 critic이 실제로 겨냥하는 지점은 차에서 그만큼이 아니라
+      #     지평선 도달거리 + offset  (호 길이 기준)
+      # 이고, 비용은 거기까지의 *직선* 거리입니다. 호로 앞에 있는 점을 현으로 재니까
+      # 코너를 자를수록 점수가 좋아집니다. R=1.5 m 90도 커브에서 실제로 계산해 보면,
+      # 경로를 정확히 따라간 궤적의 끝점보다 코너를 자른 궤적의 끝점이 목표점에
+      # 0.66 m 더 가깝습니다. 컷의 크기는 이 lookahead에 대해 초선형으로 커집니다.
+      #
+      # 6 -> 3 (1.5 m -> 0.75 m). time_steps를 100 -> 56으로 줄인 것과 합쳐서 총
+      # lookahead가 6.5 m -> 3.55 m가 됩니다. vx_max를 1.0으로 내렸는데 offset은
+      # 미터 고정이라 시간 기준 lookahead가 0.68 s -> 1.5 s로 2배 늘어나 있었던 것을
+      # 되돌리는 것이기도 합니다(3점 = 0.75 s).
+      # 코너를 계속 자르면 여기를 더 줄이고, 커브에서 경로 안쪽으로 못 붙고 밖으로
+      # 밀리기 시작하면 다시 4~5로 올리세요.
       PathFollowCritic:
         enabled: true
         cost_power: 1
@@ -266,17 +329,24 @@ controller_server:
         # 8.0일 때(7.1 m/s)보다 여유가 훨씬 적어 실차에서 목표 속도까지 못 올라오고
         # 저속으로 기어가는 원인이었습니다. 8.0으로 되돌려 vx_max 캡에 확실히 붙게 합니다.
         cost_weight: 8.0
-        offset_from_furthest: 6
+        offset_from_furthest: 3
         threshold_to_consider: 1.4
-      # 경로의 앞 지점을 향해 차체 헤딩을 맞추게 하는 항. 코너 진입을 일찍 시작하게
-      # 만들어 컷을 줄이는 데 도움이 됩니다. 2.0 -> 4.0.
-      # offset 4 -> 8: 0.25 m 간격에서 8점 = 2.0 m로, 예전 4점(0.59 m 간격 = 2.4 m)과
-      # 비슷한 앞보기 거리입니다.
+      # 경로의 앞 지점을 향해 차체 헤딩을 맞추게 하는 항. 2.0 -> 4.0.
+      #
+      # 목표점은 PathFollowCritic과 같은 방식(지평선 도달거리 + offset)으로 잡히므로
+      # 같은 현/호 문제가 있고, 이쪽이 더 셉니다: 끝점 하나가 아니라 *모든 궤적 점의
+      # 헤딩*을 그 점 쪽으로 돌리라고 요구하기 때문입니다. max_angle_to_furthest(1.0 rad)
+      # 아래에서는 통째로 꺼지므로, 켜지는 상황이 곧 급커브입니다 -- "커브를 일찍 돈다"에
+      # 가장 직접적으로 기여하는 항입니다.
+      #
+      # offset 8 -> 4 (2.0 m -> 1.0 m). PathFollow(3점 = 0.75 m)보다는 앞을 봐야 진입
+      # 준비가 되므로 한 단계 더 둡니다. 코너 진입이 굼떠 밖으로 밀리면 5~6으로,
+      # 여전히 일찍 들어가면 3으로 조정하세요.
       PathAngleCritic:
         enabled: true
         cost_power: 1
         cost_weight: 4.0
-        offset_from_furthest: 8
+        offset_from_furthest: 4
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
         # false: 후진을 허용하려면 이 critic이 "경로 방향으로 앞을 보고 있을 것"을
