@@ -170,6 +170,21 @@ mission_manager:
     validation:
       gt_eq<>: [0.0]
 
+  loop_close_distance_m:
+    type: double
+    default_value: 2.0
+    description: |
+      닫힌 코스(한 세그먼트로 코스를 통째로 보내는 simple 미션 등) 보정용(0 = 끔).
+      경로의 첫 점과 끝 점이 이 거리 안으로 붙어 있으면 루프로 봅니다. 이때 출발선에
+      선 차는 코스 끝점에도 그만큼 가까워서, trim_to_robot의 최근접 탐색이 끝점에 붙으면
+      코스 전체가 이미 지나온 구간으로 잘려 나가고 골이 출발점 옆에 놓입니다 -- goal
+      checker가 곧바로 도착으로 판정해 출발하자마자 완주가 됩니다. 최근접점이 경로
+      끝자락(끝에서 잰 arc 길이가 이 값 이내)에 붙었으면 커서를 경로 앞쪽으로 되돌려
+      한 바퀴를 통째로 보냅니다. 세그먼트를 여러 개로 쪼갠 mission.yaml에서는 각
+      세그먼트의 양 끝이 멀어 발동하지 않습니다.
+    validation:
+      gt_eq<>: [0.0]
+
   server_wait_timeout_sec:
     type: double
     default_value: 30.0

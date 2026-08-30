@@ -26,7 +26,7 @@ def generate_launch_description():
         parameters=[{
             'debug': 0,
             'device': '/dev/tty_Ardusimple',
-            'frame_id': 'gps',
+            'frame_id': 'gps_link',
             'uart1': {'baudrate': 115200},
             'inf': {'all': False},
             'publish': {

@@ -255,7 +255,13 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 4.0
+        # 4.0 -> 8.0: 이 값이 4.0으로 내려가 있었던 것은 위 gamma/vx_std 주석, 그리고
+        # PathAlignCritic 주석의 "PathAlignCritic(14.0)과의 비율" 서술과 모두 어긋나는
+        # 값이었습니다(둘 다 8.0을 전제). 순항속도 = cost_weight * model_dt * vx_std^2 /
+        # gamma 식으로 보면 4.0에서는 순항 목표가 3.5 m/s로, vx_max(1.0)보다는 위지만
+        # 8.0일 때(7.1 m/s)보다 여유가 훨씬 적어 실차에서 목표 속도까지 못 올라오고
+        # 저속으로 기어가는 원인이었습니다. 8.0으로 되돌려 vx_max 캡에 확실히 붙게 합니다.
+        cost_weight: 8.0
         offset_from_furthest: 6
         threshold_to_consider: 1.4
       # 경로의 앞 지점을 향해 차체 헤딩을 맞추게 하는 항. 코너 진입을 일찍 시작하게

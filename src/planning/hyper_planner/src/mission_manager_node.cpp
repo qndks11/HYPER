@@ -894,8 +894,38 @@ private:
     }
 
     double distance = 0.0;
-    const std::size_t nearest = hyper_planner::nearest_pose_index(
+    std::size_t nearest = hyper_planner::nearest_pose_index(
       path, robot.pose.position.x, robot.pose.position.y, distance);
+
+    // 닫힌 코스에서 출발선에 선 차는 코스의 끝점에도 그만큼 가깝습니다. 이때
+    // nearest_pose_index가 끝점을 고르면 아래 trim이 코스 전체를 "이미 지나온
+    // 구간"으로 버려서, 골이 출발점 옆에 놓이고 goal checker가 곧바로 도착으로
+    // 판정합니다("출발하자마자 완주"). 경로의 첫 점과 끝 점이 loop_close_distance_m
+    // 안으로 붙어 있고 nearest가 그 끝자락(끝에서 잰 arc 길이 기준)에 붙었으면,
+    // 커서를 경로 앞쪽(0)으로 되돌려 한 바퀴를 통째로 보냅니다. -- path_progress.hpp의
+    // 전진 커서가 코스 중간의 자기근접 구간을 다루는 것과 같은 취지입니다.
+    if (params_.loop_close_distance_m > 0.0 && path.poses.size() > 2 && nearest > 0) {
+      const auto & first = path.poses.front().pose.position;
+      const auto & last_pose = path.poses.back().pose.position;
+      const double seam = std::hypot(last_pose.x - first.x, last_pose.y - first.y);
+      if (seam <= params_.loop_close_distance_m) {
+        double tail_arc = 0.0;
+        for (std::size_t i = path.poses.size() - 1; i > nearest; --i) {
+          const auto & a = path.poses[i - 1].pose.position;
+          const auto & b = path.poses[i].pose.position;
+          tail_arc += std::hypot(b.x - a.x, b.y - a.y);
+        }
+        if (tail_arc <= params_.loop_close_distance_m) {
+          RCLCPP_INFO(
+            get_logger(),
+            "Closed-course segment (%.2f m seam); the vehicle sits near the end pose too. "
+            "Snapping to the start so the whole lap is driven instead of skipped.", seam);
+          nearest = 0;
+          distance = std::hypot(
+            first.x - robot.pose.position.x, first.y - robot.pose.position.y);
+        }
+      }
+    }
 
     if (params_.max_start_distance_m > 0.0 && distance > params_.max_start_distance_m) {
       RCLCPP_ERROR(
