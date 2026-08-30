@@ -31,6 +31,6 @@ labels:
 
 steps:
   # 골 하나, 코스 전부. decel_profile_a도 cancel_on_arrival_m도 켜지 않습니다 --
-  # 뒤에 아무 스텝도 없으니 마지막 몇 미터를 MPPI가 기어서 들어가도 잃을 시간이 없고,
+  # 뒤에 아무 스텝도 없으니 마지막 몇 미터를 기어서 들어가도 잃을 시간이 없고,
   # 그만큼 골 판정을 그대로 받는 쪽이 단순합니다.
   - {type: drive, until: course_end}

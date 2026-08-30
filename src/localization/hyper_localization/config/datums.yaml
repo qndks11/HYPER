@@ -18,33 +18,6 @@
 # 차가 충분히 움직이기 시작하면 GPS 진행방향이 이어받아 스스로 교정됩니다.
 # 확인법: 출발 지점에 차를 세운 방향의 방위각을 지도에서 읽거나, 직선으로 10m쯤
 # 몰아 본 뒤 `ros2 topic echo /imu/heading`이 수렴하는 값을 그대로 적습니다.
-#
-# ── 지자기(자기 나침반) yaw를 쓰지 않는 이유 ───────────────────────────────
-# WitMotion WT901BLE가 6축(자이로+가속도) 모드로 동작 중이라 yaw가 자북이 아니라
-# 전원 인가 시점 자세를 기준으로 적분되고, 실측 드리프트가 +0.18deg/20s = 약
-# +0.5deg/min (시간당 30deg 이상)입니다. 전원을 다시 넣으면 원점이 달라지고 주행
-# 중에도 계속 밀립니다. 그래서 ekf_local/ekf_global 어느 쪽도 IMU yaw를 절대 방위로
-# 먹지 않습니다(dual_ekf_navsat.yaml의 imu0_config 인덱스 5 = false). 대신:
-#   초기값 = initial_heading_deg,  전파 = 자이로 z,  보정 = GPS 진행방향.
-# navsat_transform도 wait_for_datum: true면 /imu를 아예 구독하지 않으므로
-# magnetic_declination_deg/yaw_offset_deg는 어디에도 영향을 주지 않습니다(0 유지).
-#
-# ── imu_yaw_sign / imu_yaw_offset_deg / imu_flip_gyro_z ────────────────────
-# imu_enu_relay가 WitMotion 드라이버 원본(/imu/raw)을 ENU로 고쳐 /imu로 내보낼 때 쓰는 값.
-#   out_yaw = imu_yaw_sign * in_yaw + radians(imu_yaw_offset_deg)
-# 이제 이 yaw를 EKF가 안 먹으므로 sign/offset은 RViz 표시용 참고값일 뿐입니다.
-#
-# imu_flip_gyro_z는 반대로 **가장 중요한 값이 되었습니다**. yaw를 자이로 z 적분이
-# 통째로 짊어지므로 부호가 반대면 차가 좌회전할 때 추정 heading이 우회전합니다.
-# GPS가 없는 구간에서는 이걸 잡아줄 보정원이 하나도 없습니다.
-# 실측 결과 false로 확정했습니다 -- WT901BLE의 gyro z는 이미 반시계가 양수이고,
-# imu_yaw_sign(1.0, "raw yaw가 이미 반시계 증가")과도 이제 일관됩니다.
-# 재확인법: ros2 topic echo /imu --field angular_velocity  # 차를 반시계로 돌린다
-# 반시계 회전에서 z가 양수여야 합니다. 음수면 imu_flip_gyro_z를 뒤집으세요.
-#
-# sim의 latitude_deg/longitude_deg/heading_deg는 hyper_gazebo/worlds/track.world의
-# <spherical_coordinates>와 반드시 일치해야 시뮬레이션 GPS 좌표와 EKF 추정치가 어긋나지
-# 않습니다.
 datums:
   sim:
     latitude_deg: 37.5665
@@ -54,7 +27,7 @@ datums:
     yaw_offset_deg: 0.0
     # hyper_gazebo/vehicle.launch.py의 스폰 yaw 기본값 Y=1.64 rad. 스폰 인자를
     # 바꿔서 띄우면 여기도 같이 바꿔야 ekf_global이 맞는 방위로 시작합니다.
-    initial_heading_deg: 93.96
+    initial_heading_deg: 93.96 #-107
 
   school:
     latitude_deg: 37.555047

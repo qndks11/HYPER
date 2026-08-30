@@ -6,6 +6,10 @@
     body_height: 0.40 # 차량 전고 기준 섀시/프레임 근사 높이 [m]
     body_density: 150.0 # 차체가 플라스틱(ABS) 내부 프레임 위주이므로, 실중량(약 30~35kg)에 맞춰 밀도 대폭 하향 [kg/m^3]
 
+    # 전/후 차축 간 거리 (실측). body_length와 별개 값이므로 명시적으로 지정해야
+    # 시뮬레이터 Ackermann 기구학이 실차와 일치한다. nav2_controller.yaml / hyper_interface와 동일.
+    wheel_base: 0.72 # [m]
+
     # Wheel params (T8 Sport 대형 우레탄/고무 타이어 기준)
     wheel_radius: 0.2 # 실제 바퀴 지름 약 26cm -> 반지름 13cm [m]
     wheel_width: 0.09 # 바퀴 단면 폭 약 9cm [m]

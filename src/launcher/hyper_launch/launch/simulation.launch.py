@@ -4,8 +4,9 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
+from launch.conditions import LaunchConfigurationEquals, LaunchConfigurationNotEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 # Stages are staggered to give Gazebo time to come up before the nodes that
@@ -52,17 +53,44 @@ def generate_launch_description():
     # apply_on_start로 /model_service와 /teleport_service의 파라미터를 건드리고
     # 상단 상태줄은 /mission_manager/status를 읽으므로, 그 노드들보다 먼저 떠 봐야
     # 대상이 없습니다.
-    mission_panel = Node(
-        package='hyper_rqt',
-        executable='hyper_panel',
-        output='screen',
-        condition=IfCondition(LaunchConfiguration('use_panel')),
-    )
+    def mission_panel():
+        return Node(
+            package='hyper_rqt',
+            executable='hyper_panel',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('use_panel')),
+        )
+
+    # waypoint_csv:=real.csv 처럼 파일명만 준 경우 hyper_waypoint/waypoints/ 아래로 풀어 줍니다.
+    waypoint_csv_resolved = PathJoinSubstitution([
+        EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
+        'waypoints', LaunchConfiguration('waypoint_csv')])
+
+    def behavior_stage(**extra):
+        return stage('behavior.launch.py',
+                     mission=LaunchConfiguration('mission'), **extra)
 
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
         DeclareLaunchArgument('mission', default_value='mission'),
+        # 차량 스폰 위치/방위(map 프레임). 기본은 sim.csv 시작점입니다. real.csv처럼
+        # 다른 곳에서 녹화한 경로를 시뮬에서 따라가려면 그 CSV의 0번 행 x/y/yaw로
+        # 스폰시켜야 리드인이 코스 전체를 가로지르는 직선으로 안 잡힙니다.
+        # 예: real.csv 시작점 -> x:=-18.7494 y:=27.8460 Y:=-1.8681
+        DeclareLaunchArgument('x', default_value='41.0866', description='Initial X position'),
+        DeclareLaunchArgument('y', default_value='-45.6842', description='Initial Y position'),
+        DeclareLaunchArgument('Y', default_value='1.64', description='Initial Yaw (rad)'),
+        # navsat_transform 원점. hyper_localization/config/datums.yaml의 키
+        # (sim | school | track). 기본값 sim은 track.world의 <spherical_coordinates>와
+        # 맞는 시뮬 원점입니다. datum_site:=track이면 실차 트랙 좌표로 시뮬을 돌립니다.
+        DeclareLaunchArgument('datum_site', default_value='sim'),
+        # behavior 스테이지가 mission_manager에 넘길 웨이포인트 CSV. 기본은
+        # hyper_waypoint/waypoints/sim.csv (behavior.launch.py의 기본값). 절대 경로로도,
+        # waypoints/ 아래 파일명(real.csv 등)으로도 넘길 수 있게 아래에서 풀어 줍니다.
+        DeclareLaunchArgument(
+            'waypoint_csv', default_value='',
+            description='웨이포인트 CSV. 파일명만 주면 hyper_waypoint/waypoints/ 아래에서 찾습니다'),
         # headless:=true면 Gazebo 3D 창을 띄우지 않습니다. 센서 렌더링은 오프스크린으로
         # 그대로 돌아가므로 카메라/라이다 토픽은 동일하게 나오고, 시각화는 rviz로 하면 됩니다.
         DeclareLaunchArgument(
@@ -92,8 +120,13 @@ def generate_launch_description():
         rviz,
         stage('sim.launch.py',
               headless=LaunchConfiguration('headless'),
-              software_rendering=LaunchConfiguration('software_rendering')),
-        TimerAction(period=ODOMETRY_DELAY_S, actions=[stage('odometry.launch.py')]),
+              software_rendering=LaunchConfiguration('software_rendering'),
+              x=LaunchConfiguration('x'),
+              y=LaunchConfiguration('y'),
+              Y=LaunchConfiguration('Y')),
+        TimerAction(period=ODOMETRY_DELAY_S, actions=[
+            stage('odometry.launch.py',
+                  datum_site=LaunchConfiguration('datum_site'))]),
         # Gazebo bridges plain sensor_msgs/Image already (see ros_gz_bridge.yaml), so
         # lane_detection_node runs input_backend ros_raw here -- no rectification, no
         # image_transport/compressed subscription. object_detection_node's own default is
@@ -101,7 +134,14 @@ def generate_launch_description():
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage('perception.launch.py', lane_input_backend='ros_raw',
                   drivable_area=LaunchConfiguration('drivable_area'))]),
+        # waypoint_csv 미지정: behavior.launch.py 기본값(sim.csv)을 씁니다.
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
-            stage('behavior.launch.py', mission=LaunchConfiguration('mission')),
-            mission_panel]),
+            behavior_stage(),
+            mission_panel(),
+        ], condition=LaunchConfigurationEquals('waypoint_csv', '')),
+        # waypoint_csv 지정: waypoints/ 아래로 풀어 넘깁니다.
+        TimerAction(period=BEHAVIOR_DELAY_S, actions=[
+            behavior_stage(waypoint_csv=waypoint_csv_resolved),
+            mission_panel(),
+        ], condition=LaunchConfigurationNotEquals('waypoint_csv', '')),
     ])

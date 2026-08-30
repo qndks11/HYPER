@@ -25,6 +25,7 @@ VehicleController::VehicleController(const double timer_period, const double tim
   declare_parameter<double>("body_length", 0.0);
   declare_parameter<double>("wheel_radius", 0.0);
   declare_parameter<double>("wheel_width", 0.0);
+  declare_parameter<double>("wheel_base", 0.0);
   declare_parameter<double>("max_steering_angle", 0.0);
   declare_parameter<double>("max_velocity", 0.0);
 
@@ -33,12 +34,14 @@ VehicleController::VehicleController(const double timer_period, const double tim
   get_parameter("body_length", body_length_);
   get_parameter("wheel_radius", wheel_radius_);
   get_parameter("wheel_width", wheel_width_);
+  get_parameter("wheel_base", wheel_base_);
   get_parameter("max_steering_angle", max_steering_angle_);
   get_parameter("max_velocity", max_velocity_);
 
-  // Set the track width and wheel base
+  // Track width from the body/wheel geometry; wheel base is the measured
+  // front-to-rear axle distance (matches urdf wheel_offset = wheel_base/2 and
+  // the real vehicle), not a value derived from body_length.
   track_width_ = body_width_ + (2 * wheel_width_ / 2);
-  wheel_base_ = body_length_ - (2 * wheel_radius_);
 
   // Subscribers
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
