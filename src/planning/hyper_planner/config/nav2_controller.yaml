@@ -520,7 +520,15 @@ local_costmap:
           #  6.0에서는 회피 기동을 짤 여유가 없었습니다). 언덕 문제를 제대로 해결하면
           # (피치 반영 or 구간 지오펜스) obstacle_max_range를 다시 올리고, 그때 vx_max도
           # 같이 올릴지 판단하세요 -- 이 둘은 항상 초 단위 시야로 함께 봐야 합니다.
-          obstacle_max_range: 9.0
+          #
+          # 9.0 -> 6.0으로 되돌립니다. 값만 9.0으로 올라가 있고 위 문단은 전부 6.0을
+          # 전제하고 있었습니다 -- 즉 노면 오탐이 시작되는 7~8 m 구간이 다시 마킹되고
+          # 있었습니다. 급커브는 경로가 트랙 가장자리에 제일 가까이 붙는 곳이라, 그
+          # 오탐이 ObstaclesCritic(repulsion 3.0 / critical 20.0)을 건드려 감속·횡이동을
+          # 만들고, 경로 점의 5% 이상이 253/254 셀에 걸리면 PathAlignCritic이
+          # max_path_occupancy_ratio로 스스로 꺼져 코너 컷이 더 커집니다.
+          # 언덕 대책이 실제로 들어가면 그때 다시 올리세요.
+          obstacle_max_range: 6.0
           obstacle_min_range: 0.0
           raytrace_max_range: 20.0
           raytrace_min_range: 0.0
