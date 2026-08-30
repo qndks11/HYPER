@@ -38,6 +38,36 @@ def generate_launch_description():
         package='witmotion_ros2',
         executable='witmotion_ros2',
         name='witmotion_node',
+        # 드라이버 기본값('log')으로 두면 BLE 스레드가 내는 진단이 전부 ~/.ros/log/로만
+        # 갑니다: "No BLE device found matching ...", "BLE error: ...", "IMU disconnected",
+        # "Connected to IMU at ...". 같은 트리의 rplidar_node/ntrip_node/gps_accuracy_gui는
+        # 모두 screen이라 IMU만 아무 말 없이 실패하는 것처럼 보이지만, 실패 이유는 내내
+        # 출력되고 있었습니다. BLE는 붙었는지 아닌지가 전부라 반드시 터미널에서 봐야 합니다.
+        output='screen',
+        # BLE 스레드에는 자체 재시도 루프가 있지만 프로세스가 죽으면 아무도 살리지 않습니다.
+        # onNotify -> publishBatch -> publish()는 SimpleBLE 내부 D-Bus 스레드에서 try/catch
+        # 없이 도는 경로라, 거기서 rclcpp 예외가 나면 std::terminate로 프로세스가 통째로
+        # 사라집니다. 그때 미션 도중 IMU만 조용히 빠지는 대신 2초 뒤 다시 붙게 합니다.
+        respawn=True,
+        respawn_delay=2.0,
+        # 이 파일에서 제일 중요한 한 줄입니다.
+        #
+        # 드라이버 소멸자는 BLE 스레드를 join하는데, 그 스레드는 running_ 플래그를 루프
+        # 사이에서만 확인합니다. 그래서 Ctrl-C 시점에 adapter.scan_for(10초) 안이나 그
+        # 직후의 sleep(5초) 안에 들어가 있으면 최대 15초가 지나야 빠져나옵니다. launch의
+        # 기본값은 sigterm_timeout=5라 그 전에 SIGTERM -> SIGKILL로 죽여 버리고, 그러면
+        # peripheral.disconnect()가 실행되지 않은 채 BlueZ 쪽에 GATT 연결이 그대로 남습니다.
+        # 연결된 WT901BLE는 advertise를 멈추므로 "다음" 실행의 스캔은 센서를 아예 못 찾고
+        # "No BLE device found"만 반복합니다 -- 한 번 띄웠다 내린 뒤부터 계속 안 붙는
+        # 증상의 정체가 이것입니다. 20초를 주어 정상 종료 경로가 끝까지 돌게 합니다.
+        #
+        # 그래도 연결이 남았다면(강제 종료 등) 다음 실행 전에 직접 끊으세요:
+        #   bluetoothctl info FD:C0:E8:FE:A9:58        # Connected: yes 면 이 문제
+        #   bluetoothctl disconnect FD:C0:E8:FE:A9:58
+        #
+        # 드라이버 자체를 고치면(patches/witmotion_ros2-ble-reliability.patch) 대기가 전부
+        # 중단 가능해져 종료가 즉시 끝나므로, 이 20초는 그때부터 그냥 여유분이 됩니다.
+        sigterm_timeout='20',
         parameters=[
             os.path.join(witmotion_share, 'config', 'witmotion.yaml'),
             {

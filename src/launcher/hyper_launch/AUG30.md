@@ -51,6 +51,18 @@ ros2 topic echo /ublox_gps_node/navpvt --field flags
 - `/gps/fix`가 아예 없음 → `ls -l /dev/tty_Ardusimple` (udev 심볼릭 링크)
 - FLOAT에서 FIXED로 안 올라감 → 하늘이 트인 곳에서 몇 분 더. 여기서 FIXED를 못 보면
   **2번으로 넘어가지 마세요.** 정확도 1 m짜리 fix로 녹화한 코스는 3번에서 쓸 수 없습니다.
+- **IMU(WT901BLE)가 안 붙음** → GUI의 "IMU link"가 NO DATA이거나 터미널에 
+  `No BLE device found matching ...`가 반복되면, 십중팔구 **이전 실행이 BLE 연결을 물고
+  죽은 것**입니다. 연결된 WT901BLE는 advertise를 멈춰서 다음 스캔에 아예 안 잡힙니다.
+
+  ```bash
+  bluetoothctl info FD:C0:E8:FE:A9:58        # Connected: yes 면 이 경우가 맞습니다
+  bluetoothctl disconnect FD:C0:E8:FE:A9:58  # 끊고 다시 launch
+  ```
+
+  그래도 안 되면 어댑터가 여러 개인지 봅니다(드라이버는 첫 번째 것만 씁니다):
+  `bluetoothctl list`. 스택을 내릴 때 Ctrl-C 후 노드가 완전히 끝날 때까지 기다리세요 —
+  중간에 강제로 죽이면 같은 상태가 다시 만들어집니다.
 
 ---
 

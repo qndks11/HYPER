@@ -1,0 +1,356 @@
+diff --git a/README.md b/README.md
+index e88a712..d7e18b8 100644
+--- a/README.md
++++ b/README.md
+@@ -44,7 +44,13 @@ ros2 run witmotion_ros2 witmotion_ros2 --ros-args \
+ - `service_uuid` / `notify_uuid` — WT901BLE GATT UUIDs (defaults match the common nRF52-based WT901BLE modules)
+ - `frame_id` — IMU frame for the published message header
+ - `topic` — topic the `sensor_msgs/Imu` message is published on
+-- `scan_timeout` / `reconnect_wait_seconds` — BLE scan/reconnect tuning
++- `scan_timeout` — upper bound on a scan; the scan stops as soon as the device
++  is matched, so this is only paid when the device is absent
++- `reconnect_wait_seconds` — wait before starting a fresh scan after a failure
++- `connect_attempts` / `connect_retry_wait_seconds` — how many times to retry
++  `connect()` in place before falling back to a full rescan. BlueZ routinely
++  aborts the first connect right after discovery stops, and retrying in place
++  is far cheaper than another scan window.
+ 
+ ## Notes
+ - Orientation is derived from the device's onboard roll/pitch/yaw fusion
+@@ -57,5 +63,18 @@ ros2 run witmotion_ros2 witmotion_ros2 --ros-args \
+ - If your specific WT901BLE variant uses different service/notify UUIDs,
+   override them in `config/witmotion.yaml`.
+ 
++## Shutdown
++The node disconnects the peripheral on exit. This matters: if the process dies
++with the GATT link still open, BlueZ keeps the device marked connected, the
++sensor stops advertising, and the *next* run cannot find it by scanning at all.
++Give the process enough time to stop on its own — under `ros2 launch`, that
++means a `sigterm_timeout` larger than the launch default of 5 seconds. If a link
++does get stranded, clear it with:
++
++```sh
++bluetoothctl info <MAC>        # Connected: yes means the link was stranded
++bluetoothctl disconnect <MAC>
++```
++
+ ## License
+ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+diff --git a/config/witmotion.yaml b/config/witmotion.yaml
+index 6687279..fea4d11 100644
+--- a/config/witmotion.yaml
++++ b/config/witmotion.yaml
+@@ -8,3 +8,5 @@ witmotion_node:
+     topic: /imu
+     scan_timeout: 10.0
+     reconnect_wait_seconds: 5.0
++    connect_attempts: 3
++    connect_retry_wait_seconds: 1.0
+diff --git a/include/witmotion_ros2/witmotion_node.hpp b/include/witmotion_ros2/witmotion_node.hpp
+index e4765f9..82e481b 100644
+--- a/include/witmotion_ros2/witmotion_node.hpp
++++ b/include/witmotion_ros2/witmotion_node.hpp
+@@ -21,7 +21,13 @@ public:
+ private:
+   void bleThreadMain();
+   std::optional<SimpleBLE::Peripheral> findPeripheral(SimpleBLE::Adapter & adapter);
++  bool matches(SimpleBLE::Peripheral & peripheral) const;
++  bool connectWithRetry(SimpleBLE::Peripheral & peripheral);
++  // Sleeps up to `seconds`, waking early if the node is shutting down.
++  // Returns false when it woke because of shutdown.
++  bool interruptibleSleep(double seconds);
+   void onNotify(const SimpleBLE::ByteArray & payload);
++  void onNotifyImpl(const SimpleBLE::ByteArray & payload);
+   void publishBatch(const std::vector<std::vector<uint8_t>> & frames);
+   void publishFrame(const std::vector<uint8_t> & frame, const rclcpp::Time & stamp);
+ 
+@@ -34,6 +40,8 @@ private:
+   std::string topic_;
+   double scan_timeout_sec_;
+   double reconnect_wait_sec_;
++  int connect_attempts_;
++  double connect_retry_wait_sec_;
+ 
+   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
+ 
+@@ -42,6 +50,13 @@ private:
+   bool has_last_batch_ns_;
+   int64_t last_batch_ns_;
+ 
++  // Written by SimpleBLE's scan callbacks, read by the BLE thread. Both live on
++  // the node rather than in findPeripheral's frame: SimpleBLE can still be
++  // running a scan callback at the moment the callbacks are cleared, and locals
++  // captured by reference would already be gone by then.
++  std::mutex found_mutex_;
++  std::optional<SimpleBLE::Peripheral> found_peripheral_;
++
+   std::atomic<bool> running_;
+   std::thread ble_thread_;
+ };
+diff --git a/src/witmotion_node.cpp b/src/witmotion_node.cpp
+index ed0c2a5..41af2fd 100644
+--- a/src/witmotion_node.cpp
++++ b/src/witmotion_node.cpp
+@@ -2,12 +2,18 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <cctype>
+ #include <chrono>
+ #include <cmath>
+ #include <cstring>
+ 
+ namespace
+ {
++// How often the BLE thread rechecks its exit conditions while waiting. Every
++// wait in this driver is built out of this tick so that shutdown, and a scan
++// hit, are noticed within ~50 ms instead of at the end of a multi-second sleep.
++constexpr auto kPollInterval = std::chrono::milliseconds(50);
++
+ // WT901BLE "0x61" combined-output frame: 0x55 0x61, then 9 little-endian
+ // int16 raw values (accel xyz, gyro xyz, angle xyz), 20 bytes total. This is
+ // the only frame format the module sends over its BLE notify characteristic
+@@ -56,6 +62,13 @@ WITMotionNode::WITMotionNode()
+   this->declare_parameter<std::string>("topic", "imu");
+   this->declare_parameter<double>("scan_timeout", 10.0);
+   this->declare_parameter<double>("reconnect_wait_seconds", 5.0);
++  // BlueZ very often aborts the first connect right after StopDiscovery
++  // ("le-connection-abort-by-local", "Software caused connection abort").
++  // Retrying the connect in place costs ~1s; falling back to the outer loop
++  // instead costs a whole fresh scan window, which is what made a single
++  // transient error look like the sensor was gone.
++  this->declare_parameter<int>("connect_attempts", 3);
++  this->declare_parameter<double>("connect_retry_wait_seconds", 1.0);
+ 
+   device_name_ = this->get_parameter("device_name").as_string();
+   device_address_ = this->get_parameter("device_address").as_string();
+@@ -65,6 +78,8 @@ WITMotionNode::WITMotionNode()
+   topic_ = this->get_parameter("topic").as_string();
+   scan_timeout_sec_ = this->get_parameter("scan_timeout").as_double();
+   reconnect_wait_sec_ = this->get_parameter("reconnect_wait_seconds").as_double();
++  connect_attempts_ = static_cast<int>(this->get_parameter("connect_attempts").as_int());
++  connect_retry_wait_sec_ = this->get_parameter("connect_retry_wait_seconds").as_double();
+ 
+   imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>(topic_, 10);
+ 
+@@ -79,28 +94,114 @@ WITMotionNode::~WITMotionNode()
+   }
+ }
+ 
++bool WITMotionNode::interruptibleSleep(double seconds)
++{
++  const auto deadline =
++    std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
++  while (running_ && std::chrono::steady_clock::now() < deadline) {
++    std::this_thread::sleep_for(kPollInterval);
++  }
++  return running_;
++}
++
++bool WITMotionNode::matches(SimpleBLE::Peripheral & peripheral) const
++{
++  if (!device_address_.empty()) {
++    // BlueZ reports addresses upper-case; accept a lower-case device_address
++    // in the params file rather than silently never matching.
++    const std::string address = peripheral.address();
++    return std::equal(
++      address.begin(), address.end(), device_address_.begin(), device_address_.end(),
++      [](unsigned char a, unsigned char b) {return std::toupper(a) == std::toupper(b);});
++  }
++  return peripheral.identifier().find(device_name_) != std::string::npos;
++}
++
+ std::optional<SimpleBLE::Peripheral> WITMotionNode::findPeripheral(SimpleBLE::Adapter & adapter)
+ {
+-  std::optional<SimpleBLE::Peripheral> found;
++  {
++    std::lock_guard<std::mutex> lock(found_mutex_);
++    found_peripheral_.reset();
++  }
+ 
+-  adapter.set_callback_on_scan_found(
+-    [this, &found](SimpleBLE::Peripheral peripheral) {
+-      if (found.has_value()) {
++  auto consider = [this](SimpleBLE::Peripheral peripheral) {
++      std::lock_guard<std::mutex> lock(found_mutex_);
++      if (found_peripheral_.has_value() || !matches(peripheral)) {
+         return;
+       }
+-      if (!device_address_.empty()) {
+-        if (peripheral.address() == device_address_) {
+-          found = peripheral;
+-        }
+-      } else if (peripheral.identifier().find(device_name_) != std::string::npos) {
+-        found = peripheral;
++      found_peripheral_ = peripheral;
++    };
++
++  // on_scan_found only fires for peripherals BlueZ discovers fresh in this
++  // session. One it already knows -- cached from an earlier scan, or still held
++  // open by a previous run of this node -- produces property updates instead,
++  // so the same matcher has to be wired to on_scan_updated as well. Without it
++  // the sensor can be invisible to every scan after the first one.
++  adapter.set_callback_on_scan_found(consider);
++  adapter.set_callback_on_scan_updated(consider);
++
++  // scan_for() blocks for the entire timeout: it ignores both a match and
++  // running_, so every scan cost the full window even when the device answered
++  // immediately, and Ctrl-C had to wait it out. Drive the scan by hand and stop
++  // as soon as either condition is met.
++  adapter.scan_start();
++  const auto deadline =
++    std::chrono::steady_clock::now() + std::chrono::duration<double>(scan_timeout_sec_);
++  while (running_ && std::chrono::steady_clock::now() < deadline) {
++    {
++      std::lock_guard<std::mutex> lock(found_mutex_);
++      if (found_peripheral_.has_value()) {
++        break;
+       }
+-    });
++    }
++    std::this_thread::sleep_for(kPollInterval);
++  }
++  adapter.scan_stop();
+ 
+-  adapter.scan_for(static_cast<int>(scan_timeout_sec_ * 1000.0));
+   adapter.set_callback_on_scan_found(nullptr);
++  adapter.set_callback_on_scan_updated(nullptr);
++
++  std::lock_guard<std::mutex> lock(found_mutex_);
++  if (!found_peripheral_.has_value()) {
++    // The adapter's own result list can still carry a peripheral that never
++    // produced a callback inside this window.
++    for (auto & peripheral : adapter.scan_get_results()) {
++      if (matches(peripheral)) {
++        found_peripheral_ = peripheral;
++        break;
++      }
++    }
++  }
+ 
+-  return found;
++  return found_peripheral_;
++}
++
++bool WITMotionNode::connectWithRetry(SimpleBLE::Peripheral & peripheral)
++{
++  for (int attempt = 1; running_ && attempt <= connect_attempts_; ++attempt) {
++    try {
++      // A link left open by a previous run -- one killed before its destructor
++      // could disconnect, say -- keeps the sensor from advertising and blocks a
++      // fresh connect. Drop it so this attempt starts from a clean link.
++      if (peripheral.is_connected()) {
++        RCLCPP_WARN(get_logger(), "IMU link already open (stale); dropping it first");
++        peripheral.disconnect();
++        if (!interruptibleSleep(connect_retry_wait_sec_)) {
++          return false;
++        }
++      }
++      peripheral.connect();
++      return true;
++    } catch (const std::exception & exc) {
++      RCLCPP_WARN(
++        get_logger(), "Connect attempt %d/%d failed: %s",
++        attempt, connect_attempts_, exc.what());
++    }
++    if (attempt < connect_attempts_ && !interruptibleSleep(connect_retry_wait_sec_)) {
++      return false;
++    }
++  }
++  return false;
+ }
+ 
+ void WITMotionNode::bleThreadMain()
+@@ -109,29 +210,36 @@ void WITMotionNode::bleThreadMain()
+     try {
+       if (!SimpleBLE::Adapter::bluetooth_enabled()) {
+         RCLCPP_WARN(get_logger(), "Bluetooth is not enabled on this system");
+-        std::this_thread::sleep_for(std::chrono::duration<double>(reconnect_wait_sec_));
++        interruptibleSleep(reconnect_wait_sec_);
+         continue;
+       }
+ 
+       auto adapters = SimpleBLE::Adapter::get_adapters();
+       if (adapters.empty()) {
+         RCLCPP_WARN(get_logger(), "No BLE adapter found");
+-        std::this_thread::sleep_for(std::chrono::duration<double>(reconnect_wait_sec_));
++        interruptibleSleep(reconnect_wait_sec_);
+         continue;
+       }
+       auto adapter = adapters.front();
+ 
+       auto peripheral_opt = findPeripheral(adapter);
+       if (!peripheral_opt.has_value()) {
++        // Report the filter that actually ran. device_address takes priority
++        // over device_name, so naming the name here sent anyone debugging a
++        // changed/incorrect MAC after the wrong parameter.
+         RCLCPP_WARN(
+-          get_logger(), "No BLE device found matching \"%s\"; retrying...",
+-          device_name_.c_str());
+-        std::this_thread::sleep_for(std::chrono::duration<double>(reconnect_wait_sec_));
++          get_logger(), "No BLE device found matching %s \"%s\"; retrying...",
++          device_address_.empty() ? "name" : "address",
++          device_address_.empty() ? device_name_.c_str() : device_address_.c_str());
++        interruptibleSleep(reconnect_wait_sec_);
+         continue;
+       }
+       auto peripheral = peripheral_opt.value();
+ 
+-      peripheral.connect();
++      if (!connectWithRetry(peripheral)) {
++        interruptibleSleep(reconnect_wait_sec_);
++        continue;
++      }
+ 
+       // Reset batch timing/framing so a stale interval or partial frame from
+       // before connect/reconnect doesn't get used after this point.
+@@ -148,10 +256,16 @@ void WITMotionNode::bleThreadMain()
+       RCLCPP_INFO(get_logger(), "Connected to IMU at %s", peripheral.address().c_str());
+ 
+       while (running_ && peripheral.is_connected()) {
+-        std::this_thread::sleep_for(std::chrono::seconds(1));
++        interruptibleSleep(1.0);
++      }
++      if (running_) {
++        RCLCPP_WARN(get_logger(), "IMU disconnected");
+       }
+-      RCLCPP_WARN(get_logger(), "IMU disconnected");
+ 
++      // Always run on the way out, shutdown included: if the process dies with
++      // the GATT link still open, BlueZ keeps the device marked connected, the
++      // sensor stops advertising, and the *next* run's scan cannot see it at
++      // all. That is what turned one hard kill into a string of failed starts.
+       if (peripheral.is_connected()) {
+         peripheral.unsubscribe(service_uuid_, notify_uuid_);
+         peripheral.disconnect();
+@@ -161,12 +275,29 @@ void WITMotionNode::bleThreadMain()
+     }
+ 
+     if (running_) {
+-      std::this_thread::sleep_for(std::chrono::duration<double>(reconnect_wait_sec_));
++      interruptibleSleep(reconnect_wait_sec_);
+     }
+   }
+ }
+ 
+ void WITMotionNode::onNotify(const SimpleBLE::ByteArray & payload)
++{
++  // Runs on SimpleBLE's internal D-Bus thread, not a ROS executor thread. An
++  // exception escaping from here unwinds into a thread with no handler and
++  // takes the whole process down via std::terminate -- during shutdown, or on
++  // any publish error, the node would simply vanish. Nothing may propagate out.
++  try {
++    onNotifyImpl(payload);
++  } catch (const std::exception & exc) {
++    RCLCPP_WARN_THROTTLE(
++      get_logger(), *get_clock(), 5000, "Dropping IMU notification: %s", exc.what());
++  } catch (...) {
++    RCLCPP_WARN_THROTTLE(
++      get_logger(), *get_clock(), 5000, "Dropping IMU notification: unknown error");
++  }
++}
++
++void WITMotionNode::onNotifyImpl(const SimpleBLE::ByteArray & payload)
+ {
+   std::vector<std::vector<uint8_t>> frames;
+   {
