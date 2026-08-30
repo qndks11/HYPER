@@ -8,6 +8,7 @@
   <xacro:arg name="body_width" default="1.0" />
   <xacro:arg name="body_height" default="0.5" />
   <xacro:arg name="body_density" default="1000.0" />
+  <xacro:arg name="wheel_base" default="1.4" />
   <xacro:arg name="wheel_radius" default="0.3" />
   <xacro:arg name="wheel_width" default="0.1" />
   <xacro:arg name="wheel_density" default="1000.0" />
@@ -37,6 +38,7 @@
   <xacro:property name="body_width" value="$(arg body_width)"/>
   <xacro:property name="body_height" value="$(arg body_height)"/>
   <xacro:property name="body_density" value="$(arg body_density)"/>
+  <xacro:property name="wheel_base" value="$(arg wheel_base)"/>
   <xacro:property name="wheel_radius" value="$(arg wheel_radius)"/>
   <xacro:property name="wheel_width" value="$(arg wheel_width)"/>
   <xacro:property name="wheel_density" value="$(arg wheel_density)"/>
@@ -63,7 +65,9 @@
   <xacro:property name="body_inertia_y" value="${1.0/12.0 * body_mass * (body_length*body_length + body_height*body_height)}"/>
   <xacro:property name="body_inertia_z" value="${1.0/12.0 * body_mass * (body_length*body_length + body_width*body_width)}"/>
   <xacro:property name="wheel_separation" value="${body_width + wheel_width}"/>
-  <xacro:property name="wheel_offset" value="${body_length/2 - wheel_radius}"/>
+  <!-- Front/rear axle half-spacing. Driven by the measured wheel_base, NOT body_length,
+       so the sim Ackermann kinematics match the real vehicle (wheel_base != body_length). -->
+  <xacro:property name="wheel_offset" value="${wheel_base/2}"/>
   <xacro:property name="wheel_mass" value="${wheel_density * PI * wheel_radius * wheel_radius * wheel_width}"/>
   <xacro:property name="wheel_inertia_x" value="${1.0/12.0 * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
   <xacro:property name="wheel_inertia_y" value="${1.0/12.0 * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
