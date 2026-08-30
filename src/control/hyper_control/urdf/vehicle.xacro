@@ -345,8 +345,15 @@
   </link>
 
 <!-- GPS Fixed Joint -->
+  <!-- 실측(2026-08-30): 안테나가 body_link 중심에서 뒤로 0.23 m, 좌우 중앙, 지면 위 1.118 m
+       (라이드 하이트 0.171 m을 빼면 body_link 기준 0.947 m). body_height 수식 대신 리터럴로
+       박아 넣었습니다 -- body_height 자체가 아직 실측 전(placeholder 0.40)이라 수식으로는
+       실측치를 정확히 못 담습니다. gps_link는 시각화(RViz)용일 뿐 navsat_transform 등
+       어떤 로컬라이제이션 코드도 이 TF를 안 씁니다(안테나 레버암 보정이 없음) -- 그래도
+       실측치를 넣어 두는 이유는 나중에 레버암 보정을 추가하게 되거나 시각화 정확도가
+       필요해질 때를 위해서입니다. -->
   <joint name="gps_joint" type="fixed">
-    <origin xyz="0 0 ${body_height/2 + 0.25}" rpy="0 0 0"/>
+    <origin xyz="-0.23 0 0.947" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="gps_link"/>
   </joint>
