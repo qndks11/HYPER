@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Absolute yaw for ekf_global from a predefined initial heading + GPS course.
+"""Absolute yaw for ekf_global from GPS course over ground.
 
 Why this node exists
 --------------------
@@ -12,41 +12,38 @@ fights the RTK position solution.
 So ekf_global no longer fuses IMU yaw at all (see dual_ekf_navsat.yaml:
 imu0_config index 5 is false in *both* filters now). Yaw is instead:
 
-  * *initialised* from a surveyed constant -- ``initial_heading_deg``, the ENU
-    heading the car is pointing when the stack is started, per datum site;
+  * *unknown at boot* -- there is no surveyed constant and no magnetometer, so
+    until something below establishes it, ekf_global's yaw is just the EKF's
+    initial state (0) carried by the z gyro. The map frame heading is
+    meaningless in that window; nothing should drive autonomously in it.
+  * *established* either by the first accepted GPS course over ground (this
+    node, once the car is moving fast/straight enough) or by an external
+    one-shot ``/imu/heading`` injection -- the "roll 0.5 m" yaw calibration in
+    gps_accuracy_gui, which drives the car a short way and measures yaw from
+    the GPS displacement, then publishes it here with a covariance from that
+    baseline. That calibration is the deliberate replacement for the old
+    surveyed ``initial_heading_deg`` constant.
   * *propagated* by the IMU's z gyro, which both EKFs already fuse;
-  * *corrected* by GPS course over ground, published here whenever the car is
-    actually moving fast enough for the course to mean something.
+  * *corrected* thereafter by GPS course over ground whenever the car is moving
+    fast enough for the course to mean something.
 
 That leaves no magnetometer anywhere in the loop. navsat_transform is already
 magnetometer-free: with ``wait_for_datum: true`` robot_localization never even
 subscribes to /imu (navsat_transform.cpp:186), it pins the map frame using the
 datum's own heading.
 
+A GPS-denied run therefore has no yaw origin at all -- run the GUI yaw
+calibration first (it only needs GPS for the ~0.5 m roll) or accept that yaw is
+pure gyro integration off an arbitrary zero.
+
 Output
 ------
 ``/imu/heading`` (sensor_msgs/Imu) carrying yaw only. ekf_global takes just the
 yaw element from it; roll/pitch are published with a huge covariance and the
-gyro/accel fields are flagged absent (covariance[0] = -1, REP-145).
-
-Two phases, and the handover between them matters:
-
-  1. **Seed** -- from startup until the first accepted GPS course, publish
-     ``initial_heading_deg`` at ``publish_rate`` Hz. This pins yaw while the
-     car sits still waiting for nav2, so ekf_global and the datum agree before
-     anything moves.
-  2. **GPS course** -- once a course is accepted, the seed stops for good (the
-     car has since turned; re-asserting the startup constant would drag yaw
-     back). Each accepted course is published exactly once, as it arrives.
-     Between them -- and any time the car is too slow for a meaningful course --
-     nothing is published and the gyro carries yaw on its own.
-
-The seed also stops the moment the wheels report motion, whether or not GPS
-ever showed up. That is what makes a GPS-denied run work: the constant pins
-yaw only while the car is parked where it was surveyed, and from first motion
-onwards yaw is pure gyro integration off that constant. Without this the seed
-would keep asserting the *parked* heading at ``publish_rate`` Hz while the car
-drives, and ekf_global would fight every turn back towards it.
+gyro/accel fields are flagged absent (covariance[0] = -1, REP-145). Each
+accepted course is published exactly once, as it arrives; between them (and any
+time the car is too slow for a meaningful course) nothing is published and the
+gyro carries yaw on its own.
 
 Course sources, in priority order:
 
@@ -65,13 +62,6 @@ Course sources, in priority order:
 Both are course over *ground*, so they point backwards when the car reverses;
 ``/odom``'s signed twist.linear.x (the Arduino's measured wheel speed) supplies
 both the speed gate and the reverse flip.
-
-Calibrating initial_heading_deg
--------------------------------
-It is an ENU heading in degrees: 0 = East, 90 = North, 180 = West, -90 = South,
-increasing counter-clockwise. Point the car the way it will start and read the
-bearing off a map (or drive it 10 m in a straight line and take the course this
-node reports). Set it per site in config/datums.yaml.
 """
 
 import math
@@ -106,17 +96,10 @@ class GpsHeading(Node):
         super().__init__('gps_heading')
 
         p = self.declare_parameter
-        self.initial_heading = math.radians(p('initial_heading_deg', 0.0).value)
-        self.initial_stddev = math.radians(p('initial_heading_stddev_deg', 10.0).value)
-        self.publish_rate = p('publish_rate', 10.0).value
         # Speed gate. Below this the course over ground is dominated by GPS
         # noise rather than by where the car is pointing, so we publish nothing
         # and let the gyro carry yaw.
         self.min_speed = p('min_speed', 0.5).value
-        # Motion threshold that retires the startup seed. Deliberately well
-        # below min_speed: a car creeping at 0.2 m/s is already turning, and
-        # the seed must be gone before it does.
-        self.seed_release_speed = p('seed_release_speed', 0.1).value
         self.max_head_acc = math.radians(p('max_head_acc_deg', 25.0).value)
         # Floor on the reported accuracy. u-blox can claim a sub-degree course
         # that is still off by the car's own slip/crab angle, and believing it
@@ -138,8 +121,7 @@ class GpsHeading(Node):
         odom_topic = p('odom_topic', 'odom').value
         output_topic = p('output_topic', 'imu/heading').value
 
-        self._seeded_only = True   # no GPS course accepted yet -> keep seeding
-        self._moved = False        # wheels have never turned -> still parked
+        self._established = False   # has any absolute yaw been published yet
         self._odom_vx = None
         self._odom_stamp = None
         self._navpvt_stamp = None
@@ -155,23 +137,15 @@ class GpsHeading(Node):
         else:
             self.get_logger().warn(
                 'ublox_msgs not available -- falling back to /gps/fix differencing')
-        self.create_timer(1.0 / self.publish_rate, self._on_timer)
 
         self.get_logger().info(
-            f'gps_heading: seeding yaw at {math.degrees(self.initial_heading):.1f} deg ENU '
-            f'(+/-{math.degrees(self.initial_stddev):.1f}), '
-            f'course sources {navpvt_topic} then {fix_topic}')
+            'gps_heading: yaw unknown until the first GPS course (or a one-shot '
+            f'{output_topic} injection); course sources {navpvt_topic} then {fix_topic}')
 
     # ---------------------------------------------------------------- inputs
     def _on_odom(self, msg):
         self._odom_vx = msg.twist.twist.linear.x
         self._odom_stamp = self.get_clock().now()
-        if not self._moved and abs(self._odom_vx) >= self.seed_release_speed:
-            self._moved = True
-            if self._seeded_only:
-                self.get_logger().info(
-                    'car is moving -- initial-heading seed off, yaw now gyro'
-                    + ('' if NavPVT is None else ' (+ GPS course when it arrives)'))
 
     def _speed(self):
         """Signed wheel speed, or None when /odom is stale or absent."""
@@ -269,19 +243,12 @@ class GpsHeading(Node):
             return
 
     # --------------------------------------------------------------- outputs
-    def _on_timer(self):
-        # Seed only while parked and before GPS takes over. Re-asserting the
-        # startup heading after either would yank yaw back to wherever the car
-        # was parked -- which, with no GPS, nothing would ever undo.
-        if self._seeded_only and not self._moved:
-            self._publish(self.initial_heading, self.initial_stddev, seed=True)
-
-    def _publish(self, yaw, stddev, seed=False):
-        if not seed and self._seeded_only:
-            self._seeded_only = False
+    def _publish(self, yaw, stddev):
+        if not self._established:
+            self._established = True
             self.get_logger().info(
                 f'first GPS course accepted ({math.degrees(yaw):.1f} deg ENU) -- '
-                'initial-heading seed off, yaw now gyro + GPS')
+                'yaw established, now gyro + GPS course')
 
         msg = Imu()
         msg.header.stamp = self.get_clock().now().to_msg()

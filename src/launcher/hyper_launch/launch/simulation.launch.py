@@ -53,6 +53,23 @@ def generate_launch_description():
     # apply_on_start로 /model_service와 /teleport_service의 파라미터를 건드리고
     # 상단 상태줄은 /mission_manager/status를 읽으므로, 그 노드들보다 먼저 떠 봐야
     # 대상이 없습니다.
+    # GPS 정확도 + 위치/방위 모니터. real.launch.py와 같은 노드입니다. 시뮬에서도
+    # /odometry/gps(navsat_transform)와 /odometry/filtered_map이 나오므로 그대로
+    # 쓸모가 있고, 특히 "초기 yaw 캘리브레이션" 버튼 -- 차를 앞으로 0.5 m 굴려 GPS
+    # 변위로 ENU yaw를 재고 되돌아오는 -- 을 실차에 쓰기 전에 여기서 검증할 수 있습니다.
+    # 이 버튼은 /velocity, /steering_angle을 잠깐 publish하고, 측정한 yaw를
+    # /imu/heading으로 1회 주입하므로 미션(nav2) 주행 중에는 누르지 마세요.
+    # use_gps_gui:=false로 끌 수 있습니다(헤드리스 CI 등).
+    # use_sim_time=true: 주입하는 /imu/heading 스탬프가 sim 시계여야 ekf_global이 받습니다.
+    gps_accuracy_gui = Node(
+        package='hyper_localization',
+        executable='gps_accuracy_gui.py',
+        name='gps_accuracy_gui',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+        condition=IfCondition(LaunchConfiguration('use_gps_gui')),
+    )
+
     def mission_panel():
         return Node(
             package='hyper_rqt',
@@ -117,7 +134,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_panel', default_value='true',
             description='Launch the hyper_rqt HYPER Panel (mission start/cancel, teleport)'),
+        DeclareLaunchArgument(
+            'use_gps_gui', default_value='true',
+            description='Launch the GPS accuracy / yaw-calibration monitor GUI'),
         rviz,
+        gps_accuracy_gui,
         stage('sim.launch.py',
               headless=LaunchConfiguration('headless'),
               software_rendering=LaunchConfiguration('software_rendering'),

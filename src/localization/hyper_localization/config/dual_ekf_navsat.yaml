@@ -126,7 +126,8 @@ ekf_global:
     # 밀린다. 이걸 절대 방위로 먹이면 map 프레임 heading이 서서히 통째로 돌아가고,
     # RTK 위치해와 싸운다. 그래서 지자기/드라이버 yaw는 어느 필터에도 안 넣는다.
     # 대신 절대 yaw는 imu1(gps_heading 노드)에서만 온다:
-    #   초기값 = datums.yaml의 initial_heading_deg (측량한 상수)
+    #   초기값 = 없음 -- 부팅 직후 yaw는 알 수 없고 아래 vyaw 적분만으로 이어진다
+    #   확립   = gps_accuracy_gui의 0.5 m 캘리브레이션(1회 주입) 또는 첫 GPS 진행방향
     #   전파   = 아래 vyaw(자이로 z)
     #   보정   = 주행 중 GPS 진행방향(course over ground)
     # roll/pitch는 중력으로 관측되므로 그대로 신뢰한다.
@@ -142,9 +143,9 @@ ekf_global:
     imu0_remove_gravitational_acceleration: true
 
     # gps_heading 노드(hyper_localization/scripts/gps_heading.py)가 내보내는
-    # yaw 전용 Imu. 이 필터의 유일한 절대 방위 기준이다. 정지 중에는 초기 heading
-    # 상수를, 주행 중에는 GPS 진행방향을 (u-blox headAcc에서 뽑은 공분산과 함께)
-    # 실을 때만 publish한다 -- 느릴 때는 아예 안 나오므로 자이로가 yaw를 잇는다.
+    # yaw 전용 Imu. 이 필터의 유일한 절대 방위 기준이다. 주행 중 GPS 진행방향을
+    # (u-blox headAcc에서 뽑은 공분산과 함께) 실을 때만, 그리고 gps_accuracy_gui의
+    # 캘리브레이션이 1회 주입할 때만 publish된다 -- 그 전/느릴 때는 자이로가 yaw를 잇는다.
     # ekf_local에는 넣지 않는다: odom 프레임은 연속이어야 하므로 절대 방위 점프가
     # 들어가면 안 된다 (map->odom이 흡수하도록 여기 global에만 넣는다).
     imu1: imu/heading

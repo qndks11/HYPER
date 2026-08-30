@@ -9,15 +9,11 @@
 # ENU 대비 얼마나 돌릴지입니다. 0이면 map X=East, Y=North로 ENU와 완전히 정렬되고,
 # rviz_satellite 앵커/위경도 웨이포인트 계산과도 그대로 맞습니다. 건드리지 마세요.
 #
-# ── initial_heading_deg  (실차에서 매번 확인해야 하는 값) ──────────────────
-# 스택을 켜는 순간 차가 향하고 있는 ENU 방위(도). 0=East, 90=North, 180=West,
-# -90=South, 반시계 방향이 +.
-# hyper_localization의 gps_heading 노드가 ekf_global에 넣는 절대 yaw의 "초기값"입니다.
-# 지자기 yaw를 어디에서도 안 쓰기 때문에(아래 참조) 이 상수가 유일한 시작 기준이고,
-# 여기서 틀린 각도만큼 map 프레임 heading이 처음부터 틀어진 채로 출발합니다.
-# 차가 충분히 움직이기 시작하면 GPS 진행방향이 이어받아 스스로 교정됩니다.
-# 확인법: 출발 지점에 차를 세운 방향의 방위각을 지도에서 읽거나, 직선으로 10m쯤
-# 몰아 본 뒤 `ros2 topic echo /imu/heading`이 수렴하는 값을 그대로 적습니다.
+# ── 초기 yaw ───────────────────────────────────────────────────────────────
+# 측량 상수(initial_heading_deg)는 없앴습니다. 부팅 직후 yaw는 "알 수 없음"이고,
+# gps_accuracy_gui의 "Calibrate initial yaw"(0.5 m 굴려 GPS 변위로 측정) 또는
+# 주행 중 첫 GPS 진행방향이 gps_heading을 통해 /imu/heading으로 절대 yaw를
+# 세울 때까지 자이로 적분만으로 이어집니다.
 datums:
   sim:
     latitude_deg: 37.5665
@@ -25,9 +21,6 @@ datums:
     heading_deg: 0.0
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
-    # hyper_gazebo/vehicle.launch.py의 스폰 yaw 기본값 Y=1.64 rad. 스폰 인자를
-    # 바꿔서 띄우면 여기도 같이 바꿔야 ekf_global이 맞는 방위로 시작합니다.
-    initial_heading_deg: 93.96 #-107
 
   school:
     latitude_deg: 37.555047
@@ -38,8 +31,6 @@ datums:
     imu_yaw_sign:  1.0
     imu_yaw_offset_deg: -91.5
     imu_flip_gyro_z: false
-    # 주차선 방위각 196.99°(SSW, 진북 기준 시계방향) -> ENU(0=East, 반시계+) 환산: 90 - 196.99.
-    initial_heading_deg: -106.99
 
   track:
     latitude_deg: 37.2887947
@@ -50,5 +41,3 @@ datums:
     imu_yaw_sign: 1.0
     imu_yaw_offset_deg: -91.5
     imu_flip_gyro_z: false
-    # TODO(실차): 출발 지점 방위를 실측해서 채우세요. 0 = East.
-    initial_heading_deg: 0.0

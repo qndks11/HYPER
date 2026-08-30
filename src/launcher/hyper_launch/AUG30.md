@@ -168,7 +168,8 @@ ros2 run tf2_ros tf2_echo map body_link          # map -> body_link TF가 사는
 (`tail -1 .../real.csv | cut -d, -f1`).
 
 RViz에서 계획 경로가 실제 녹화한 코스와 겹쳐 보이는지 눈으로 먼저 확인합니다. 코스가 엉뚱한
-데 있으면 `datum_site`나 `initial_heading_deg`가 틀린 것입니다.
+데 있으면 `datum_site`가 틀렸거나, 초기 yaw가 아직 확립되지 않은 것입니다
+(gps_accuracy_gui의 "Calibrate initial yaw"를 먼저 돌리세요).
 
 ### 출발
 

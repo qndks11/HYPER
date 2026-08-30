@@ -82,9 +82,11 @@ def _launch_setup(context, config, datums_yaml):
 
     # -----------------------------------------------------------------
     # 절대 yaw 공급원. 지자기 yaw를 어디에서도 쓰지 않으므로(datums.yaml 참조)
-    # ekf_global의 방위 기준은 이 노드 하나뿐이다:
-    #   정지 중 -> datums.yaml의 initial_heading_deg를 그대로 실어 yaw를 고정
-    #   주행 중 -> GPS 진행방향(course over ground)으로 자이로 드리프트를 교정
+    # ekf_global의 방위 기준은 이 노드 하나뿐이다. 측량 상수는 없앴다:
+    #   부팅 직후 -> yaw 알 수 없음(자이로 적분만)
+    #   확립      -> gps_accuracy_gui의 0.5 m 캘리브레이션이 /imu/heading으로 1회
+    #               주입하거나, 주행 중 첫 GPS 진행방향
+    #   이후      -> GPS 진행방향(course over ground)으로 자이로 드리프트 교정
     # 실차에서는 /ublox_gps_node/navpvt의 heading/headAcc를, 시뮬레이션처럼 NavPVT가
     # 없으면 /gps/fix 연속 측정값 차분을 쓴다. 그래서 sim/실차 모두 띄운다.
     # -----------------------------------------------------------------
@@ -94,7 +96,6 @@ def _launch_setup(context, config, datums_yaml):
         name='gps_heading',
         output='screen',
         parameters=[clock_override, {
-            'initial_heading_deg': float(datum.get('initial_heading_deg', 0.0)),
             # sim GPS 노이즈는 ~1 cm(vehicle.xacro)라 실차 기본값 0.3 m는 지나치게
             # 비관적이다. 그대로 두면 기본 기선 0.5 m에서 각도 불확실도가
             # atan(0.3/0.5)=31deg로 튀어 max_head_acc(25deg)에 전부 기각되고 GPS
