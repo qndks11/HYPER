@@ -50,6 +50,10 @@ def generate_launch_description():
     # enabling it is a decision an entrypoint launch file makes on purpose. Turning it on here
     # without also adding drivable_area_layer to the local_costmap plugins in
     # hyper_planner/config/nav2_controller.yaml just publishes a topic nobody reads.
+    sign_class_map_arg = DeclareLaunchArgument(
+        'sign_class_map', default_value="['']",
+        description="YOLO 클래스 이름 -> 신호 값 추가/덮어쓰기. \"['LaneBan:ban']\" 형태")
+
     drivable_area_arg = DeclareLaunchArgument(
         'drivable_area',
         default_value='false',
@@ -119,11 +123,18 @@ def generate_launch_description():
 
     # The /image_raw remap below is object_detection_node's only camera input now -- fed by
     # logitech_camera_publisher_node (usb_camera) or ros_gz_bridge (ros_raw, sim).
+    #
+    # sign_class_map maps YOLO class names onto the sign values mission_manager consumes
+    # (red/green/left_arrow/ban/allow). The node's built-in map covers the class names the
+    # current model uses; set this when a retrained model renames a class, so the sign does
+    # not silently vanish. Entries are "<YoloClass>:<sign>", e.g.
+    #   ros2 launch ... sign_class_map:="['LaneBan:ban','LaneAllow:allow']"
     object_detection_node = Node(
         package='hyper_object_detection',
         executable='object_detection_node',
         parameters=[{
             'model_path': model_path,
+            'sign_class_map': LaunchConfiguration('sign_class_map'),
         }],
         remappings=[('/image_raw', '/camera_object/image_raw')],
         output='screen'
@@ -143,6 +154,7 @@ def generate_launch_description():
     return LaunchDescription([
         lane_input_backend_arg,
         object_input_backend_arg,
+        sign_class_map_arg,
         drivable_area_arg,
         lane_detection_container,
         lane_detection_node,

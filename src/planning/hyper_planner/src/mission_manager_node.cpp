@@ -49,6 +49,22 @@
 //         그대로 남는데, 감속 중의 "낡은 제한"은 항상 실제로 필요한 값보다 빠르기 때문에
 //         이쪽만은 안전한 방향으로 실패하지 않습니다.
 //
+// 분기 -- 차선 안내 표지에 따라 두 경로 중 하나 (branch 스텝)
+//   코스 끝의 갈림길처럼 "표지가 알려 주는 대로 가야 하는" 곳에 씁니다. 웨이포인트 CSV
+//   하나는 한 번 주행해 녹화한 것이라 갈림길을 표현할 수 없으므로(라벨이 CSV를 따라 단조
+//   증가해야 합니다), 갈래마다 CSV를 따로 녹화해 courses로 등록하고 branch가 고릅니다.
+//
+//   판정은 "같은 값이 debounce_frames 연속"입니다. wait_signal의 "허용 목록 안이기만 하면
+//   됨"과 다른데, 분기는 어느 값이 나왔는지가 곧 어느 길이기 때문입니다(pick_branch).
+//
+//   wait_signal과 결정적으로 다른 점은 "못 봤다"의 안전한 답이 없다는 것입니다. 신호등은
+//   못 보면 서 있으면 되지만 갈림길에서는 어디로든 가야 하므로, timeout이 지나면 반드시
+//   default 갈래로 갑니다. 그래서 default가 필수이고 timeout_s는 짧습니다.
+//
+//   prearm도 됩니다. 확인되면 서지 않고 그대로 갈래로 들어가는데, 이때 골 경로는 "지금
+//   위치 -> 분기 지점(지금 코스) -> 고른 갈래의 끝(갈래 코스)"이라 두 코스에 걸칩니다.
+//   그것이 신호등 prearm과의 유일한 차이입니다(try_preempt_for_branch).
+//
 // 장애물 회피는 스텝이 아닙니다 -- MPPI가 local costmap을 보며 해당 drive 스텝 안에서
 // 알아서 처리합니다.
 //
@@ -121,6 +137,15 @@ constexpr double kFeedbackStaleSeconds = 0.5;
 // 진행도 계산용 tf 조회 타임아웃. tick마다 부르므로 골을 보낼 때(tf_timeout_sec, 기본 5초)와
 // 달리 짧아야 합니다 -- 길게 잡으면 tf가 잠깐 비는 동안 타이머가 통째로 멈춥니다.
 constexpr double kProgressTfTimeoutSeconds = 0.1;
+
+// 골 경로를 이룰 구간 하나 = 어느 코스의 어느 웨이포인트 범위(양끝 포함).
+// 보통은 하나지만, 분기를 서지 않고 통과할 때는 main 코스와 갈래 코스 둘이 됩니다.
+struct PathSegment
+{
+  const hyper_planner::Course * course{nullptr};
+  std::size_t begin_index{0};
+  std::size_t end_index{0};
+};
 
 // 경로를 만들다 실패했을 때, 다시 시도해 볼 만한 실패(kRetry: 아직 tf가 없다 등)와
 // 설정이 틀려서 영영 안 될 실패(kInvalid)를 구분합니다.
@@ -255,9 +280,70 @@ private:
     if (!loader.load()) {
       return false;
     }
-    waypoints_ = std::move(loader.waypoints());
+    courses_ = std::move(loader.courses());
     steps_ = std::move(loader.steps());
     return true;
+  }
+
+  // ---------------------------------------------------------------- 코스 접근
+
+  const hyper_planner::Course & course_of(const Step & step) const
+  {
+    return courses_[step.course_id];
+  }
+
+  PathSegment segment_of(const Step & step) const
+  {
+    return PathSegment{&course_of(step), step.begin_index, step.end_index};
+  }
+
+  // ---------------------------------------------------------------- 분기 판정
+
+  // 로그용. "allow -> left_route, ban -> right_route".
+  static std::string branch_values(const Step & branch)
+  {
+    std::string text;
+    for (const auto & branch_case : branch.cases) {
+      if (!text.empty()) {
+        text += ", ";
+      }
+      text += join_values(branch_case.accepted) + " -> " + branch_case.route;
+    }
+    return text;
+  }
+
+  static std::string route_name(const Step & branch, std::size_t target)
+  {
+    for (const auto & branch_case : branch.cases) {
+      if (branch_case.target == target) {
+        return branch_case.route;
+      }
+    }
+    return branch.default_route;
+  }
+
+  // 지금까지 본 신호로 갈래를 고를 수 있으면 true.
+  //
+  // wait_signal의 sign_streak_이 아니라 value_streak_을 쓰는 이유: 신호등은 "허용 목록
+  // 안이기만 하면" 되지만(green이든 left_arrow든 결과가 같습니다), 분기는 *어느 값이*
+  // 확인됐는지가 곧 어느 길로 가느냐입니다. 그래서 같은 값이 연속으로 몇 프레임 나왔는지를
+  // 따로 셉니다. 두 갈래가 번갈아 보이면 어느 쪽도 확정되지 않고, timeout 뒤 default로
+  // 갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다.
+  bool pick_branch(const Step & branch, std::size_t & target, std::string & matched) const
+  {
+    if (value_streak_ < branch.debounce_frames) {
+      return false;
+    }
+    for (const auto & branch_case : branch.cases) {
+      if (std::find(branch_case.accepted.begin(), branch_case.accepted.end(), streak_value_) !=
+        branch_case.accepted.end())
+      {
+        target = branch_case.target;
+        matched = streak_value_;
+        return true;
+      }
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------- 상태 진행
@@ -296,18 +382,39 @@ private:
         phase_ = Phase::kWaiting;
         wait_until_ = now() + rclcpp::Duration::from_seconds(step.timeout_s);
         sign_streak_ = 0;
+        value_streak_ = 0;
         RCLCPP_INFO(
           get_logger(), "%s waiting for '%s' on %s (%d frame(s), timeout %.0f s).",
           progress().c_str(), join_values(step.accepted).c_str(), params_.sign_topic.c_str(),
           step.debounce_frames, step.timeout_s);
         break;
+      case StepType::kBranch:
+        // 분기도 "서서 신호를 본다"는 점은 wait_signal과 같으므로 같은 phase를 씁니다.
+        // 다른 것은 판정 결과입니다 -- 다음 스텝으로 가는 게 아니라 갈래를 고릅니다.
+        phase_ = Phase::kWaiting;
+        wait_until_ = now() + rclcpp::Duration::from_seconds(step.timeout_s);
+        sign_streak_ = 0;
+        value_streak_ = 0;
+        RCLCPP_INFO(
+          get_logger(), "%s branching on %s (%s; %d frame(s), timeout %.0f s -> '%s').",
+          progress().c_str(), params_.sign_topic.c_str(), branch_values(step).c_str(),
+          step.debounce_frames, step.timeout_s, step.default_route.c_str());
+        break;
     }
     publish_status(status_text());
   }
 
+  // 다음 스텝은 항상 Step::next_index입니다. 보통은 바로 다음 스텝이지만, 분기의 갈래
+  // (route)는 마지막에 합류 지점으로 되돌아가거나 미션을 끝냅니다(kEndOfMission).
   void advance()
   {
-    ++step_index_;
+    goto_step(
+      step_index_ < steps_.size() ? steps_[step_index_].next_index : steps_.size());
+  }
+
+  void goto_step(std::size_t index)
+  {
+    step_index_ = index;
     begin_step();
   }
 
@@ -337,25 +444,13 @@ private:
           advance();
         }
         break;
-      case Phase::kWaiting: {
-        const Step & step = steps_[step_index_];
-        if (sign_streak_ >= step.debounce_frames) {
-          RCLCPP_INFO(get_logger(), "Signal '%s' confirmed; going.", last_sign_.c_str());
-          advance();
-        } else if (now() >= wait_until_) {
-          if (params_.proceed_on_signal_timeout) {
-            RCLCPP_WARN(
-              get_logger(),
-              "No '%s' within %.0f s (last saw '%s'). Proceeding anyway -- check the traffic "
-              "light detector.", join_values(step.accepted).c_str(), step.timeout_s,
-              last_sign_.empty() ? "nothing" : last_sign_.c_str());
-            advance();
-          } else {
-            fail("timed out waiting for signal '" + join_values(step.accepted) + "'");
-          }
+      case Phase::kWaiting:
+        if (steps_[step_index_].type == StepType::kBranch) {
+          tick_branch();
+        } else {
+          tick_wait_signal();
         }
         break;
-      }
       case Phase::kBlocked:
         tick_blocked();
         break;
@@ -363,7 +458,7 @@ private:
         update_progress();
         update_prearm();
         // 통과 신호가 확인되면 설 이유가 없으므로 cancel-on-arrival보다 먼저 봅니다.
-        if (!try_preempt_for_signal()) {
+        if (!try_preempt()) {
           check_cancel_on_arrival();
         }
         break;
@@ -401,8 +496,7 @@ private:
     nav_msgs::msg::Path path;
     switch (
       build_path(
-        step.begin_index, step.end_index, step.tail_after_label_m, step.reverse, step.label,
-        path))
+        {segment_of(step)}, step.tail_after_label_m, step.reverse, step.label, path))
     {
       case PathBuild::kOk:
         break;
@@ -413,7 +507,9 @@ private:
         // 사유는 build_path/trim_to_robot이 이미 로그로 남겼습니다. 다음 tick에 다시
         // 시도합니다(오도메트리가 아직 안 올라온 것뿐일 수 있으므로).
         if ((now() - starting_since_).seconds() > params_.server_wait_timeout_sec) {
-          fail("could not locate the vehicle in frame '" + waypoints_.frame_id + "'");
+          fail(
+            "could not locate the vehicle in frame '" +
+            course_of(step).waypoints.frame_id + "'");
         }
         return;
     }
@@ -423,6 +519,57 @@ private:
       progress().c_str(), path.poses.size(), params_.action_name.c_str());
     phase_ = Phase::kDriving;   // 응답이 올 때까지 재전송을 막습니다.
     send_goal(step, path);
+  }
+
+  // ------------------------------------------------------------- 신호 대기/분기
+
+  void tick_wait_signal()
+  {
+    const Step & step = steps_[step_index_];
+    if (sign_streak_ >= step.debounce_frames) {
+      RCLCPP_INFO(get_logger(), "Signal '%s' confirmed; going.", last_sign_.c_str());
+      advance();
+    } else if (now() >= wait_until_) {
+      if (params_.proceed_on_signal_timeout) {
+        RCLCPP_WARN(
+          get_logger(),
+          "No '%s' within %.0f s (last saw '%s'). Proceeding anyway -- check the traffic "
+          "light detector.", join_values(step.accepted).c_str(), step.timeout_s,
+          last_sign_.empty() ? "nothing" : last_sign_.c_str());
+        advance();
+      } else {
+        fail("timed out waiting for signal '" + join_values(step.accepted) + "'");
+      }
+    }
+  }
+
+  // 분기 지점에 서서 차선 안내 신호를 읽고 갈래를 고릅니다.
+  //
+  // wait_signal과 결정적으로 다른 점은 "못 봤다"의 안전한 답이 없다는 것입니다. 신호등은
+  // 못 보면 서 있는 게 안전하지만, 갈림길에서는 어디로든 가야 합니다. 그래서 여기에는
+  // proceed_on_signal_timeout 같은 선택지가 없고 default 갈래로 반드시 갑니다 -- 대신
+  // timeout_s를 짧게 잡습니다(더 기다린다고 더 나은 답이 나오지 않습니다).
+  void tick_branch()
+  {
+    const Step & step = steps_[step_index_];
+    std::size_t target = 0;
+    std::string matched;
+    if (pick_branch(step, target, matched)) {
+      RCLCPP_INFO(
+        get_logger(), "%s branch: '%s' confirmed; taking route '%s'.",
+        progress().c_str(), matched.c_str(), route_name(step, target).c_str());
+      goto_step(target);
+      return;
+    }
+    if (now() >= wait_until_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "%s branch: no lane sign confirmed within %.0f s (last saw '%s'). Taking the default "
+        "route '%s' -- check the sign detector.",
+        progress().c_str(), step.timeout_s, last_sign_.empty() ? "nothing" : last_sign_.c_str(),
+        step.default_route.c_str());
+      goto_step(step.default_target);
+    }
   }
 
   // ------------------------------------------------------------------ 막힘 처리
@@ -481,21 +628,51 @@ private:
   // 세그먼트 경로를 만들어 차량의 현재 위치에 맞춰 다듬습니다. 실패 사유는 여기서 로그로
   // 남기므로, 호출자는 kRetry / kInvalid만 보고 어떻게 할지 정하면 됩니다.
   //
+  // 세그먼트를 여러 개 받는 이유는 분기 prearm 때문입니다. 갈래로 서지 않고 들어갈 때의
+  // 골은 "지금 위치 -> 분기 지점(main 코스) -> 고른 갈래의 끝(갈래 코스)"이라 두 코스에
+  // 걸칩니다. 세그먼트가 하나면 예전과 똑같이 동작합니다.
+  //
   // tail_m > 0이면 라벨 뒤로 그만큼 직선 꼬리를 덧붙입니다(decel 프로파일). 꼬리는
   // trim_to_robot보다 먼저 붙입니다 -- 그래야 그 안의 resample이 꼬리까지 같은 간격으로
   // 다시 깔아 주고(MPPI의 경로 critic은 '미터'가 아니라 '점 개수'로 셉니다), 그러면서도
   // 꼭짓점을 옮기지 않으므로 꼬리 길이는 tail_m 그대로 남습니다. set_stop_point가 라벨을
   // 되찾을 때 그 길이에 의존합니다.
   PathBuild build_path(
-    std::size_t begin_index, std::size_t end_index, double tail_m, bool reverse,
+    const std::vector<PathSegment> & segments, double tail_m, bool reverse,
     const std::string & label, nav_msgs::msg::Path & path)
   {
-    path = hyper_planner::make_path(
-      waypoints_.points, begin_index, end_index, waypoints_.frame_id, now(), reverse);
+    path = nav_msgs::msg::Path{};
+    path.header.frame_id = segments.front().course->waypoints.frame_id;
+    path.header.stamp = now();
+
+    for (const PathSegment & segment : segments) {
+      const nav_msgs::msg::Path part = hyper_planner::make_path(
+        segment.course->waypoints.points, segment.begin_index, segment.end_index,
+        path.header.frame_id, path.header.stamp, reverse);
+      if (part.poses.size() < 2) {
+        RCLCPP_ERROR(
+          get_logger(), "Segment for '%s' (course '%s', wp #%zu..#%zu) has fewer than 2 poses.",
+          label.c_str(), segment.course->name.c_str(), segment.begin_index, segment.end_index);
+        return PathBuild::kInvalid;
+      }
+      // 이음매의 중복점 하나를 버립니다. 같은 코스를 이어 붙일 때 앞 세그먼트의 끝과 뒤
+      // 세그먼트의 시작이 같은 웨이포인트이고, 갈래 CSV를 분기 지점에서 정확히 시작해
+      // 녹화했을 때도 그렇습니다. 떨어져 있으면(이음매가 있으면) 아무것도 안 버립니다.
+      std::size_t first = 0;
+      if (!path.poses.empty()) {
+        const auto & tail = path.poses.back().pose.position;
+        const auto & head = part.poses.front().pose.position;
+        if (std::hypot(head.x - tail.x, head.y - tail.y) < 1e-6) {
+          first = 1;
+        }
+      }
+      path.poses.insert(
+        path.poses.end(), part.poses.begin() + static_cast<std::ptrdiff_t>(first),
+        part.poses.end());
+    }
     if (path.poses.size() < 2) {
       RCLCPP_ERROR(
-        get_logger(), "Segment for '%s' (wp #%zu..#%zu) has fewer than 2 poses.",
-        label.c_str(), begin_index, end_index);
+        get_logger(), "Path for '%s' has fewer than 2 poses.", label.c_str());
       return PathBuild::kInvalid;
     }
 
@@ -609,11 +786,12 @@ private:
   // 좌표를 쓰고, 그게 없으면(끝 인덱스가 CSV 범위 밖) 경로의 마지막 점으로 대신합니다.
   void set_stop_point(const Step & step, const nav_msgs::msg::Path & path)
   {
+    const auto & points = course_of(step).waypoints.points;
     double stop_x = 0.0;
     double stop_y = 0.0;
-    if (step.end_index < waypoints_.points.size()) {
-      stop_x = waypoints_.points[step.end_index].x;
-      stop_y = waypoints_.points[step.end_index].y;
+    if (step.end_index < points.size()) {
+      stop_x = points[step.end_index].x;
+      stop_y = points[step.end_index].y;
     } else if (!path.poses.empty()) {
       stop_x = path.poses.back().pose.position.x;
       stop_y = path.poses.back().pose.position.y;
@@ -633,7 +811,7 @@ private:
     return has_superseded_goal_ && handle && handle->get_goal_id() == superseded_goal_id_;
   }
 
-  // 지금 실행 중인 골에 다가가는 동안 다음 wait_signal의 신호를 미리 볼지 정합니다.
+  // 지금 실행 중인 골에 다가가는 동안 다음 wait_signal/branch의 신호를 미리 볼지 정합니다.
   void update_prearm()
   {
     const Step & step = steps_[step_index_];
@@ -641,16 +819,30 @@ private:
       progress_.distance_to_stop_m() <= step.prearm_distance_m;
 
     if (in_range && !prearmed_) {
-      // 진입하는 순간 streak을 비웁니다. 멀리서 -- 신호등이 아직 몇 픽셀일 때 -- 우연히
-      // 쌓인 연속 프레임이 그대로 통과 판정으로 이어지지 않게 하려는 것입니다.
+      // 진입하는 순간 streak을 비웁니다. 멀리서 -- 표지가 아직 몇 픽셀일 때 -- 우연히
+      // 쌓인 연속 프레임이 그대로 통과/분기 판정으로 이어지지 않게 하려는 것입니다.
       sign_streak_ = 0;
+      value_streak_ = 0;
+      const Step & watched = steps_[step.prearm_wait_step];
+      const std::string looking_for = watched.type == StepType::kBranch
+        ? branch_values(watched) : join_values(watched.accepted);
       RCLCPP_INFO(
         get_logger(), "%s %.1f m from '%s'; watching %s for '%s'.",
         progress().c_str(), progress_.distance_to_stop_m(), step.label.c_str(),
-        params_.sign_topic.c_str(),
-        join_values(steps_[step.prearm_wait_step].accepted).c_str());
+        params_.sign_topic.c_str(), looking_for.c_str());
     }
     prearmed_ = in_range;
+  }
+
+  // 지금 스텝이 미리 보고 있는 것이 신호등인지 분기인지에 따라 갈라 줍니다.
+  bool try_preempt()
+  {
+    const Step & step = steps_[step_index_];
+    if (!step.prearm_enabled) {
+      return false;
+    }
+    return steps_[step.prearm_wait_step].type == StepType::kBranch
+      ? try_preempt_for_branch() : try_preempt_for_signal();
   }
 
   // 통과 신호가 확인되면 정지 없이 그대로 통과합니다. 실행 중인 골을 "지금 위치 -> 다음
@@ -671,10 +863,20 @@ private:
 
     const std::size_t merge_index = step.prearm_merge_step;
     const Step & merge_step = steps_[merge_index];
+
+    // 두 세그먼트가 같은 코스에서 이어지는 것이 보통입니다(정지선 앞뒤). 그때는 예전처럼
+    // 하나의 연속 구간으로 만듭니다.
+    std::vector<PathSegment> segments;
+    if (step.course_id == merge_step.course_id) {
+      segments.push_back({&course_of(step), step.begin_index, merge_step.end_index});
+    } else {
+      segments.push_back(segment_of(step));
+      segments.push_back(segment_of(merge_step));
+    }
+
     nav_msgs::msg::Path path;
     if (build_path(
-        step.begin_index, merge_step.end_index, merge_step.tail_after_label_m, false,
-        merge_step.label, path) != PathBuild::kOk)
+        segments, merge_step.tail_after_label_m, false, merge_step.label, path) != PathBuild::kOk)
     {
       // 다음 tick에 다시 시도합니다. 끝내 못 만들면 prearm이 그냥 안 일어나고, 원래 골
       // 그대로 정지선에 서서 wait_signal이 처리합니다 -- 안전한 쪽으로 실패합니다.
@@ -697,7 +899,61 @@ private:
     retries_ = 0;
     prearmed_ = false;
     sign_streak_ = 0;
+    value_streak_ = 0;
     send_goal(merge_step, path);
+    return true;
+  }
+
+  // 분기의 prearm -- 차선 안내 신호가 확인되면 서지 않고 그대로 갈래로 들어갑니다.
+  //
+  // 신호등 prearm과 다른 점은 이어 붙일 구간이 두 코스에 걸친다는 것뿐입니다. 골 경로는
+  // "지금 위치 -> 분기 지점(지금 스텝의 코스) -> 고른 갈래의 끝(갈래 코스)"입니다. 갈래
+  // CSV의 첫 점이 실제로 분기 지점에 붙어 있는지는 로드 시점에 이미 검사했으므로
+  // (mission_loader.hpp의 check_branch_seams) 여기서 이음매를 다시 재지 않습니다.
+  //
+  // 확인이 안 되면 아무 일도 일어나지 않고 원래 골 그대로 분기 지점에 섭니다. 그러면
+  // branch 스텝이 서서 신호를 읽고, 그래도 못 읽으면 default 갈래로 갑니다.
+  bool try_preempt_for_branch()
+  {
+    const Step & step = steps_[step_index_];
+    if (!prearmed_ || !goal_handle_ || arrival_requested_) {
+      return false;
+    }
+    const Step & branch = steps_[step.prearm_wait_step];
+    std::size_t target = 0;
+    std::string matched;
+    if (!pick_branch(branch, target, matched)) {
+      return false;
+    }
+
+    const Step & route_step = steps_[target];
+    nav_msgs::msg::Path path;
+    const std::vector<PathSegment> segments{segment_of(step), segment_of(route_step)};
+    if (build_path(
+        segments, route_step.tail_after_label_m, false, route_step.label,
+        path) != PathBuild::kOk)
+    {
+      // 다음 tick에 다시 시도합니다. 끝내 못 만들면 분기 지점에 서서 고릅니다.
+      return false;
+    }
+
+    RCLCPP_INFO(
+      get_logger(),
+      "%s '%s' confirmed %.1f m before '%s'; taking route '%s' without stopping "
+      "(%zu-pose path across courses '%s' -> '%s' preempts the running goal).",
+      progress().c_str(), matched.c_str(), progress_.distance_to_stop_m(), step.label.c_str(),
+      route_name(branch, target).c_str(), path.poses.size(), course_of(step).name.c_str(),
+      course_of(route_step).name.c_str());
+
+    superseded_goal_id_ = goal_handle_->get_goal_id();
+    has_superseded_goal_ = true;
+
+    step_index_ = target;
+    retries_ = 0;
+    prearmed_ = false;
+    sign_streak_ = 0;
+    value_streak_ = 0;
+    send_goal(route_step, path);
     return true;
   }
 
@@ -853,7 +1109,7 @@ private:
         double distance = 0.0;
         // goal checker 공차를 아슬아슬하게 못 맞춰 progress checker에 걸린 경우
         // 차는 사실상 도착해 있습니다. 같은 골을 반복해 보내며 시간을 버리지 않습니다.
-        if (distance_to_waypoint(step.end_index, distance) && distance <= params_.arrival_slack_m) {
+        if (distance_to_waypoint(step, distance) && distance <= params_.arrival_slack_m) {
           RCLCPP_WARN(
             get_logger(),
             "%s aborted, but the vehicle is %.2f m from '%s' (within arrival_slack_m %.2f). "
@@ -987,17 +1243,18 @@ private:
     }
   }
 
-  bool distance_to_waypoint(std::size_t index, double & distance_m)
+  bool distance_to_waypoint(const Step & step, double & distance_m)
   {
+    const hyper_planner::Course & course = course_of(step);
     geometry_msgs::msg::PoseStamped robot;
-    if (index >= waypoints_.points.size() ||
-      !lookup_robot_pose(waypoints_.frame_id, robot, params_.tf_timeout_sec))
+    if (step.end_index >= course.waypoints.points.size() ||
+      !lookup_robot_pose(course.waypoints.frame_id, robot, params_.tf_timeout_sec))
     {
       return false;
     }
     distance_m = std::hypot(
-      waypoints_.points[index].x - robot.pose.position.x,
-      waypoints_.points[index].y - robot.pose.position.y);
+      course.waypoints.points[step.end_index].x - robot.pose.position.x,
+      course.waypoints.points[step.end_index].y - robot.pose.position.y);
     return true;
   }
 
@@ -1007,16 +1264,25 @@ private:
   {
     last_sign_ = value;
 
-    // 신호를 세는 상황은 둘입니다. kWaiting은 정지선에 서서 기다리는 중이고,
-    // kDriving + prearmed_는 정지선으로 다가가며 미리 보는 중입니다. 어느 쪽이든
-    // 기준이 되는 값은 wait_signal 스텝에 적힌 accepted입니다.
+    // 값별 연속 프레임 수. 스텝 종류와 무관하게 항상 셉니다 -- branch는 "허용 목록 안인가"가
+    // 아니라 "어느 값이 확인됐는가"로 갈래를 고르기 때문입니다(pick_branch 참고).
+    if (value == streak_value_) {
+      ++value_streak_;
+    } else {
+      streak_value_ = value;
+      value_streak_ = 1;
+    }
+
+    // 아래는 wait_signal 전용 카운터입니다. 신호를 세는 상황은 둘입니다. kWaiting은
+    // 정지선에 서서 기다리는 중이고, kDriving + prearmed_는 정지선으로 다가가며 미리 보는
+    // 중입니다. 어느 쪽이든 기준이 되는 값은 wait_signal 스텝에 적힌 accepted입니다.
     const Step * wait_step = nullptr;
     if (phase_ == Phase::kWaiting) {
       wait_step = &steps_[step_index_];
     } else if (phase_ == Phase::kDriving && prearmed_) {
       wait_step = &steps_[steps_[step_index_].prearm_wait_step];
     }
-    if (wait_step == nullptr) {
+    if (wait_step == nullptr || wait_step->type != StepType::kWaitSignal) {
       return;
     }
 
@@ -1122,8 +1388,13 @@ private:
     std::string text = progress() + " " + type_name(step.type);
     if (step.type == StepType::kDrive) {
       text += " until=" + step.label;
+      if (courses_.size() > 1) {
+        text += " course=" + course_of(step).name;
+      }
     } else if (step.type == StepType::kWaitSignal) {
       text += " value=" + join_values(step.accepted);
+    } else if (step.type == StepType::kBranch) {
+      text += " cases=" + branch_values(step) + " default=" + step.default_route;
     }
     return text;
   }
@@ -1142,7 +1413,9 @@ private:
   mission_manager::Params params_;
   bool params_logged_once_{false};
 
-  hyper_planner::WaypointFile waypoints_;
+  // 미션이 쓰는 코스들. 분기(branch)가 없으면 [0] = "main" 하나뿐이고, 그때 동작은
+  // 코스가 하나였던 때와 완전히 같습니다.
+  std::vector<hyper_planner::Course> courses_;
   std::vector<Step> steps_;
 
   Phase phase_{Phase::kIdle};
@@ -1164,6 +1437,10 @@ private:
   rclcpp::Time blocked_retry_at_;
   int sign_streak_{0};
   std::string last_sign_;
+  // 같은 값이 연속으로 몇 프레임 나왔는지. branch가 갈래를 고를 때 씁니다(sign_streak_은
+  // "허용 목록 안이었는가"라 어느 값이었는지를 잃습니다).
+  std::string streak_value_;
+  int value_streak_{0};
   // 지금 실행 중인 drive 스텝에서 신호를 미리 보는 중인지.
   bool prearmed_{false};
 

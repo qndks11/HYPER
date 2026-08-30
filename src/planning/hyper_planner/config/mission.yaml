@@ -20,8 +20,19 @@
 # mission_manager는 로드 시점에 각 label을 CSV의 최근접 웨이포인트로 스냅하고,
 # 스냅 거리가 label_snap_tolerance_m를 넘으면 미션을 거부합니다(라벨이 엉뚱한 데
 # 붙은 채로 주행이 시작되는 사고 방지).
+#
+# 갈림길이 있으면 세 번째 부분이 붙습니다.
+#   courses: "어느 코스"  -- 갈래마다 따로 녹화한 CSV와 그 CSV의 labels
+#   routes:  "고르면 무엇을" -- branch가 고를 수 있는 스텝 시퀀스들
+# 자세한 것은 아래 `branch` 스텝 설명과 파일 끝의 예시를 보세요. courses를 안 쓰면
+# 코스는 waypoint_csv 하나("main")뿐이고 동작은 분기 기능이 없던 때와 같습니다.
 
 label_snap_tolerance_m: 1.0
+
+# 갈래 CSV의 첫 점이 분기 지점에서 이만큼 넘게 떨어져 있으면 미션을 거부합니다.
+# label_snap_tolerance_m와 같은 취지입니다 -- 어긋난 채로 달리면 차가 분기 지점에서
+# 갈래 CSV의 첫 점까지 직선으로 가로지릅니다. 분기를 안 쓰면 아무 일도 안 합니다.
+branch_seam_tolerance_m: 2.0
 
 # --- label_waypoints.py가 관리하는 블록 (아래 주석 참고) ---
 labels:
@@ -144,6 +155,33 @@ labels:
 #                정하세요. vx_max를 2.5로 내리면서 같은 거리가 2.4배 긴 시간이 됐으므로,
 #                신호 주기가 짧다면 prearm_distance_m를 6~8 m로 줄이는 것을 검토하세요.
 #
+#   branch       차선 안내 신호를 보고 두 갈래(routes) 중 하나를 골라 그리로 갑니다.
+#                코스 끝의 갈림길처럼 "표지가 알려 주는 대로 가야 하는" 곳에 씁니다.
+#
+#                wait_signal과 결정적으로 다른 점은 "못 봤다"의 안전한 답이 없다는 것입니다.
+#                신호등은 못 보면 서 있으면 되지만 갈림길에서는 어디로든 가야 합니다.
+#                그래서 `default`가 필수이고, timeout_s는 신호등의 60초와 달리 짧게 잡습니다
+#                (더 기다린다고 더 나은 답이 나오지 않습니다). 못 고르고 timeout이 지나면
+#                경고를 남기고 default 갈래로 갑니다.
+#
+#                판정은 "같은 값이 debounce_frames 연속"입니다. wait_signal의 "허용 목록
+#                안이기만 하면 됨"과 다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기
+#                때문입니다. 두 표지가 번갈아 보이면 어느 쪽도 확정되지 않고 default로
+#                갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다.
+#
+#                prearm_distance_m: wait_signal과 같습니다. 0보다 크면 앞 drive 스텝의 골까지
+#                이만큼 남았을 때부터 표지를 미리 보고, 확인되면 서지 않고 그대로 갈래로
+#                들어갑니다(골을 "지금 위치 -> 분기 지점 -> 고른 갈래의 끝"으로 갈아끼웁니다).
+#                확인이 안 되면 원래 골 그대로 분기 지점에 서고, 거기서 branch가 다시 봅니다.
+#
+#                cases의 value에 쉼표를 넣어 한 갈래에 여러 값을 허용할 수 있습니다.
+#                같은 값이 두 갈래에 나오면 로드 시점에 거부합니다(어디로 갈지가 순서에
+#                숨는 것을 막습니다).
+#
+#                갈래(routes)가 끝나면 branch 뒤의 main 스텝으로 합류하고, branch가 main의
+#                마지막 스텝이면 미션이 끝납니다. route 안에 또 branch를 두는 것은 지원하지
+#                않습니다(합류 지점이 모호해집니다).
+#
 # 장애물 회피는 step이 아닙니다 -- 이미 MPPI costmap 안에서 처리되므로
 # 해당 구간 drive step 안에서 자동으로 일어납니다.
 steps:
@@ -216,3 +254,56 @@ steps:
   # 아니라 직선 외삽이라 여기서도 12 m가 그대로 붙습니다.
   - {type: drive, until: finish, goal_checker: precise_goal_checker,
      cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+# ---------------------------------------------------------------------------
+# 9) 차선 안내 표지에 따른 분기 (아직 안 켬)
+#
+# 코스 끝의 갈림길에서 표지가 "ban"(진입 금지) / "allow"(진입 허용) 중 하나를 띄우고,
+# 그에 따라 두 차선 중 하나로 들어가는 구간입니다. 켜려면 세 가지가 필요합니다.
+#
+#   1. 갈래 CSV 두 개를 녹화합니다. 둘 다 *분기 지점에서 시작*해야 합니다 -- 첫 점이
+#      분기 라벨에서 branch_seam_tolerance_m(2 m)보다 멀면 미션 로드가 거부됩니다.
+#      파일은 sim.csv 옆(hyper_waypoint/waypoints/)에 두세요. 아래처럼 파일 이름만 적으면
+#      main CSV가 있는 디렉터리에서 찾으므로, waypoint_csv:=.../real.csv로 실차 코스를
+#      실을 때 갈래 CSV도 real 쪽으로 같이 따라갑니다.
+#
+#   2. 갈래마다 끝 라벨을 찍습니다. 아래는 "녹화한 데까지 다 간다"는 뜻의 `last`
+#      센티널을 썼습니다(simple.yaml의 course_end와 같습니다). 코스 끝보다 앞에서
+#      끝내야 하면 label_waypoints.py로 좌표를 찍으세요.
+#
+#   3. object_detection이 ban/allow를 내보내야 합니다. YOLO 클래스 이름이 아래
+#      SIGNAL_MAP의 후보('Ban'/'NoEntry'/'Allow'/'Entry')와 다르면 런치에서
+#      sign_class_map 파라미터로 맞추세요 -- 안 맞으면 그 클래스는 무시되고
+#      (경고 로그가 한 번 납니다) 차는 항상 default 갈래로 갑니다.
+#
+# 켤 때는 위 finish 스텝을 lane_fork까지로 줄이고 아래 블록의 주석을 벗기세요.
+#
+# courses:
+#   lane_allow:
+#     csv: sim_lane_allow.csv
+#     labels:
+#       lane_allow_end: last
+#   lane_ban:
+#     csv: sim_lane_ban.csv
+#     labels:
+#       lane_ban_end: last
+#
+# steps: (finish 스텝 대신)
+#   - {type: drive, until: lane_fork, goal_checker: precise_goal_checker,
+#      cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+#   - type: branch
+#     default: ban_route          # 표지를 못 읽었을 때 갈 곳. 필수입니다.
+#     timeout_s: 8.0              # 신호등의 60초와 달리 짧게 -- 더 기다려도 답이 안 나옵니다.
+#     debounce_frames: 3
+#     prearm_distance_m: 12.0     # 서지 않고 그대로 갈래로 들어갑니다. 0이면 서서 읽습니다.
+#     cases:
+#       - {value: "allow", goto: allow_route}
+#       - {value: "ban",   goto: ban_route}
+#
+# routes:
+#   allow_route:
+#     - {type: drive, course: lane_allow, until: lane_allow_end,
+#        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+#   ban_route:
+#     - {type: drive, course: lane_ban, until: lane_ban_end,
+#        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}

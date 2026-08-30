@@ -166,6 +166,68 @@ prearm만 끕니다.
 **주의**: 갈아끼우기는 되돌릴 수 없습니다. 통과 판정이 나면 그 자리에서 신호를 더 이상 보지 않으므로,
 통과한 뒤 초록 -> 빨강으로 바뀌어도 그대로 지나갑니다. 15 m / 6 m/s면 약 2.5초의 노출입니다.
 
+### branch 스텝 -- 차선 안내 표지에 따라 두 갈래 중 하나
+
+코스 끝의 갈림길에서 표지가 알려 주는 대로 두 경로 중 하나를 고릅니다. 웨이포인트 CSV 하나는 "한 번
+주행해 녹화한 것"이라 갈림길을 표현할 수 없으므로(라벨이 CSV를 따라 단조 증가해야 합니다), 갈래마다
+CSV를 따로 녹화하고 `courses:`로 등록합니다.
+
+```yaml
+courses:
+  lane_allow: {csv: sim_lane_allow.csv, labels: {lane_allow_end: last}}
+  lane_ban:   {csv: sim_lane_ban.csv,   labels: {lane_ban_end: last}}
+
+steps:
+  - {type: drive, until: lane_fork, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - type: branch
+    default: ban_route        # 표지를 못 읽었을 때 갈 곳. 필수입니다.
+    timeout_s: 8.0
+    debounce_frames: 3
+    prearm_distance_m: 12.0   # 서지 않고 그대로 갈래로 들어갑니다.
+    cases:
+      - {value: "allow", goto: allow_route}
+      - {value: "ban",   goto: ban_route}
+
+routes:
+  allow_route:
+    - {type: drive, course: lane_allow, until: lane_allow_end, ...}
+  ban_route:
+    - {type: drive, course: lane_ban, until: lane_ban_end, ...}
+```
+
+**라벨은 코스마다 독립입니다.** 최상위 `labels:`는 `main` 코스(= `waypoint_csv`)의 것이고
+-- `label_waypoints.py`가 그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 갈래 코스는
+`courses.<이름>.labels`를 씁니다. `drive` 스텝은 자기 `course:`의 라벨만 찾습니다.
+
+**CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) mission.yaml이 있는 디렉터리,
+(3) 준 그대로 순으로 찾습니다. 갈래 CSV를 `sim.csv` 옆에 두고 파일 이름만 적으면
+`waypoint_csv:=.../real.csv`로 실차 코스를 실을 때 갈래도 같이 따라갑니다.
+
+**갈래 CSV는 반드시 분기 지점에서 시작해야 합니다.** 첫 점이 분기 라벨에서
+`branch_seam_tolerance_m`(기본 2 m)보다 멀면 로드가 **거부**됩니다. 안 그러면 차가 분기 지점에서
+갈래 CSV의 첫 점까지 직선(lead-in)으로 코스를 가로지릅니다 -- 라벨 스냅 허용치와 같은 취지입니다.
+
+**판정은 "같은 값이 `debounce_frames` 연속"입니다.** `wait_signal`의 "허용 목록 안이기만 하면 됨"과
+다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기 때문입니다. 두 표지가 번갈아 보이면 어느 쪽도
+확정되지 않고 `default` 갈래로 갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다. 같은 값이 두 `cases`에
+나오면 로드 시점에 거부합니다.
+
+**`default`가 필수인 이유**: `wait_signal`은 못 보면 서 있으면 되지만(그게 안전), 갈림길에서는
+어디로든 가야 합니다. 그래서 `proceed_on_signal_timeout` 같은 선택지가 없고 timeout이 지나면 반드시
+`default`로 갑니다. 대신 `timeout_s`는 신호등의 60초와 달리 짧게 잡으세요 -- 더 기다린다고 더 나은
+답이 나오지 않습니다.
+
+**`prearm_distance_m`**는 `wait_signal`과 같습니다. 확인되면 서지 않고 그대로 갈래로 들어갑니다:
+골을 "지금 위치 -> 분기 지점(main 코스) -> 고른 갈래의 끝(갈래 코스)"으로 갈아끼웁니다. 두 코스에
+걸친 경로를 한 골로 만드는 것이 신호등 prearm과의 유일한 차이입니다. 확인이 안 되면 원래 골 그대로
+분기 지점에 서고, 거기서 `branch` 스텝이 다시 봅니다.
+
+갈래가 끝나면 `branch` 뒤의 main 스텝으로 **합류**하고, `branch`가 main의 마지막 스텝이면 미션이
+끝납니다. route 안에 또 `branch`를 두는 것은 지원하지 않습니다(합류 지점이 모호해집니다).
+
+표지 값(`ban` / `allow`)은 `hyper_object_detection`이 냅니다 -- YOLO 클래스 이름이 다르면
+`sign_class_map` 파라미터로 맞추세요(그 패키지의 README 참고).
+
 ### 후진 세그먼트 (`reverse: true`)
 
 주차는 후진으로 녹화한 구간을 되짚어 갑니다. 이 구간은 MPPI가 아니라 RPP를 씁니다
