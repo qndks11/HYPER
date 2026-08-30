@@ -25,10 +25,10 @@
     # a command outside what it was tuned for. These also define the ROS-side end
     # of the linear mapping to PWM duty on the Arduino (see hyper_motor_interface.ino).
     max_velocity: 1.0 # 저속 테스트용으로 하향. hyper_control과 동일하게 맞춤 [m/s]
-    max_steering_angle: 0.5235988 # ~30 deg [rad]
+    max_steering_angle: 0.5061455 # 29 deg (실측) [rad]
 
     # Front-to-rear axle distance, used for the bicycle-model yaw rate
     # published on /odom (see arduino_interface_node.py's _publish_odom()).
     # Measured by hand on the vehicle. Re-measure and update if the chassis
     # changes.
-    wheel_base: 0.73 # [m]
+    wheel_base: 0.72 # [m]

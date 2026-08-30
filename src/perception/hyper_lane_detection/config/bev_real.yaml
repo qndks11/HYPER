@@ -33,22 +33,18 @@
       cx: 281.71746988
       cy: 184.49891651
 
-      # !! UNMEASURED -- these are the intended mounting pose from hyper_control's
-      # parameters.yaml (camera_height / camera_pitch, and camera_setback resolved against
-      # body_length), not a measurement of where the camera ended up on the built car. The
-      # homography is only as correct as they are: an error here tilts or scales the whole ground
-      # plane, and pitch is by far the most sensitive of the three. Measure the real mount and
-      # replace these before trusting any distance this node publishes on the vehicle.
+      # 2026-08-30 실측 반영 (지면 -> 광학중심 높이, 하향각 직접 측정).
       #
-      # !! When you do measure it, measure camera_height from the GROUND, not from body_link.
-      # parameters.yaml's camera_height is the camera joint's z in body_link, which is a different
-      # datum -- in the sim model body_link rides 0.3 m up on its wheels, so the same mount is
-      # 1.2 there and 1.5 here. Taking the body_link number as a ground height is exactly the bug
-      # that drew the sim overlay at 0.80x true distance; the real car has its own ride height and
-      # the same trap. dx scales linearly with this number.
-      camera_height: 1.2              # [m] optical center above the ground
-      camera_pitch: 0.2617994         # [rad] downward tilt (15 deg)
-      camera_longitudinal_offset: 0.145   # [m] ahead of body_link's origin
+      # camera_longitudinal_offset은 직접 잰 값이 아니라 변환값입니다: 실측은 "차량 앞단
+      # (범퍼)에서 카메라까지 뒤로 간 거리"(= hyper_control/parameters.yaml의 camera_setback
+      # 정의와 동일, 실측 0.64 m)이고, 이 필드는 body_link 원점 기준 전방 거리라 아래 식으로
+      # 변환했습니다 (body_length는 실측 1.33 m, camera_box_size는 아직 실측 전 placeholder
+      # 0.05 m -- 나중에 하우징 크기를 실측하면 이 계산도 다시 해야 합니다):
+      #   offset = body_length/2 - camera_box_size/2 - camera_setback
+      #          = 1.33/2 - 0.05/2 - 0.64 = 0.0 m
+      camera_height: 1.27             # [m] optical center above the ground (실측)
+      camera_pitch: 0.192             # [rad] downward tilt (실측, 약 11도)
+      camera_longitudinal_offset: 0.0   # [m] ahead of body_link's origin (위 변환식 참고)
 
       # Ground patch to render, in meters ahead of / either side of body_link, and the scale to
       # render it at. Same values the sim front camera uses -- see this file's header.
