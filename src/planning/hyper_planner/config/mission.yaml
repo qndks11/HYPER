@@ -271,10 +271,10 @@ steps:
 #      센티널을 썼습니다(simple.yaml의 course_end와 같습니다). 코스 끝보다 앞에서
 #      끝내야 하면 label_waypoints.py로 좌표를 찍으세요.
 #
-#   3. object_detection이 ban/allow를 내보내야 합니다. YOLO 클래스 이름이 아래
-#      SIGNAL_MAP의 후보('Ban'/'NoEntry'/'Allow'/'Entry')와 다르면 런치에서
-#      sign_class_map 파라미터로 맞추세요 -- 안 맞으면 그 클래스는 무시되고
-#      (경고 로그가 한 번 납니다) 차는 항상 default 갈래로 갑니다.
+#   3. object_detection이 ban/allow를 내보내야 합니다. 현재 models/best.pt는 'Ban'/'Allow'
+#      클래스를 가지고 있고 SIGNAL_MAP이 그대로 받으므로 추가 설정이 없습니다. 모델을
+#      다시 학습해 이름이 바뀌면 런치의 sign_class_map으로 맞추세요 -- 안 맞으면 그
+#      클래스는 무시되고(경고 로그가 한 번 납니다) 차는 항상 default 갈래로 갑니다.
 #
 # 켤 때는 위 finish 스텝을 lane_fork까지로 줄이고 아래 블록의 주석을 벗기세요.
 #

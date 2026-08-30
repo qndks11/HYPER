@@ -30,9 +30,11 @@ class ObjectDetection(Node):
 
     # YOLO 모델의 클래스 이름 -> 위 신호 값.
     #
-    # 여기 없는 클래스는 "신호가 아닌 것"(자동차, 사람 등)으로 보고 무시합니다. 학습 모델의
-    # 클래스 이름이 바뀌면 신호가 조용히 사라지므로, 무시한 이름은 한 번씩 경고로 남깁니다
-    # (아래 _map_class). 코드를 안 고치고 맞추려면 sign_class_map 파라미터를 쓰세요.
+    # models/best.pt가 실제로 가진 클래스는 여섯입니다:
+    #   Allow, Ban, Go, LeftTurn, Stop, Warn
+    # 아래 매핑은 그 여섯을 전부 덮습니다. 모델을 다시 학습해 이름이 바뀌면 그 신호가
+    # 조용히 사라지므로, 매핑에 없는 이름은 한 번씩 경고로 남깁니다(아래 _map_class).
+    # 코드를 안 고치고 맞추려면 sign_class_map 파라미터를 쓰세요.
     SIGNAL_MAP = {
         # 빨간불
         'Stop': 'red',
@@ -43,15 +45,17 @@ class ObjectDetection(Node):
         # 좌회전 화살표
         'LeftTurn': 'left_arrow',
 
-        # Yellow light
+        # 황색등. 'none'으로 두는 것은 "무시"가 아니라 "통과 신호가 아니다"입니다 --
+        # 매핑에서 빼면 이 박스가 중앙 선택에서 아예 제외되어, 화면 가장자리의 다른
+        # 표지가 대신 뽑힐 수 있습니다. 'none'이면 황색등이 중앙을 차지한 채 통과
+        # 신호가 아님을 알리므로, wait_signal의 연속 프레임이 거기서 끊깁니다.
+        # ('Yellow'는 예전 모델의 이름입니다. 지금 모델은 'Warn'을 씁니다.)
+        'Warn': 'none',
         'Yellow': 'none',
 
-        # 차선 안내 표지 -- 실제 학습 모델의 클래스 이름에 맞춰 넣은 후보들입니다.
-        # 모델이 다른 이름을 쓰면 sign_class_map 파라미터로 덮어쓰세요.
+        # 차선 안내 표지 -- 코스 끝 갈림길에서 branch 스텝이 봅니다.
         'Ban': 'ban',
-        'NoEntry': 'ban',
         'Allow': 'allow',
-        'Entry': 'allow',
     }
 
     def __init__(self):

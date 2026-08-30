@@ -35,10 +35,22 @@ ros2 launch hyper_object_detection perception.launch.py
 
 ### YOLO 클래스 이름 맞추기 (`sign_class_map`)
 
-내장 매핑은 `SIGNAL_MAP`에 있습니다: `Stop`->`red`, `Go`->`green`, `LeftTurn`->`left_arrow`,
-`Yellow`->`none`, 그리고 차선 안내 후보로 `Ban`/`NoEntry`->`ban`, `Allow`/`Entry`->`allow`.
+현재 `models/best.pt`가 가진 클래스는 여섯입니다 -- `Allow`, `Ban`, `Go`, `LeftTurn`, `Stop`,
+`Warn`. `SIGNAL_MAP`이 그 여섯을 전부 덮습니다.
 
-**학습 모델의 클래스 이름이 이와 다르면 그 신호는 무시됩니다.** 코드를 고치지 않고 맞추려면:
+| YOLO 클래스 | 신호 값 |
+| --- | --- |
+| `Stop` | `red` |
+| `Go` | `green` |
+| `LeftTurn` | `left_arrow` |
+| `Warn` (구 `Yellow`) | `none` |
+| `Ban` | `ban` |
+| `Allow` | `allow` |
+
+황색등을 `none`으로 두는 것은 "무시"가 아니라 "통과 신호가 아니다"입니다. 매핑에서 빼면 그 박스가
+중앙 선택에서 아예 제외되어 화면 가장자리의 다른 표지가 대신 뽑힐 수 있습니다.
+
+**모델을 다시 학습해 클래스 이름이 바뀌면 그 신호는 무시됩니다.** 코드를 고치지 않고 맞추려면:
 
 ```bash
 ros2 run hyper_object_detection object_detection_node --ros-args \
