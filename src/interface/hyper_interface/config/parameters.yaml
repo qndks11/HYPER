@@ -1,13 +1,15 @@
 /**:
   ros__parameters:
-    # USB serial link to the Arduino. Check with `ls /dev/serial/by-id/` -- prefer a
-    # by-id symlink over /dev/ttyACM0 / /dev/ttyUSB0 if more than one USB serial
-    # device is ever plugged in, since the ttyACM/ttyUSB number is not stable.
-    # This board uses a CH340 USB-serial chip, which shows up as /dev/ttyUSB*,
-    # NOT /dev/ttyACM* (that's for boards with native USB or an FTDI chip) --
-    # confirm with `lsusb` (look for "QinHeng Electronics CH340") if this
-    # stops matching after swapping boards.
-    serial_port: "/dev/ttyUSB0"
+    # USB serial link to the Arduino, as the fixed symlink from
+    # udev/99-hyper-serial.rules. Do not go back to a raw /dev/ttyUSB* number:
+    # the car has three USB serial devices (RTK, the EBIMU adapter, this board)
+    # and the numbering follows plug order, so the IMU and this board end up
+    # fighting over ttyUSB0. See the "USB 시리얼 포트 고정" section in the
+    # top-level README if the symlink is missing.
+    # This board uses a CH340 USB-serial chip (it enumerates as /dev/ttyUSB*, NOT
+    # /dev/ttyACM*) -- confirm with `lsusb` (look for "QinHeng Electronics CH340")
+    # if the udev rule stops matching after swapping boards.
+    serial_port: "/dev/tty_arduino"
     baud_rate: 115200
 
     # Rate at which /velocity + /steering_angle are packed and sent to the Arduino.

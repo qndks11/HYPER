@@ -1,6 +1,11 @@
 ebimu_node:
   ros__parameters:
-    port: "/dev/ttyUSB0"
+    # udev/99-hyper-serial.rules가 만드는 고정 심볼릭 링크. 차에는 USB 시리얼이
+    # 셋(RTK, 이 IMU 어댑터, Arduino 보드) 물려 있어서 /dev/ttyUSB* 번호가 꽂힌
+    # 순서마다 바뀐다 -- 특히 Arduino 보드(hyper_interface)도 CH340 USB 시리얼이라
+    # 번호로 잡으면 둘이 서로의 포트를 집는다. 규칙을 아직 안 깔았다면
+    # 저장소 루트 README의 "USB 시리얼 포트 고정" 절을 먼저 보세요.
+    port: "/dev/tty_ebimu"
     baudrate: 115200
     # vehicle.xacro has no "imu_link" (or "base_link") -- the only body
     # frame is "body_link", which is also ekf_local/ekf_global's

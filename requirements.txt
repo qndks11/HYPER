@@ -2,4 +2,3 @@
 # (built against the apt python3-numpy on ROS 2 Humble) is ABI-compatible with.
 numpy<2
 ultralytics
-bleak

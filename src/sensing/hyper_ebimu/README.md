@@ -35,9 +35,14 @@ E2BOX **EBIMU-9DOFV5** AHRS 모듈용 ROS 2 드라이버입니다. 이 센서는
 **Quaternion 필드 순서가 `[z][y][x][w]`** 라는 점(스펙 5-1/6-1-4절) 외에는 축을 별도로
 재매핑하지 않습니다 — 센서 자체 body frame 그대로 퍼블리시합니다. 이게 차량의
 ENU/body_link 관례(특히 yaw 부호, angular_velocity.z 부호)와 맞는지는 실차에서 직접
-확인해야 합니다. 이 플랫폼의 다른 IMU(WitMotion WT901BLE)에 대해 정확히 이 보정을 하는
-`hyper_localization`의 `imu_enu_relay.py`가 참고할 패턴입니다 — 이 센서가 그걸 대체하거나
-같이 쓰이게 되면 동일하게 적용하세요.
+확인해야 합니다. `ekf_global`이 이 센서의 yaw를 map 프레임 절대 방위로 그대로 먹기 때문에
+(`dual_ekf_navsat.yaml`의 `imu0_config` 인덱스 5 = true) 여기가 어긋나면 추정 heading이
+통째로 돌아갑니다.
+
+보정이 필요하면 `hyper_localization`의 `imu_enu_relay.py`를 씁니다 — 이전 IMU를 ENU로
+고치던 relay라 지금은 꺼져 있지만(`odometry.launch.py`에서 주석 처리),
+`config/ebimu.yaml`의 `topic`을 `imu/raw`로 바꾸고 relay를 되살리면 그대로 재사용할 수
+있습니다(`out_yaw = yaw_sign * in_yaw + yaw_offset_rad`, 자이로 z 부호 반전 포함).
 
 ## 실행
 
@@ -46,9 +51,13 @@ ros2 launch hyper_ebimu ebimu.launch.py
 ```
 
 포트, 보드레이트, 출력 주기, 토픽명, covariance는 `config/ebimu.yaml`에서 설정합니다.
-covariance 기본값은 검증되지 않은 자리표시자이며, `sensors.launch.py`가 WitMotion의
-`orientation_covariance`를 EKF 융합용으로 튜닝하는 것과 같은 방식으로 실차 데이터를 보고
-다시 잡아야 합니다.
+포트 기본값 `/dev/tty_ebimu`는 저장소의 `udev/99-hyper-serial.rules`가 만드는 고정
+심볼릭 링크입니다(루트 README의 "USB 시리얼 포트 고정" 절).
+
+covariance 기본값은 검증되지 않은 자리표시자입니다. 특히 `orientation_covariance[8]`
+(yaw, 현재 0.02 rad^2 ≈ 8deg)은 `ekf_global`이 지자기 yaw를 얼마나 믿을지를 그대로
+결정하므로, 실차 데이터(정지 상태 yaw 분산, 모터 근처 자기 간섭)를 보고 다시 잡아야
+합니다.
 
 ## 주의
 

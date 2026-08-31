@@ -52,18 +52,22 @@ ros2 topic echo /ublox_gps_node/navpvt --field flags
 - FLOAT에서 FIXED로 안 올라감 → 하늘이 트인 곳에서 몇 분 더. 여기서 FIXED를 못 보면
   **2번으로 넘어가지 마세요.** 정확도 1 m짜리 fix로 녹화한 코스는 3번에서 쓸 수 없습니다.
 - **IMU(EBIMU-9DOFV5)가 안 붙음** → GUI의 "IMU link"가 NO DATA면 USB-UART 포트부터
-  봅니다. `hyper_ebimu/config/ebimu.yaml`의 `port` 기본값이 `/dev/ttyUSB0`인데,
-  Arduino 인터페이스 보드(CH340, `hyper_interface`)도 같은 `/dev/ttyUSB0`를 기본값으로
-  쓰기 때문에 둘 다 꽂혀 있으면 꽂힌 순서에 따라 번호가 뒤바뀝니다.
+  봅니다. IMU 어댑터와 Arduino 보드가 둘 다 `/dev/ttyUSB*`로 잡히기 때문에, udev 규칙을
+  안 깔았으면 꽂힌 순서에 따라 서로의 포트를 집습니다.
 
   ```bash
-  ls -l /dev/serial/by-id/          # 어느 칩이 어느 ttyUSB인지 확인
-  ros2 topic hz /imu                # 100 Hz 근처면 정상
+  ls -l /dev/tty_ebimu /dev/tty_arduino   # 없으면 udev 규칙부터
+  ros2 topic hz /imu                      # 100 Hz 근처면 정상
   ```
 
-  섞였으면 `ebimu.yaml`의 `port`(또는 `interface.launch.py`의 `serial_port`)를
-  `/dev/serial/by-id/...` 경로로 고정하세요. udev 심볼릭 링크(`/dev/tty_Ardusimple`
-  처럼)를 하나 더 만들어 두는 쪽이 확실합니다.
+  링크가 없으면 저장소의 규칙을 설치하세요(자세한 건 루트 README의
+  "USB 시리얼 포트 고정" 절):
+
+  ```bash
+  sudo cp ~/HYPER/udev/99-hyper-serial.rules /etc/udev/rules.d/
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  ~/HYPER/udev/show-serial-ids.sh          # 그래도 안 뜨면 실제 칩 ID 확인
+  ```
 
   > WT901BLE(BLE) 시절의 `bluetoothctl disconnect` 절차는 더 이상 해당 없습니다.
 
