@@ -17,7 +17,7 @@
   <exec_depend>hyper_planner</exec_depend>
   <exec_depend>hyper_lidar</exec_depend>
   <exec_depend>hyper_rtk</exec_depend>
-  <exec_depend>witmotion_ros2</exec_depend>
+  <exec_depend>hyper_ebimu</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

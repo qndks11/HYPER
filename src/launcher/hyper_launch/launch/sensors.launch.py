@@ -12,7 +12,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 #                                          (input_backend:=direct_usb, see perception.launch.py)
 #   Logitech C920                       -> owned directly by object_detection_node itself
 #                                          (no ROS topic, see perception.launch.py)
-#   WitMotion WT901BLE (witmotion_ros2) -> /imu                    (EKF)
+#   E2BOX EBIMU-9DOFV5 (hyper_ebimu)    -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
 # /camera_rear/image_raw has no physical source yet, and input_backend:=direct_usb has no
@@ -27,8 +27,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 def generate_launch_description():
     imu = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('witmotion_ros2'),
-            'launch', 'witmotion.launch.py')),
+            get_package_share_directory('hyper_ebimu'),
+            'launch', 'ebimu.launch.py')),
     )
 
     lidar = IncludeLaunchDescription(
