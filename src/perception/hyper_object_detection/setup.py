@@ -32,6 +32,7 @@ setup(
     entry_points={
         'console_scripts': [
             'object_detection_node = hyper_object_detection.object_detection_node:main',
+            'image_saver_service = hyper_object_detection.image_saver_service:main',
         ],
     },
 )

@@ -7,12 +7,26 @@
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>rclcpp</depend>
-  <depend>ackermann_msgs</depend>
+  <depend>rclcpp_action</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
-  <depend>sensor_msgs</depend>
+  <depend>nav2_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
   <depend>yaml-cpp</depend>
+  <depend>generate_parameter_library</depend>
+  <!-- nav2_controller.yaml's local_costmap can load drivable_area_layer from this
+       package; pluginlib needs it installed even when the layer is commented out of
+       `plugins`, since a typo there fails at costmap activation, not at build. -->
+  <exec_depend>hyper_costmap_plugins</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_mppi_controller</exec_depend>
+  <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <export><build_type>ament_cmake</build_type></export>

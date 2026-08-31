@@ -7,7 +7,7 @@ ekf_local:
     use_sim_time: true
     frequency: 30.0
     sensor_timeout: 0.1
-    two_d_mode: false
+    two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
     print_diagnostics: true
@@ -30,6 +30,13 @@ ekf_local:
     odom0_relative: false
 
     imu0: imu
+    # yaw(인덱스 5)는 false -- odom 프레임은 "연속적"이어야 하므로 절대 방위(자기
+    # 나침반) 기준을 여기에 넣으면 안 됩니다. 지자기 교란/차량 모터 근처에서 yaw가
+    # 튀면 그 점프가 그대로 odom 프레임에 들어가고, odom을 연속 좌표계로 가정하는
+    # 하위 노드(로컬 플래너/코스트맵)가 깨집니다. roll/pitch는 중력으로 관측되므로
+    # 신뢰할 수 있어 true로 둡니다. 여기 yaw는 vyaw(자이로 z) 적분으로만 결정되며,
+    # 느린 드리프트는 ekf_global의 map->odom 변환이 흡수합니다.
+    # (robot_localization의 dual_ekf_navsat_example.yaml도 동일하게 yaw는 false)
     imu0_config: [false, false, false,
                   true,  true,  false,
                   false, false, false,
@@ -64,7 +71,7 @@ ekf_local:
                                   0.0,    0.0,    1e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    1.0,  0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    1.0,  0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
-                                  0.0,    0.0,    0.0,    0.0,    0.0,    1e-9, 0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
+                                  0.0,    0.0,    0.0,    0.0,    0.0,    1.0,  0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0,  0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0,  0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0,  0.0,      0.0,     0.0,     0.0,    0.0,    0.0,
@@ -79,8 +86,8 @@ ekf_global:
   ros__parameters:
     use_sim_time: true
     frequency: 30.0
-    sensor_timeout: 0.1
-    two_d_mode: false
+    sensor_timeout: 0.3
+    two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
     print_diagnostics: true
@@ -114,6 +121,16 @@ ekf_global:
     odom1_relative: false
 
     imu0: imu
+    # yaw(인덱스 5)는 ekf_local과 마찬가지로 false. WT901BLE는 6축 모드로 돌아
+    # yaw가 자북이 아니라 "전원 인가 시점 자세" 기준으로 적분되고 분당 0.5도씩
+    # 밀린다. 이걸 절대 방위로 먹이면 map 프레임 heading이 서서히 통째로 돌아가고,
+    # RTK 위치해와 싸운다. 그래서 지자기/드라이버 yaw는 어느 필터에도 안 넣는다.
+    # 대신 절대 yaw는 imu1(gps_heading 노드)에서만 온다:
+    #   초기값 = 없음 -- 부팅 직후 yaw는 알 수 없고 아래 vyaw 적분만으로 이어진다
+    #   확립   = gps_accuracy_gui의 0.5 m 캘리브레이션(1회 주입) 또는 첫 GPS 진행방향
+    #   전파   = 아래 vyaw(자이로 z)
+    #   보정   = 주행 중 GPS 진행방향(course over ground)
+    # roll/pitch는 중력으로 관측되므로 그대로 신뢰한다.
     imu0_config: [false, false, false,
                   true,  true,  false,
                   false, false, false,
@@ -124,6 +141,24 @@ ekf_global:
     imu0_relative: false
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
+
+    # gps_heading 노드(hyper_localization/scripts/gps_heading.py)가 내보내는
+    # yaw 전용 Imu. 이 필터의 유일한 절대 방위 기준이다. 주행 중 GPS 진행방향을
+    # (u-blox headAcc에서 뽑은 공분산과 함께) 실을 때만, 그리고 gps_accuracy_gui의
+    # 캘리브레이션이 1회 주입할 때만 publish된다 -- 그 전/느릴 때는 자이로가 yaw를 잇는다.
+    # ekf_local에는 넣지 않는다: odom 프레임은 연속이어야 하므로 절대 방위 점프가
+    # 들어가면 안 된다 (map->odom이 흡수하도록 여기 global에만 넣는다).
+    imu1: imu/heading
+    imu1_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, false,
+                  false, false, false]
+    imu1_nodelay: true
+    imu1_differential: false
+    imu1_relative: false
+    imu1_queue_size: 10
+    imu1_remove_gravitational_acceleration: false
 
     use_control: false
 
@@ -148,7 +183,7 @@ ekf_global:
                                   0.0,    0.0,    1e-9,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    1.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    1.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
-                                  0.0,    0.0,    0.0,    0.0,    0.0,    1e-9,   0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
+                                  0.0,    0.0,    0.0,    0.0,    0.0,    1.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,
@@ -164,11 +199,18 @@ navsat_transform:
     use_sim_time: true
     frequency: 30.0
     delay: 3.0
-    magnetic_declination_radians: -0.14   # 한국(서울) 근사값. 정확한 값은 NOAA 계산기로
-    yaw_offset: 1.570796327                # IMU가 북쪽=0이면 유지, 동쪽=0이면 0.0
+    # odometry.launch.py가 datum_site별로 config/datums.yaml의
+    # magnetic_declination_deg/yaw_offset_deg를 덮어씁니다 (사이트마다 실제 IMU 보정값이
+    # 다르므로). 이 yaml을 launch 없이 단독으로 쓸 경우에만 아래 기본값(보정 없음)이
+    # 적용됩니다.
+    magnetic_declination_radians: 0.0
+    yaw_offset: 0.0
     zero_altitude: false
     broadcast_utm_transform: true
     base_link_frame: body_link
     publish_filtered_gps: true
     use_odometry_yaw: false
+    # wait_for_datum/datum은 odometry.launch.py가 datum_site 인자(config/datums.yaml)로
+    # 덮어씁니다. 이 yaml을 launch 없이 단독으로 쓸 경우에만 아래 기본값(첫 GPS fix를 원점으로
+    # 사용)이 적용됩니다.
     wait_for_datum: false

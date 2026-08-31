@@ -4,6 +4,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
 
 # Real-car sensor bring-up: assigns each physical sensor to the topic role
 # hyper_localization / hyper_object_detection already expect from simulation
@@ -15,13 +16,10 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 #   E2BOX EBIMU-9DOFV5 (hyper_ebimu)    -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
 #   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
-# /camera_rear/image_raw has no physical source yet, and input_backend:=direct_usb has no
-# rear-camera path at all -- lane_detection_node simply never receives rear frames on the real
-# vehicle until a rear camera and its own backend wiring are added.
 #
-# Neither camera goes through usb_cam here anymore -- usb_cam has been removed from this
-# workspace entirely (see deps.repos), and hyper_camera is now just the config file
-# distribution point for both cameras; see hyper_camera's README.
+# No camera is launched here at all -- usb_cam has been removed from this workspace entirely
+# (see deps.repos); hyper_camera now provides both USB cameras' driver nodes (see
+# perception.launch.py) plus every camera's calibration/config files.
 
 
 def generate_launch_description():

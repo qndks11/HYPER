@@ -11,6 +11,16 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>std_srvs</depend>
+  <depend>python3-opencv</depend>
+
+  <!-- This package's perception.launch.py launches hyper_lane_detection (both backends) and
+       reads its bev_real.yaml from that package's share directory. -->
+  <exec_depend>hyper_lane_detection</exec_depend>
+
+  <!-- lane_input_backend:=intra_process loads hyper_camera's ELP publisher into this launch
+       file's container. -->
+  <exec_depend>hyper_camera</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

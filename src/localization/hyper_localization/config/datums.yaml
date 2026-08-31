@@ -1,0 +1,43 @@
+# navsat_transform 원점(datum) 목록 + 사이트별 IMU/heading 보정값.
+# odometry.launch.py 실행 시 `datum_site:=sim|school|track` 인자로 선택합니다.
+#
+# ── heading_deg ────────────────────────────────────────────────────────────
+# navsat_transform datum의 세 번째 값(robot_localization의 datum[2]). 0으로 둡니다.
+# wait_for_datum: true일 때 navsat_transform은 "datum 지점에서 차량의 map 프레임
+# yaw가 0"이라고 못박고 map<-UTM 회전을 datum[2]로 정합니다(navsat_transform.cpp의
+# setManualDatum + computeTransform). 즉 이 값은 차량의 초기 방위가 아니라 map 축을
+# ENU 대비 얼마나 돌릴지입니다. 0이면 map X=East, Y=North로 ENU와 완전히 정렬되고,
+# rviz_satellite 앵커/위경도 웨이포인트 계산과도 그대로 맞습니다. 건드리지 마세요.
+#
+# ── 초기 yaw ───────────────────────────────────────────────────────────────
+# 측량 상수(initial_heading_deg)는 없앴습니다. 부팅 직후 yaw는 "알 수 없음"이고,
+# gps_accuracy_gui의 "Calibrate initial yaw"(0.5 m 굴려 GPS 변위로 측정) 또는
+# 주행 중 첫 GPS 진행방향이 gps_heading을 통해 /imu/heading으로 절대 yaw를
+# 세울 때까지 자이로 적분만으로 이어집니다.
+datums:
+  sim:
+    latitude_deg: 37.5665
+    longitude_deg: 126.9780
+    heading_deg: 0.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+
+  school:
+    latitude_deg: 37.555047
+    longitude_deg: 127.045522
+    heading_deg: 0.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+    imu_yaw_sign:  1.0
+    imu_yaw_offset_deg: -91.5
+    imu_flip_gyro_z: false
+
+  track:
+    latitude_deg: 37.2887947
+    longitude_deg: 127.1072418
+    heading_deg: 0.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+    imu_yaw_sign: 1.0
+    imu_yaw_offset_deg: -91.5
+    imu_flip_gyro_z: false

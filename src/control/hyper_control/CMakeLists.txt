@@ -27,6 +27,12 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# TODO: restore once scripts/t8s_bringup.py exists (currently blocks the build)
+# install(PROGRAMS
+#   scripts/t8s_bringup.py
+#   DESTINATION lib/${PROJECT_NAME}
+# )
+
 install(TARGETS
   vehicle_controller_node
   joystick_controller_node

@@ -1,0 +1,10 @@
+<library path="hyper_costmap_layers">
+  <class type="hyper_costmap_plugins::DrivableAreaLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>
+      Marks ground the camera classified as off-course into the costmap, as a decaying confidence
+      accumulator kept in the costmap's own frame. Complements the lidar obstacle layer rather than
+      replacing it: paint and grass are not obstacles, and the obstacle layer's raytrace clearing
+      would wipe them every cycle.
+    </description>
+  </class>
+</library>

@@ -6,21 +6,48 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    default_params = PathJoinSubstitution([
-        FindPackageShare('hyper_planner'), 'config', 'parking_params.yaml'])
-    default_course = PathJoinSubstitution([
-        EnvironmentVariable('HOME'), 'HYPER', 'src', 'waypoint', 'course.yaml'])
+    default_nav2_params = PathJoinSubstitution([
+        FindPackageShare('hyper_planner'), 'config', 'nav2_controller.yaml'])
+    # mission.launch.py와 같은 규칙입니다: mission은 config/<이름>.yaml을 고르고,
+    # mission_yaml은 그 결과를 절대 경로로 덮어씁니다.
+    default_mission_yaml = PathJoinSubstitution([
+        FindPackageShare('hyper_planner'), 'config',
+        [LaunchConfiguration('mission'), '.yaml']])
+    default_waypoint_csv = PathJoinSubstitution([
+        EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
+        'waypoints', 'sim.csv'])
 
     return LaunchDescription([
-        DeclareLaunchArgument('params_file', default_value=default_params),
-        DeclareLaunchArgument('course_yaml', default_value=default_course),
+        DeclareLaunchArgument('nav2_params_file', default_value=default_nav2_params),
+        DeclareLaunchArgument(
+            'mission', default_value='mission',
+            description='config/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
+        DeclareLaunchArgument('mission_yaml', default_value=default_mission_yaml),
+        DeclareLaunchArgument('waypoint_csv', default_value=default_waypoint_csv),
+        # mission_manager_node의 '~/start'는 여전히 사람이 직접 호출해야 합니다
+        # (mission.launch.py의 auto_start 기본값 false -- 미션 주행은 사람이 시작하는 게 안전).
+        DeclareLaunchArgument(
+            'use_sim_time', default_value='true',
+            description='시뮬레이션은 true, 실차는 false'),
 
+        # controller_server(follow_path 액션 서버) + lifecycle_manager + cmd_vel 변환.
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
-                FindPackageShare('hyper_planner'), 'launch', 'parking_system_cpp.launch.py'])),
+                FindPackageShare('hyper_planner'), 'launch', 'nav2_controller.launch.py'])),
             launch_arguments={
-                'params_file': LaunchConfiguration('params_file'),
-                'course_yaml': LaunchConfiguration('course_yaml'),
+                'params_file': LaunchConfiguration('nav2_params_file'),
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+            }.items(),
+        ),
+
+        # config/mission.yaml의 스텝 큐를 실행하는 미션 매니저.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('hyper_planner'), 'launch', 'mission.launch.py'])),
+            launch_arguments={
+                'mission_yaml': LaunchConfiguration('mission_yaml'),
+                'waypoint_csv': LaunchConfiguration('waypoint_csv'),
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
             }.items(),
         ),
     ])

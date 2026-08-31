@@ -12,8 +12,9 @@ from launch.actions import (
     ExecuteProcess,
     SetEnvironmentVariable
 )
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 
 from launch_ros.actions import Node
@@ -117,14 +118,30 @@ def generate_launch_description():
     # 쓰는 glCopyImageSubData 일부 경로를 구현하지 않아 "GL3PlusTextureGpu::copyTo
     # UnimplementedException"으로 ign gazebo가 죽는다. llvmpipe 소프트웨어 렌더러로 강제 전환하면
     # 해당 경로가 완전히 구현되어 있어 크래시가 사라진다.
+    #
+    # 다만 이 우회는 WSL2에서만 필요하고, 네이티브 리눅스 + 실제 GPU에서는 모든 렌더링을
+    # CPU로 끌어내려 손해만 본다(측정상 GUI를 켠 상태에서 RTF 0.833 -> 0.918). 그래서 기본값은
+    # 네이티브 GPU 렌더링이고, WSL2에서 돌릴 때만 software_rendering:=true로 켜면 된다.
+    software_rendering_arg = DeclareLaunchArgument(
+        'software_rendering',
+        default_value='false',
+        description=(
+            'Force llvmpipe software rendering. Only needed on WSL2, whose virtual GPU '
+            'crashes ign gazebo in the OGRE-Next GL3Plus backend. Costs performance on '
+            'native Linux with a real GPU.'
+        )
+    )
+
     gz_render_software = SetEnvironmentVariable(
         name='LIBGL_ALWAYS_SOFTWARE',
-        value='1'
+        value='1',
+        condition=IfCondition(LaunchConfiguration('software_rendering'))
     )
 
     gz_gallium_driver = SetEnvironmentVariable(
         name='GALLIUM_DRIVER',
-        value='llvmpipe'
+        value='llvmpipe',
+        condition=IfCondition(LaunchConfiguration('software_rendering'))
     )
 
     world_arg = DeclareLaunchArgument(
@@ -132,6 +149,22 @@ def generate_launch_description():
         default_value=default_world_path,
         description='Specify the world file for Gazebo'
     )
+
+    # headless:=true는 ign gazebo를 서버 전용(-s)으로 띄우고, 카메라/라이다가 쓰는 오프스크린
+    # 렌더링만 --headless-rendering으로 남깁니다. 3D 창을 그리던 `ign gazebo gui` 프로세스가
+    # 통째로 사라지므로(측정상 코어 하나를 상시 점유했음) 시뮬레이터가 실시간에 훨씬 가깝게
+    # 돕니다. 센서 토픽은 그대로 나오므로 시각화가 필요하면 rviz를 쓰면 됩니다.
+    headless_arg = DeclareLaunchArgument(
+        'headless',
+        default_value='false',
+        description='Run Gazebo without the 3D GUI window (sensors still render offscreen)'
+    )
+
+    headless_flags = PythonExpression([
+        "'-s --headless-rendering ' if '",
+        LaunchConfiguration('headless'),
+        "'.lower() in ('true', '1') else ''"
+    ])
 
     x_arg = DeclareLaunchArgument(
         'x',
@@ -211,7 +244,7 @@ def generate_launch_description():
     gazebo_launch = IncludeLaunchDescription(
         gazebo_pkg_launch,
         launch_arguments={
-            'gz_args': ['-r -v 4 ', world_file],
+            'gz_args': ['-r -v 4 ', headless_flags, world_file],
             'on_exit_shutdown': 'true'
         }.items()
     )
@@ -258,6 +291,26 @@ def generate_launch_description():
         output='screen'
     )
 
+    model_service_node = Node(
+        package='hyper_gazebo',
+        executable='model_service.py',
+        output='screen'
+    )
+
+    # 차량을 mission.yaml의 라벨 위치로 옮기는 테스트용 서비스 (sim 전용).
+    teleport_service_node = Node(
+        package='hyper_gazebo',
+        executable='teleport_service.py',
+        output='screen'
+    )
+
+    # 두 차로 제어 표지판(초록 화살표 / 빨간 X)의 위치를 맞바꾸는 테스트용 서비스.
+    lane_sign_service_node = Node(
+        package='hyper_gazebo',
+        executable='lane_sign_service.py',
+        output='screen'
+    )
+
     joint_state, forward_velocity, forward_position = start_vehicle_control()
 
     vehicle_controller_node = Node(
@@ -267,7 +320,23 @@ def generate_launch_description():
         output='screen'
     )
 
+    # ros_gz_bridge's parameter_bridge publishes camera/image_raw with a plain rclcpp
+    # publisher, not image_transport, so no camera/image_raw/compressed topic exists
+    # unless something republishes it explicitly.
+    camera_compressed_republisher_node = Node(
+        package='image_transport',
+        executable='republish',
+        name='camera_compressed_republisher',
+        arguments=['raw', 'compressed'],
+        remappings=[
+            ('in', 'camera/image_raw'),
+            ('out/compressed', 'camera/image_raw/compressed'),
+        ],
+        output='screen'
+    )
+
     launch_description = LaunchDescription([
+        software_rendering_arg,
         gz_render_software,
         gz_gallium_driver,
         gz_resource_path,
@@ -291,6 +360,7 @@ def generate_launch_description():
         ),
 
         world_arg,
+        headless_arg,
         gazebo_launch,
 
         x_arg,
@@ -304,6 +374,10 @@ def generate_launch_description():
         robot_state_publisher_node,
         vehicle_controller_node,
         gz_bridge_node,
+        camera_compressed_republisher_node,
+        model_service_node,
+        teleport_service_node,
+        lane_sign_service_node,
     ])
 
     return launch_description

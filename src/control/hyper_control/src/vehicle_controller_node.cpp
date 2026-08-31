@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "hyper_control/vehicle_controller_node.hpp"
 
 VehicleController::VehicleController(const double timer_period, const double timeout_duration) :
@@ -23,6 +25,7 @@ VehicleController::VehicleController(const double timer_period, const double tim
   declare_parameter<double>("body_length", 0.0);
   declare_parameter<double>("wheel_radius", 0.0);
   declare_parameter<double>("wheel_width", 0.0);
+  declare_parameter<double>("wheel_base", 0.0);
   declare_parameter<double>("max_steering_angle", 0.0);
   declare_parameter<double>("max_velocity", 0.0);
 
@@ -31,12 +34,14 @@ VehicleController::VehicleController(const double timer_period, const double tim
   get_parameter("body_length", body_length_);
   get_parameter("wheel_radius", wheel_radius_);
   get_parameter("wheel_width", wheel_width_);
+  get_parameter("wheel_base", wheel_base_);
   get_parameter("max_steering_angle", max_steering_angle_);
   get_parameter("max_velocity", max_velocity_);
 
-  // Set the track width and wheel base
+  // Track width from the body/wheel geometry; wheel base is the measured
+  // front-to-rear axle distance (matches urdf wheel_offset = wheel_base/2 and
+  // the real vehicle), not a value derived from body_length.
   track_width_ = body_width_ + (2 * wheel_width_ / 2);
-  wheel_base_ = body_length_ - (2 * wheel_radius_);
 
   // Subscribers
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
@@ -136,12 +141,12 @@ void VehicleController::timer_callback()
 
   // Reset velocity to zero if timeout
   if (velocity_elapsed_time > timeout_duration_) {
-    wheel_angular_velocity_ = {0.0, 0.0};
+    std::fill(wheel_angular_velocity_.begin(), wheel_angular_velocity_.end(), 0.0);
   }
 
   // Reset steering angle to zero if timeout
   if (steering_elapsed_time > timeout_duration_) {
-    wheel_steering_angle_ = {0.0, 0.0};
+    std::fill(wheel_steering_angle_.begin(), wheel_steering_angle_.end(), 0.0);
   }
 
   // Publish steering position

@@ -11,29 +11,46 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
-find_package(ament_index_cpp REQUIRED)
-find_package(camera_calibration_parsers REQUIRED)
 find_package(OpenCV REQUIRED)
 
 include_directories(include)
 
-add_executable(lane_detection_node
+# Built as a component (see rclcpp_components_register_node below) so it can be loaded into the
+# same ComposableNodeContainer as hyper_camera's ElpCameraPublisherNode for zero-copy
+# intra-process delivery under input_backend:=intra_process -- see
+# hyper_object_detection/launch/perception.launch.py. rclcpp_components_register_node also
+# generates the plain `lane_detection_node` executable used for input_backend:=ros_raw.
+add_library(lane_detection_component SHARED
   src/lane_detection_node.cpp
+  src/ground_projection.cpp
+  src/drivable_area.cpp
   src/lane_detector.cpp
   src/stopline_detector.cpp
   src/input_backend.cpp
-  src/elp_camera_capture.cpp
 )
-ament_target_dependencies(lane_detection_node
-  rclcpp std_msgs sensor_msgs cv_bridge ament_index_cpp
-  camera_calibration_parsers OpenCV)
+target_include_directories(lane_detection_component PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+ament_target_dependencies(lane_detection_component
+  rclcpp rclcpp_components std_msgs sensor_msgs nav_msgs cv_bridge OpenCV)
+rclcpp_components_register_node(lane_detection_component
+  PLUGIN "LaneDetection"
+  EXECUTABLE lane_detection_node)
 
-install(TARGETS
-  lane_detection_node
-  DESTINATION lib/${PROJECT_NAME}
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(TARGETS lane_detection_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
 if(BUILD_TESTING)

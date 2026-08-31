@@ -1,0 +1,18 @@
+<library path="hyper_rqt">
+  <class name="HyperPanel"
+         type="hyper_rqt.hyper_panel.HyperPanel"
+         base_class_type="rqt_gui_py::Plugin">
+    <description>
+      HYPER 스택 운영 버튼 패널. config/panel.yaml에 적힌 서비스만 버튼으로
+      보여 주고, /mission_manager/status를 상단에 표시합니다.
+    </description>
+    <qtgui>
+      <group>
+        <label>HYPER</label>
+      </group>
+      <label>HYPER Panel</label>
+      <icon type="theme">applications-utilities</icon>
+      <statustip>미션/시뮬레이터 서비스를 버튼으로 호출합니다.</statustip>
+    </qtgui>
+  </class>
+</library>

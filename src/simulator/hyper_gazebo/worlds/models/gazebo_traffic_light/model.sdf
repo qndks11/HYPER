@@ -84,14 +84,6 @@
     <link name="red_on">
       <gravity>false</gravity>
       <pose>0 0.535 0.35 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.002</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>
@@ -112,14 +104,6 @@
     <link name="yellow_off">
       <gravity>false</gravity>
       <pose>0.075 0.535 0 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.05</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>
@@ -180,14 +164,6 @@
     <link name="yellow_on">
       <gravity>false</gravity>
       <pose>0 0.535 0 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.002</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>
@@ -208,14 +184,6 @@
     <link name="right_turn_off">
       <gravity>false</gravity>
       <pose>0.075 0.535 -0.35 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.05</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>
@@ -321,14 +289,6 @@
     <link name="green_off">
       <gravity>false</gravity>
       <pose>0.075 0.535 -0.7 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.05</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>
@@ -389,14 +349,6 @@
     <link name="green_on">
       <gravity>false</gravity>
       <pose>0 0.535 -0.7 0 1.5707 0</pose>
-      <collision name="collision">
-        <geometry>
-          <cylinder>
-            <radius>0.15</radius>
-            <length>0.002</length>
-          </cylinder>
-        </geometry>
-      </collision>
 
       <visual name="visual">
         <geometry>

@@ -24,6 +24,13 @@ install(TARGETS
   LIBRARY DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/model_service.py
+  scripts/teleport_service.py
+  scripts/lane_sign_service.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)

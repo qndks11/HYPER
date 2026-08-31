@@ -18,24 +18,24 @@ def generate_launch_description():
         package='ublox_gps',
         executable='ublox_gps_node',
         name='ublox_gps_node',
-        output='screen',
+        output='log',
         remappings=[
             # hyper_localization의 navsat_transform_node가 구독하는 /gps/fix로 직접 발행
             ('~/fix', 'gps/fix'),
         ],
         parameters=[{
-            'debug': 4,
+            'debug': 0,
             'device': '/dev/tty_Ardusimple',
-            'frame_id': 'gps',
+            'frame_id': 'gps_link',
             'uart1': {'baudrate': 115200},
-            'inf': {'all': True},
+            'inf': {'all': False},
             'publish': {
                 'all': True,
                 'aid': {'hui': False},
                 'nav': {'posecef': False},
             },
-            'tmode3': 0, 
-            'rate': 1.0,
+            'tmode3': 0,
+            'rate': 5.0,
         }],
     )
 

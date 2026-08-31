@@ -68,7 +68,7 @@ class ArduinoInterfaceNode(Node):
         # in /odom (angular.z = velocity * tan(steering_angle) / wheel_base).
         # Measured by hand on the vehicle. Re-measure and update (here and in
         # parameters.yaml) if the chassis changes.
-        self.declare_parameter('wheel_base', 0.73)
+        self.declare_parameter('wheel_base', 0.72)
 
         self._command_timeout = self.get_parameter('command_timeout').value
         self._max_velocity = self.get_parameter('max_velocity').value

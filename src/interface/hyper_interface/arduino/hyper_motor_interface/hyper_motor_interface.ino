@@ -252,7 +252,7 @@ const float MAX_VELOCITY = 1.0f;          // [m/s] -- not read by the PI drive l
                                            // (see apply_drive()), kept only as a
                                            // doc reference matching hyper_control /
                                            // hyper_interface's parameters.yaml.
-const float MAX_STEERING_ANGLE = 0.5235988f; // [rad] (~30 deg), matches the sensor calibration above
+const float MAX_STEERING_ANGLE = 0.5061455f; // [rad] (29 deg, measured), matches the sensor calibration above
 
 // ---- Fail-safe ----
 // If no valid packet arrives within this long, cut power to both motors
