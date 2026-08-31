@@ -98,7 +98,7 @@ ros2 launch hyper_launch perception.launch.py
 ros2 launch hyper_launch behavior.launch.py
 ```
 
-각 launch 파일은 각각 `hyper_gazebo`, `hyper_localization`, 인지 패키지, `hyper_planner`를 호출합니다. `sensors.launch.py`는 `witmotion_ros2`(WT901BLE, EKF용 `/imu`), `hyper_lidar`(RPLidar, `/scan`), `hyper_rtk`(u-blox + NTRIP, `/gps/fix`)를 각 토픽 역할에 맞춰 묶어서 띄웁니다.
+각 launch 파일은 각각 `hyper_gazebo`, `hyper_localization`, 인지 패키지, `hyper_planner`를 호출합니다. `sensors.launch.py`는 `hyper_ebimu`(EBIMU-9DOFV5, EKF용 `/imu`), `hyper_lidar`(RPLidar, `/scan`), `hyper_rtk`(u-blox + NTRIP, `/gps/fix`)를 각 토픽 역할에 맞춰 묶어서 띄웁니다.
 
 카메라는 여기서 하나도 띄우지 않습니다 -- 전부 `perception.launch.py`가 엽니다. `lane_input_backend:=intra_process`는 `ComposableNodeContainer` 하나에 두 컴포넌트를 함께 로드합니다: `hyper_camera`의 `ElpCameraPublisherNode`(`/dev/video_elp` → `/camera/image_raw`)와 `lane_detection`. 둘 다 `use_intra_process_comms`가 켜져 있어 프레임이 직렬화 없이 포인터로 `lane_detection`에 전달됩니다. `object_input_backend:=usb_camera`는 `logitech_camera_publisher_node`를 별도 프로세스로 띄워 `/dev/video_logitech`를 열고 일반 토픽으로 `object_detection_node`에 넘깁니다(rclpy에는 zero-copy 경로가 없음).
 

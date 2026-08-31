@@ -11,19 +11,21 @@ The correction applied here is:
 
     out_yaw = yaw_sign * in_yaw + yaw_offset_rad
 
-ekf_global fuses this yaw as its absolute heading (imu0_config index 5 is true
-there; ekf_local keeps it false so the odom frame stays continuous), so yaw_sign
-and yaw_offset_rad *are* the map-frame heading -- measure them per site and put
-them in config/datums.yaml. Watch out for the WT901BLE running in 6-axis mode:
-its yaw then integrates from wherever it was powered on and drifts ~0.5 deg/min,
-which walks the map heading around. Confirm the sensor is in 9-axis (magnetometer)
-mode before trusting it.
+NOT LAUNCHED RIGHT NOW. The car's IMU is an E2BOX EBIMU-9DOFV5 (hyper_ebimu),
+which publishes straight to /imu, so nothing produces /imu/raw any more and
+odometry.launch.py keeps this node commented out. It is kept because the EBIMU's
+axes have not been checked against REP-103 ENU yet (see hyper_ebimu/README.md):
+if its yaw or gyro z turns out to be mirrored or offset, point ebimu.yaml's
+`topic` at imu/raw and re-enable this relay with the per-site values in
+config/datums.yaml (imu_yaw_sign / imu_yaw_offset_deg / imu_flip_gyro_z).
 
-flip_angular_velocity_z still matters: yaw is *propagated* by integrating the z
-gyro between heading corrections, so a flipped sign turns every left turn into an
-estimated right turn. Verify on the car: rotate it counter-clockwise and check
-that `ros2 topic echo /imu --field angular_velocity` reports positive z. If it is
-negative, flip imu_flip_gyro_z in datums.yaml.
+Whatever ends up publishing /imu, its yaw *is* the map-frame heading: ekf_global
+fuses it as an absolute heading (imu0_config index 5 is true there; ekf_local
+keeps it false so the odom frame stays continuous). flip_angular_velocity_z
+matters just as much -- yaw is propagated by integrating the z gyro between
+corrections, so a flipped sign turns every left turn into an estimated right
+turn. Verify on the car: rotate it counter-clockwise and check that
+`ros2 topic echo /imu --field angular_velocity` reports positive z.
 
 roll, pitch, accel and the covariances are passed through untouched.
 """

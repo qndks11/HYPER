@@ -126,12 +126,17 @@ ekf_global:
     # map 프레임은 점프해도 되는 좌표계이므로(연속성은 ekf_local이 만드는 odom이
     # 책임진다) 절대 방위를 여기에서만 먹인다. 지자기 교란으로 yaw가 튀면 map->odom
     # 변환이 같이 튀지만 odom 프레임 자체는 흔들리지 않는다.
-    # 실차에서는 드라이버 원본이 REP-103 ENU가 아니라서 /imu/raw -> imu_enu_relay -> /imu
-    # 로 들어오므로, 여기 들어오는 yaw의 부호와 원점은 datums.yaml의
-    # imu_yaw_sign / imu_yaw_offset_deg가 결정한다. 사이트마다 실측해서 채워야 하고,
-    # 틀리면 map 프레임 heading이 그 각도만큼 통째로 돌아간 채 출발한다.
-    # 부팅 직후부터 절대 yaw가 있으므로 초기 yaw 캘리브레이션(0.5 m 굴리기)은
-    # 필요 없다 -- WT901BLE가 9축(지자기 포함) 모드인지만 확인할 것.
+    # 실차 IMU는 E2BOX EBIMU-9DOFV5(hyper_ebimu)이고, 9축(지자기 융합) AHRS라 켜는
+    # 순간부터 절대 방위가 나온다. 드라이버가 body_link 프레임으로 /imu에 바로
+    # publish하므로 중간 relay가 없다(sensors.launch.py -> ebimu.launch.py).
+    # 덕분에 초기 yaw를 세우는 별도 절차(0.5 m 굴리기 캘리브레이션)도 필요 없다.
+    # 다만 EBIMU 축이 REP-103 ENU와 맞는지는 실차 미확인이다(hyper_ebimu/README.md).
+    # 아는 방위로 세우고 `ros2 topic echo /imu --field orientation`의 yaw가 그 방위
+    # (북=90deg)로 나오는지 반드시 확인할 것 -- 틀리면 map 프레임 heading이 그 각도만큼
+    # 통째로 돌아간 채 출발한다. 보정이 필요하면 odometry.launch.py의 imu_enu_relay
+    # 주석을 참고한다.
+    # yaw 공분산은 ebimu.yaml의 orientation_covariance[8](현재 0.02, 자리표시자)이
+    # 그대로 이 필터의 신뢰도가 되므로 실차 데이터로 다시 잡아야 한다.
     # roll/pitch는 중력으로 관측되므로 그대로 신뢰한다.
     imu0_config: [false, false, false,
                   true,  true,  true,
@@ -146,8 +151,9 @@ ekf_global:
 
     # RTK GNSS 진행방향(u-blox NavPVT headMot)을 절대 yaw로 먹이던 imu1(/imu/heading,
     # gps_heading 노드)은 지금 빼 두었다 -- 위 imu0의 지자기 yaw가 그 역할을 한다.
-    # 같이 꺼지는 것: gps_accuracy_gui의 "Calibrate initial yaw"도 /imu/heading으로
-    # 주입하므로 이제 EKF에 닿지 않는다(GUI 표시용으로는 그대로 동작한다).
+    # 같이 없앤 것: gps_accuracy_gui의 "Calibrate initial yaw" 버튼(0.5 m 굴려 GPS
+    # 변위로 초기 yaw를 재서 /imu/heading으로 주입하던 기능). 9축 IMU가 부팅부터
+    # 절대 yaw를 주므로 불필요해졌다.
     # 되돌리는 법: odometry.launch.py의 gps_heading 노드 주석을 풀고 여기에 아래를
     # 다시 넣는다 (스크립트 hyper_localization/scripts/gps_heading.py는 그대로 있다).
     #   imu1: imu/heading

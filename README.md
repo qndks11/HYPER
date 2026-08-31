@@ -262,7 +262,7 @@ ros2 launch hyper_launch simulation.launch.py
 ros2 launch hyper_launch real.launch.py
 ```
 
-`sim` 대신 `sensors`(WitMotion IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
+`sim` 대신 `sensors`(EBIMU-9DOFV5 IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
 
 스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
 
@@ -282,7 +282,7 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 센서 | 패키지 | 최종 토픽 |
 |------|--------|-----------|
-| WitMotion WT901BLE | `witmotion_ros2` | `/imu` (EKF) |
+| E2BOX EBIMU-9DOFV5 | `hyper_ebimu` | `/imu` (EKF) |
 | RPLidar | `hyper_lidar` | `/scan` |
 | u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
 
@@ -327,6 +327,6 @@ ros2 launch hyper_launch behavior.launch.py
 | `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
 | `/velocity_actual`, `/steering_angle_actual` | `std_msgs/Float64` | arduino_interface_node → | Arduino의 인코더/조향각 센서로 측정한 실제 값 (실차 전용, 닫힌 루프 피드백) |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `witmotion_ros2` → ROS (실차, WT901BLE) | IMU |
-| `/imu/raw` | `sensor_msgs/Imu` | `witmotion_ros2` → `imu_enu_relay` | 실차 전용. 드라이버 원본(나침반식 yaw). relay가 ENU로 고쳐 `/imu`로 다시 발행 |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `hyper_ebimu` → ROS (실차, EBIMU-9DOFV5) | IMU. yaw(지자기 융합)가 `ekf_global`의 절대 방위 기준 |
+| `/imu/raw` | `sensor_msgs/Imu` | (없음) → `imu_enu_relay` | **현재 비활성.** WitMotion WT901BLE 전용 경로였고, EBIMU는 `/imu`로 바로 발행한다. EBIMU 축이 ENU와 다르면 `ebimu.yaml`의 `topic`을 `imu/raw`로 바꾸고 `odometry.launch.py`의 relay 주석을 푼다 |
 | `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → (없음) | RTK 진행방향 기반 yaw. **현재 비활성** — `gps_heading` 노드는 `odometry.launch.py`에서 주석 처리했고 EKF도 구독하지 않는다. 절대 방위는 `ekf_global`이 `/imu`의 지자기 yaw로 잡는다 (되돌리려면 launch 주석 해제 + `dual_ekf_navsat.yaml`의 `imu1` 블록 복원 + `imu0_config` yaw를 false로) |
