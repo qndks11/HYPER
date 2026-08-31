@@ -51,14 +51,21 @@ ros2 topic echo /ublox_gps_node/navpvt --field flags
 - `/gps/fix`가 아예 없음 → `ls -l /dev/tty_Ardusimple` (udev 심볼릭 링크)
 - FLOAT에서 FIXED로 안 올라감 → 하늘이 트인 곳에서 몇 분 더. 여기서 FIXED를 못 보면
   **2번으로 넘어가지 마세요.** 정확도 1 m짜리 fix로 녹화한 코스는 3번에서 쓸 수 없습니다.
-- **IMU(WT901BLE)가 안 붙음** → GUI의 "IMU link"가 NO DATA이거나 터미널에 
-  `No BLE device found matching ...`가 반복되면, 십중팔구 **이전 실행이 BLE 연결을 물고
-  죽은 것**입니다. 연결된 WT901BLE는 advertise를 멈춰서 다음 스캔에 아예 안 잡힙니다.
+- **IMU(EBIMU-9DOFV5)가 안 붙음** → GUI의 "IMU link"가 NO DATA면 USB-UART 포트부터
+  봅니다. `hyper_ebimu/config/ebimu.yaml`의 `port` 기본값이 `/dev/ttyUSB0`인데,
+  Arduino 인터페이스 보드(CH340, `hyper_interface`)도 같은 `/dev/ttyUSB0`를 기본값으로
+  쓰기 때문에 둘 다 꽂혀 있으면 꽂힌 순서에 따라 번호가 뒤바뀝니다.
 
   ```bash
-  bluetoothctl info FD:C0:E8:FE:A9:58        # Connected: yes 면 이 경우가 맞습니다
-  bluetoothctl disconnect FD:C0:E8:FE:A9:58  # 끊고 다시 launch
+  ls -l /dev/serial/by-id/          # 어느 칩이 어느 ttyUSB인지 확인
+  ros2 topic hz /imu                # 100 Hz 근처면 정상
   ```
+
+  섞였으면 `ebimu.yaml`의 `port`(또는 `interface.launch.py`의 `serial_port`)를
+  `/dev/serial/by-id/...` 경로로 고정하세요. udev 심볼릭 링크(`/dev/tty_Ardusimple`
+  처럼)를 하나 더 만들어 두는 쪽이 확실합니다.
+
+  > WT901BLE(BLE) 시절의 `bluetoothctl disconnect` 절차는 더 이상 해당 없습니다.
 
   그래도 안 되면 어댑터가 여러 개인지 봅니다(드라이버는 첫 번째 것만 씁니다):
   `bluetoothctl list`. 스택을 내릴 때 Ctrl-C 후 노드가 완전히 끝날 때까지 기다리세요 —
@@ -121,13 +128,13 @@ EKF가 뜨는 데 5초 걸립니다(`ODOMETRY_DELAY_S`).
 ### 녹화 중 별도 터미널에서 같이 볼 것
 
 ```bash
-ros2 topic hz /imu/heading    # 주행 중 5 Hz 근처 (GPS fix rate와 같음)
+ros2 topic hz /imu            # 100 Hz 근처 (EBIMU output_rate_ms=10)
+ros2 topic echo /imu --field orientation    # 차량 방위와 맞는지 (북=90deg)
 ```
 
-`/imu/heading`이 주행 중에도 계속 10 Hz면 **초기 heading 시드가 안 꺼진 것**이고, 그건 GPS
-코스 보정이 한 번도 안 들어왔다는 뜻입니다. 그대로 녹화하면 방위가 자이로 드리프트로만
-갑니다. `min_fix_displacement`(0.5 m) 기본값 기준 **0.5 m/s 이상**으로 몰아야 매 fix마다
-코스가 나옵니다.
+> 이 문서를 쓸 때는 `gps_heading` 노드가 `/imu/heading`으로 절대 yaw를 공급했지만, 지금은
+> 그 노드를 끄고 IMU(EBIMU-9DOFV5) 지자기 yaw를 `ekf_global`이 직접 씁니다. `/imu/heading`은
+> 더 이상 나오지 않으니 대신 위 두 줄로 IMU를 확인하세요.
 
 ### 녹화가 끝나면 — 품질 확인
 
@@ -180,8 +187,12 @@ ros2 run tf2_ros tf2_echo map body_link          # map -> body_link TF가 사는
 (`tail -1 .../real.csv | cut -d, -f1`).
 
 RViz에서 계획 경로가 실제 녹화한 코스와 겹쳐 보이는지 눈으로 먼저 확인합니다. 코스가 엉뚱한
-데 있으면 `datum_site`가 틀렸거나, 초기 yaw가 아직 확립되지 않은 것입니다
-(gps_accuracy_gui의 "Calibrate initial yaw"를 먼저 돌리세요).
+데 있으면 `datum_site`가 틀렸거나, IMU yaw가 ENU와 어긋난 것입니다.
+
+> 이 문서를 쓴 뒤 IMU가 EBIMU-9DOFV5(9축)로 바뀌면서 "Calibrate initial yaw" 버튼은
+> 없앴습니다. 절대 yaw는 켜는 순간부터 `/imu`에 있고 `ekf_global`이 그대로 씁니다.
+> 대신 `ros2 topic echo /imu --field orientation`의 yaw가 실제 차량 방위(북=90deg)와
+> 맞는지 확인하세요.
 
 ### 출발
 
