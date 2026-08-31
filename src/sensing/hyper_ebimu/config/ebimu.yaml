@@ -1,0 +1,27 @@
+ebimu_node:
+  ros__parameters:
+    port: "/dev/ttyUSB0"
+    baudrate: 115200
+    # vehicle.xacro has no "imu_link" (or "base_link") -- the only body
+    # frame is "body_link", which is also ekf_local/ekf_global's
+    # base_link_frame (dual_ekf_navsat.yaml). Publishing under any other
+    # frame_id needs a TF link to body_link that doesn't exist, and
+    # robot_localization would just silently never fuse this sensor.
+    frame_id: body_link
+    topic: imu
+    # 1ms~1000ms (sensor's own "sor" command, spec 6-1-2). 10 = 100Hz.
+    output_rate_ms: 10
+    reconnect_wait_seconds: 2.0
+    # Placeholder covariances (roll/pitch/accel tighter than yaw, since
+    # yaw depends on the magnetometer's own environment-dependent quality
+    # per spec 8-1) -- not yet validated against real vehicle data. Tune
+    # here once this IMU is actually fused by ekf_local/ekf_global.
+    orientation_covariance: [0.01, 0.0, 0.0,
+                             0.0, 0.01, 0.0,
+                             0.0, 0.0, 0.02]
+    angular_velocity_covariance: [0.0025, 0.0, 0.0,
+                                  0.0, 0.0025, 0.0,
+                                  0.0, 0.0, 0.0025]
+    linear_acceleration_covariance: [0.01, 0.0, 0.0,
+                                     0.0, 0.01, 0.0,
+                                     0.0, 0.0, 0.01]
