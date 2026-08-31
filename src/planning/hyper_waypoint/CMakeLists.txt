@@ -14,12 +14,23 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 add_executable(waypoint_recorder_node src/waypoint_recorder_node.cpp)
 ament_target_dependencies(waypoint_recorder_node
-  rclcpp geometry_msgs nav_msgs sensor_msgs diagnostic_msgs)
+  rclcpp geometry_msgs nav_msgs sensor_msgs diagnostic_msgs std_msgs std_srvs)
 
 install(TARGETS waypoint_recorder_node
   DESTINATION lib/${PROJECT_NAME})
+
+install(
+  PROGRAMS
+    scripts/waypoint_record_gui.py
+  DESTINATION lib/${PROJECT_NAME})
+
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME})
 
 ament_package()

@@ -2,7 +2,6 @@
 
 import os
 
-import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -12,18 +11,36 @@ from std_msgs.msg import String
 from ultralytics import YOLO
 
 
-WINDOW_NAME = 'Object Detection'
-
-
 class ObjectDetection(Node):
 
-    # YOLO 모델의 클래스 이름을 behavior_supervisor가 사용하는 값으로 변환
+    # mission_manager가 쓰는 신호 값의 전체 목록.
     #
-    # behavior_supervisor에서 사용하는 신호:
-    #   red
-    #   green
-    #   left_arrow
-    #   none
+    # 신호등: red / green / left_arrow
+    # 차선 안내: ban / allow  -- 코스 끝의 갈림길에서 어느 차선으로 갈지 알려 주는 표지.
+    #            mission.yaml의 branch 스텝이 이 값을 보고 두 갈래 중 하나를 고릅니다.
+    # 차선 안내(상대 위치): allow_left / allow_right  -- 'allow'와 'ban' 표지가 한 프레임에
+    #            같이 보일 때, 'allow'가 'ban'보다 화면에서 왼쪽에 있으면 allow_left,
+    #            오른쪽에 있으면 allow_right. "허용 차선으로 가라"를 어느 쪽 차선인지까지
+    #            알려 주는 갈림길에서 branch 스텝이 이 값을 봅니다.
+    # none:    유효한 신호를 못 봤다.
+    VALID_SIGNS = frozenset({
+        'red',
+        'green',
+        'left_arrow',
+        'ban',
+        'allow',
+        'allow_left',
+        'allow_right',
+        'none',
+    })
+
+    # YOLO 모델의 클래스 이름 -> 위 신호 값.
+    #
+    # models/best.pt가 실제로 가진 클래스는 여섯입니다:
+    #   Allow, Ban, Go, LeftTurn, Stop, Warn
+    # 아래 매핑은 그 여섯을 전부 덮습니다. 모델을 다시 학습해 이름이 바뀌면 그 신호가
+    # 조용히 사라지므로, 매핑에 없는 이름은 한 번씩 경고로 남깁니다(아래 _map_class).
+    # 코드를 안 고치고 맞추려면 sign_class_map 파라미터를 쓰세요.
     SIGNAL_MAP = {
         # 빨간불
         'Stop': 'red',
@@ -34,8 +51,17 @@ class ObjectDetection(Node):
         # 좌회전 화살표
         'LeftTurn': 'left_arrow',
 
-        # Yellow light
+        # 황색등. 'none'으로 두는 것은 "무시"가 아니라 "통과 신호가 아니다"입니다 --
+        # 매핑에서 빼면 이 박스가 중앙 선택에서 아예 제외되어, 화면 가장자리의 다른
+        # 표지가 대신 뽑힐 수 있습니다. 'none'이면 황색등이 중앙을 차지한 채 통과
+        # 신호가 아님을 알리므로, wait_signal의 연속 프레임이 거기서 끊깁니다.
+        # ('Yellow'는 예전 모델의 이름입니다. 지금 모델은 'Warn'을 씁니다.)
+        'Warn': 'none',
         'Yellow': 'none',
+
+        # 차선 안내 표지 -- 코스 끝 갈림길에서 branch 스텝이 봅니다.
+        'Ban': 'ban',
+        'Allow': 'allow',
     }
 
     def __init__(self):
@@ -54,6 +80,12 @@ class ObjectDetection(Node):
             os.path.expanduser('~/traffic_dataset')
         )
 
+        # YOLO 클래스 이름 -> 신호 값 추가/덮어쓰기. "YoloClass:sign" 형태의 문자열 목록입니다.
+        # 예: ros2 run ... --ros-args -p sign_class_map:="['LaneBan:ban','LaneAllow:allow']"
+        # 학습 모델의 클래스 이름은 팀마다/버전마다 달라지는데, 그때마다 이 파일을 고치는 대신
+        # 런치에서 맞출 수 있게 한 것입니다.
+        self.declare_parameter('sign_class_map', [''])
+
         model_path = self.get_parameter('model_path').value
         self.confidence_threshold = float(
             self.get_parameter('confidence_threshold').value
@@ -65,6 +97,23 @@ class ObjectDetection(Node):
         )
 
         self.save_dir = self.get_parameter('save_dir').value
+
+        self.signal_map = dict(self.SIGNAL_MAP)
+        for entry in self.get_parameter('sign_class_map').value or []:
+            if not entry.strip():
+                continue
+            raw_name, _, sign_name = entry.partition(':')
+            raw_name, sign_name = raw_name.strip(), sign_name.strip()
+            if not raw_name or sign_name not in self.VALID_SIGNS:
+                self.get_logger().error(
+                    f"sign_class_map entry '{entry}' is not '<YoloClass>:<sign>' with sign in "
+                    f'{sorted(self.VALID_SIGNS)}; ignoring it.'
+                )
+                continue
+            self.signal_map[raw_name] = sign_name
+
+        # 무시한 클래스 이름은 한 번씩만 경고합니다(매 프레임 찍으면 로그가 묻힙니다).
+        self.unmapped_classes = set()
 
         os.makedirs(self.save_dir, exist_ok=True)
 
@@ -80,6 +129,9 @@ class ObjectDetection(Node):
 
         self.get_logger().info(
             f'YOLO model classes: {self.model.names}'
+        )
+        self.get_logger().info(
+            f'Sign class map: {self.signal_map}'
         )
 
         # -------------------- ROS 통신 --------------------
@@ -102,7 +154,12 @@ class ObjectDetection(Node):
             qos_profile_sensor_data
         )
 
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        # YOLO 검출 결과를 그린 프레임을 rviz에서 볼 수 있도록 발행 (imshow 대체)
+        self.annotated_image_publisher = self.create_publisher(
+            Image,
+            '/perception/object_detection/annotated_image',
+            qos_profile_sensor_data
+        )
 
         self.get_logger().info(
             'ObjectDetection started: publishing /perception/sign'
@@ -112,20 +169,16 @@ class ObjectDetection(Node):
         """
         판단 노드가 사용하는 형식으로 신호를 발행한다.
 
-        가능한 값:
-            red
-            green
-            left_arrow
-            none
+        가능한 값은 VALID_SIGNS 참고 (red / green / left_arrow / ban / allow / none).
         """
-        valid_signs = {
-            'red',
-            'green',
-            'left_arrow',
-            'none'
-        }
-
-        if sign_name not in valid_signs:
+        if sign_name not in self.VALID_SIGNS:
+            # 여기로 오면 SIGNAL_MAP이나 sign_class_map이 VALID_SIGNS에 없는 값을 냈다는
+            # 뜻입니다. 'none'으로 바꿔 내보내되(안전한 쪽), 조용히 넘기지는 않습니다 --
+            # mission_manager 쪽에서는 "신호가 영영 안 온다"로만 보여 원인을 찾기 어렵습니다.
+            self.get_logger().error(
+                f"Sign '{sign_name}' is not one of {sorted(self.VALID_SIGNS)}; "
+                'publishing none instead.'
+            )
             sign_name = 'none'
 
         msg = String()
@@ -153,9 +206,9 @@ class ObjectDetection(Node):
             )
             return
 
-        self.process_frame(frame)
+        self.process_frame(frame, msg.header)
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, header):
         self.n_frames += 1
 
         # 지정된 프레임 간격마다 YOLO 추론
@@ -183,17 +236,86 @@ class ObjectDetection(Node):
         result = results[0]
         annotated_frame = result.plot()
 
-        self.publish_middle_traffic_light(
-            result,
-            frame.shape[1]
+        # 'allow'와 'ban'이 한 프레임에 같이 보이면 둘의 좌우 배치가 곧 신호이므로
+        # (allow_left / allow_right) 중앙 선택보다 먼저 본다. 둘 중 하나만 보이거나
+        # 아예 없으면 False를 돌려주고 평소의 중앙 선택으로 넘어간다.
+        if not self.publish_lane_fork_sign(result):
+            self.publish_center_sign(
+                result,
+                frame.shape[1]
+            )
+
+        annotated_msg = self.bridge.cv2_to_imgmsg(
+            annotated_frame,
+            encoding='bgr8'
         )
+        annotated_msg.header = header
+        self.annotated_image_publisher.publish(annotated_msg)
 
-        cv2.imshow(WINDOW_NAME, annotated_frame)
-        cv2.waitKey(1)
+    def _map_class(self, raw_class_name):
+        """
+        YOLO 클래스 이름을 신호 값으로 바꾼다. 신호가 아니면 None.
 
-    def publish_middle_traffic_light(self, result, image_width):
+        매핑에 없는 이름은 한 번씩 경고로 남긴다. 학습 모델의 클래스 이름이 바뀌면
+        (예: 'Ban' -> 'LaneBan') 신호가 조용히 사라지는데, 그 증상은 mission_manager
+        쪽에서 "신호가 영영 안 온다"로만 보여 원인을 찾기 어렵기 때문이다.
+        """
+        sign_name = self.signal_map.get(raw_class_name)
+        if sign_name is None and raw_class_name not in self.unmapped_classes:
+            self.unmapped_classes.add(raw_class_name)
+            self.get_logger().warn(
+                f"YOLO class '{raw_class_name}' is not in the sign class map, so it is "
+                'ignored. If this is a traffic light or a lane-guidance sign, add it with '
+                "the sign_class_map parameter (e.g. -p sign_class_map:=\"['"
+                f'{raw_class_name}:ban\']").'
+            )
+        return sign_name
+
+    def publish_lane_fork_sign(self, result):
+        """
+        'allow'와 'ban' 표지가 한 프레임에 같이 보이면 좌우 배치를 신호로 낸다.
+
+        allow가 ban보다 왼쪽이면 'allow_left', 오른쪽이면 'allow_right'를 publish하고
+        True를 돌려준다. 둘 중 하나만 보이거나 아예 없으면 아무것도 안 하고 False --
+        그러면 호출부가 평소의 publish_center_sign으로 넘어간다.
+
+        중앙 50% 제한을 두지 않는다: 갈림길 표지는 보통 나란히 붙어 있어 한쪽이 중앙
+        밖으로 밀리기 쉽고, 여기서 중요한 건 화면 어디에 있느냐가 아니라 둘의 상대
+        위치이기 때문이다. 같은 클래스가 여러 개면 신뢰도가 가장 높은 박스를 쓴다.
+        """
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            return False
+
+        best = {'allow': None, 'ban': None}  # sign -> (confidence, box_center_x)
+        for box in boxes:
+            raw_class_name = str(self.model.names[int(box.cls[0])])
+            sign_name = self._map_class(raw_class_name)
+            if sign_name not in ('allow', 'ban'):
+                continue
+
+            confidence = float(box.conf[0])
+            x1, _, x2, _ = box.xyxy[0].tolist()
+            box_center = (x1 + x2) / 2.0
+            if best[sign_name] is None or confidence > best[sign_name][0]:
+                best[sign_name] = (confidence, box_center)
+
+        if best['allow'] is None or best['ban'] is None:
+            return False
+
+        allow_x = best['allow'][1]
+        ban_x = best['ban'][1]
+        self.publish_sign('allow_left' if allow_x < ban_x else 'allow_right')
+        return True
+
+    def publish_center_sign(self, result, image_width):
         """
         화면 중앙 50% 영역에 있는 신호 객체 중에서 하나를 선택한다.
+
+        신호등과 차선 안내 표지가 같은 프레임에 보이면 중앙에 가까운 쪽 하나만 나간다.
+        그래도 안전한데, mission_manager의 판정은 "같은 값이 연속 N프레임"이라 두 표지가
+        번갈아 나오면 어느 쪽도 확정되지 않기 때문이다 -- 신호등 앞에서는 계속 서 있고,
+        갈림길에서는 timeout 뒤 default 갈래로 간다. 둘 다 안전한 쪽 실패다.
 
         선택 우선순위:
         1. 화면 중앙에 가장 가까운 객체
@@ -224,12 +346,9 @@ class ObjectDetection(Node):
                 self.model.names[class_id]
             )
 
-            # 판단 노드에서 사용할 수 있는 신호 클래스로 변환
-            sign_name = self.SIGNAL_MAP.get(
-                raw_class_name
-            )
-
-            # 자동차, 사람, 표지판 등 신호가 아닌 클래스는 제외
+            # 판단 노드에서 사용할 수 있는 신호 클래스로 변환.
+            # 자동차, 사람 등 신호가 아닌 클래스는 여기서 걸러집니다.
+            sign_name = self._map_class(raw_class_name)
             if sign_name is None:
                 continue
 
@@ -267,16 +386,6 @@ class ObjectDetection(Node):
         confidence = float(best_box.conf[0])
 
         self.publish_sign(best_sign_name)
-
-        self.get_logger().info(
-            f'Detected traffic light: '
-            f'{best_raw_class_name} -> {best_sign_name} '
-            f'({confidence:.2f})'
-        )
-
-    def destroy_node(self):
-        cv2.destroyAllWindows()
-        super().destroy_node()
 
 
 def main(args=None):

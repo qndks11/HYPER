@@ -1,6 +1,6 @@
 #include "hyper_control/joystick_controller_node.hpp"
 
-JoystickController::JoystickController(const double timer_period) :
+JoystickController::JoystickController(double timer_period) :
   Node{"joystick_controller"},
   max_steering_angle_{0.0},
   max_velocity_{0.0},
@@ -10,10 +10,19 @@ JoystickController::JoystickController(const double timer_period) :
   // Declare the used parameters
   declare_parameter<double>("max_steering_angle", 0.0);
   declare_parameter<double>("max_velocity", 0.0);
+  // Overrides the timer_period ctor arg (default 0.01s = 100Hz) when set --
+  // lets the publish rate be tuned from a launch file/yaml without
+  // recompiling. 0.0 (the default) means "use timer_period as given".
+  declare_parameter<double>("joystick_publish_period", 0.0);
 
   // Get parameters on startup
   get_parameter("max_steering_angle", max_steering_angle_);
   get_parameter("max_velocity", max_velocity_);
+  double publish_period_override{0.0};
+  get_parameter("joystick_publish_period", publish_period_override);
+  if (publish_period_override > 0.0) {
+    timer_period = publish_period_override;
+  }
 
   // Subscription to the 'joy' topic
   subscriber_ = create_subscription<sensor_msgs::msg::Joy>(
@@ -31,8 +40,8 @@ JoystickController::JoystickController(const double timer_period) :
 void JoystickController::listener_callback(const sensor_msgs::msg::Joy::SharedPtr msg)
 {
   // Set the desired angle and desired velocity based on the joystick's axis
-  steering_angle_ = msg->axes[0] * max_steering_angle_;
-  velocity_ = msg->axes[3] * max_velocity_;
+  steering_angle_ = msg->axes[0] * max_steering_angle_;  // Left stick X
+  velocity_ = msg->axes[4] * max_velocity_;              // Right stick Y
 }
 
 void JoystickController::timer_callback()

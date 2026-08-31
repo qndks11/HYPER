@@ -1,0 +1,294 @@
+# HYPER 미션 정의 -- mission_manager_node가 읽습니다.
+#
+# 구조는 두 부분으로 나뉩니다.
+#   labels: "어디서"  -- 코스 위의 이벤트 지점 좌표 (map 프레임, 미터)
+#   steps:  "무엇을"  -- 그 지점들을 순서대로 엮은 미션 시퀀스
+#
+# 이렇게 나눈 이유: 정지 시간을 5초에서 6초로 바꾸거나 주차 접근을 튜닝할 때마다
+# 코스를 다시 녹화할 수는 없기 때문입니다. labels는 코스를 다시 녹화해도 물리적
+# 위치가 그대로면 살아남습니다(웨이포인트 idx가 아니라 좌표로 저장하므로).
+#
+# labels 채우는 법:
+#   python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+#       src/planning/hyper_waypoint/waypoints/sim.csv
+#
+# 실행:
+#   ros2 launch hyper_planner nav2_controller.launch.py   # 액션 서버가 먼저 떠 있어야 합니다
+#   ros2 launch hyper_planner mission.launch.py
+#   ros2 service call /mission_manager/start std_srvs/srv/Trigger
+#
+# mission_manager는 로드 시점에 각 label을 CSV의 최근접 웨이포인트로 스냅하고,
+# 스냅 거리가 label_snap_tolerance_m를 넘으면 미션을 거부합니다(라벨이 엉뚱한 데
+# 붙은 채로 주행이 시작되는 사고 방지).
+#
+# 갈림길이 있으면 세 번째 부분이 붙습니다.
+#   courses: "어느 코스"  -- 갈래마다 따로 녹화한 CSV와 그 CSV의 labels
+#   routes:  "고르면 무엇을" -- branch가 고를 수 있는 스텝 시퀀스들
+# 자세한 것은 아래 `branch` 스텝 설명과 파일 끝의 예시를 보세요. courses를 안 쓰면
+# 코스는 waypoint_csv 하나("main")뿐이고 동작은 분기 기능이 없던 때와 같습니다.
+
+label_snap_tolerance_m: 1.0
+
+# 갈래 CSV의 첫 점이 분기 지점에서 이만큼 넘게 떨어져 있으면 미션을 거부합니다.
+# label_snap_tolerance_m와 같은 취지입니다 -- 어긋난 채로 달리면 차가 분기 지점에서
+# 갈래 CSV의 첫 점까지 직선으로 가로지릅니다. 분기를 안 쓰면 아무 일도 안 합니다.
+#
+# 3.0으로 올린 이유: sim_right.csv의 첫 점이 lane_fork(= sim1.csv 끝)에서 약 2.5 m
+# 떨어져 있습니다(sim_right를 분기 지점보다 조금 뒤에서 녹화 시작). 코스 진행
+# 방향으로 이어지는 2.5 m라 통과는 시키되, 더 깔끔하게 하려면 sim_right.csv를
+# 갈림길 지점부터 다시 녹화하세요.
+branch_seam_tolerance_m: 3.0
+
+# --- label_waypoints.py가 관리하는 블록 (아래 주석 참고) ---
+labels:
+  # 이 블록은 label_waypoints.py가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+  stopline_1: {x: 39.812, y: -3.227}   # wp #78
+  light_1: {x: 12.202, y: -8.547}   # wp #305
+  light_2: {x: -0.500, y: 1.395}   # wp #565
+  park_t_entry: {x: -26.564, y: -21.848}   # wp #653
+  park_t_spot: {x: -16.047, y: -28.716}   # wp #687
+  light_3: {x: -9.691, y: -11.769}   # wp #904
+  accel_start: {x: -36.231, y: 41.459}   # wp #1110
+  accel_end: {x: -39.314, y: -34.026}   # wp #1249
+  park_p_entry: {x: 6.394, y: -32.312}   # wp #1366
+  park_p_spot: {x: 9.817, y: -40.114}   # wp #1385
+  finish: {x: 19.720, y: -18.906}   # wp #1468
+
+# --- 미션 시퀀스 ---
+#
+# step 종류:
+#   drive        경로를 따라 `until` 라벨까지 주행. 한 세그먼트 = FollowPath 골 1개.
+#                controller/goal_checker로 nav2 플러그인을 골라 쓸 수 있습니다
+#                (nav2_controller.yaml에 등록된 이름: FollowPath / ReverseFollowPath,
+#                 general_goal_checker / precise_goal_checker).
+#                reverse: true 는 "이 구간은 후진으로 녹화했다"는 표시입니다.
+#                포즈 방향은 CSV의 yaw(= 실제 차체 헤딩)를 그대로 쓰므로 뒤집지 않습니다
+#                -- RPP는 진행 방향을 포즈 방향이 아니라 carrot 점의 차체 좌표계 x부호로
+#                판단하고, goal checker의 yaw 비교는 차체 헤딩 기준이기 때문입니다.
+#                이 플래그가 실제로 하는 일은 (1) 헤딩을 무시하는 직선 진입 경로(lead-in)를
+#                끄고, (2) CSV에 yaw가 없을 때 유도한 방향을 180도 뒤집는 것입니다.
+#                로드 시점에 녹화된 방향과 플래그가 맞는지 검사해 경고합니다.
+#
+#                cancel_on_arrival_m: 골까지 남은 거리가 이 값 이하이고 속도도 충분히
+#                떨어졌으면, 골 판정을 기다리지 않고 취소해 도착으로 칩니다. MPPI는 골
+#                공차 안으로 들어가는 마지막 수십 cm를 기어가는데(nav2_controller.yaml의
+#                precise_goal_checker 주석), 어차피 뒤에 stop/wait_signal이 붙는
+#                스텝이라면 그 시간을 버릴 이유가 없습니다. 그만큼 짧게 서므로 정지선
+#                앞에서는 오히려 안전한 쪽입니다. 0 = 끔(기본값).
+#
+#                후진 주차 스텝(park_*_spot)에는 켜지 마세요 -- 0.4 m 짧게 서면 칸에 덜
+#                들어갑니다. 반대로 주차 *진입* 스텝에는 반드시 켜야 합니다: 진입 스텝은
+#                decel_profile_a를 쓰고, 프로파일을 쓰면 경로 끝이 라벨보다 뒤에 있어
+#                goal checker가 라벨에서 절대 만족되지 않기 때문입니다(도착 판정이 오직
+#                취소로만 일어납니다). 대신 값을 작게 잡으세요 -- 진입에서 덜 간 거리는
+#                그대로 후진 경로 전체를 밀어, 칸 안 정지 오차에 더해집니다.
+#
+#                decel_profile_a: 0보다 크면 이 스텝을 등감속(m/s^2)으로 세웁니다. 0 = 끔.
+#                MPPI는 가속도 제약이 없고, 감속이 "궤적의 마지막 점을 경로 끝점에 맞춘다"는
+#                항에서 부수적으로 나옵니다. 그래서 속도가
+#                    v = 남은거리 / (time_steps * model_dt)
+#                라는 지수 감쇠가 되어 수학적으로 영영 도착하지 않고, local costmap 반지름
+#                (10 m)부터 기어가기 시작해 정지까지 5초 넘게 씁니다.
+#
+#                이 값을 켜면 미션 매니저가 두 가지를 합니다.
+#                 (1) 골 경로를 라벨보다 decel_profile_lookahead_m(기본 12 m)만큼 뒤까지
+#                     늘립니다. MPPI가 보는 경로 끝이 costmap 밖에 있으면 위의 감속 항이
+#                     아예 켜지지 않아, 차는 라벨 직전까지 vx_max로 달립니다. 이 꼬리는
+#                     녹화 코스가 아니라 라벨의 진행 방향으로 뻗은 직선이라, 코스가 라벨
+#                     뒤에서 무엇을 하든(후진/코스 끝) 항상 정확히 그 길이만큼 붙습니다.
+#                 (2) 대신 /speed_limit으로 v = sqrt(2*a*d)를 실어 보내 vx_max를 직접
+#                     깎습니다. 이게 등감속 프로파일입니다.
+#
+#                반드시 cancel_on_arrival_m과 같이 쓰세요. 경로 끝이 라벨보다 뒤에 있으므로
+#                goal checker는 라벨에서 절대 만족되지 않고, 도착 판정이 오직 취소로만
+#                일어납니다. 취소가 안 걸리면 차가 정지선을 그냥 지나갑니다(그때를 위한
+#                하드 백스톱이 노드 안에 두 개 있고, 걸리면 ERROR/WARN 로그가 납니다).
+#
+#                a 값 정하기: 2.0이면 2.22 m/s에서 제동거리 1.23 m입니다(6 m/s 시절에는
+#                9 m였습니다 -- vx_max를 내리면서 프로파일이 훨씬 짧아졌습니다). 차가 실제로 그만큼 못
+#                줄이면 프로파일보다 빠르게 라벨에 닿아 "reached ... above
+#                cancel_on_arrival_speed" 경고가 납니다 -- 그러면 a를 낮추세요. 반대로
+#                여유 있게 서면 올려서 시간을 줄이세요.
+#
+#                후진 스텝에는 켤 수 없습니다(로드 시점에 자동으로 꺼집니다) -- RPP는
+#                goal checker에 실제로 닿아야 하기 때문입니다. 주차 *진입* 스텝에는
+#                켜세요: 안 켜면 MPPI의 지수 감속으로 마지막 10 m를 기어들어가고, 차가
+#                제대로 서기 전에 goal checker가 먼저 만족돼 후진 스텝이 시작됩니다.
+#                늘리는 꼬리가 녹화 코스가 아니라 직선이라, 라벨 뒤가 후진 구간이어도
+#                (주차 진입) 켤 수 있습니다.
+#
+#                obstacle_hold_s: 0보다 크면, 이 스텝에서 컨트롤러가 abort 했을 때 미션을
+#                실패로 끝내지 않고 "앞이 막혔다"로 봅니다. 골을 안 보낸 채로 서 있다가
+#                (워치독이 차를 세웁니다) obstacle_retry_period_sec(기본 1초)마다 같은 골을
+#                다시 보내고, 치워지면 선 자리에서 그대로 이어 갑니다. 이 시간(초) 동안 계속
+#                막혀 있으면 그때는 실패로 끝냅니다(영영 서 있는 것보다 낫습니다).
+#                0 = 끔 -- 그때는 goal_retry_limit(기본 2)이 소진되는 즉시 미션 실패입니다.
+#
+#                경로를 벗어나지 않는 컨트롤러(ForwardFollowPath / ReverseFollowPath)에서만
+#                의미가 있습니다. MPPI(FollowPath)는 애초에 막히면 비켜 가므로 abort 자체가
+#                거의 안 납니다.
+#   stop         duration_s 동안 정지. 골을 안 보내면 cmd_vel_to_ackermann의
+#                워치독(input_timeout 0.3s)이 차를 세웁니다.
+#   wait_signal  /perception/sign이 value를 debounce_frames 연속으로 낼 때까지 대기.
+#                value에 쉼표를 넣어 여러 신호를 허용할 수 있습니다(예: "green,left_arrow").
+#                timeout_s 안에 못 보면 기본값(proceed_on_signal_timeout: true)으로는
+#                경고를 남기고 그냥 출발합니다 -- 대회에서 영영 멈춰 서는 것보다 낫습니다.
+#
+#                prearm_distance_m: 0보다 크면, 앞 drive 스텝의 골까지 이만큼 남았을 때부터
+#                신호를 미리 봅니다. 통과 신호가 확인되면 서지 않고 그대로 통과합니다 --
+#                실행 중인 골을 "지금 위치 -> 다음 drive 스텝의 끝"까지의 골로 갈아끼우고
+#                (nav2가 /cmd_vel을 끊지 않고 갈아끼웁니다) 이 wait_signal을 건너뜁니다.
+#                초록불에 굳이 정차했다 재출발하는 시간을 없애는 것이 목적입니다.
+#
+#                확인이 안 되면 -- 빨간불이든, 인식이 끊겼든, 애매하든 -- 아무 일도 일어나지
+#                않고 원래 골 그대로 정지선에 섭니다. 즉 기본 동작이 "정지"이고 "통과"가
+#                명시적 예외라, 인식이 흔들려도 안전한 쪽으로 실패합니다.
+#
+#                패턴이 [drive -> wait_signal -> drive]가 아니면(뒤가 stop이거나, 뒤 drive가
+#                후진 세그먼트이거나, 두 drive의 controller가 다르면) 로드 시점에 경고를
+#                남기고 이 자리의 prearm만 끕니다 -- 그러면 예전처럼 서서 기다립니다.
+#
+#                값을 정할 때: 클수록 초록불을 일찍 잡아 감속을 덜 하지만, 그만큼 멀리서
+#                신호등을 분류해야 합니다(화면에서 몇 픽셀 안 됩니다). 정지선을 넘을
+#                위험은 늘지 않습니다 -- 서는 쪽은 원래 골이 그대로 하기 때문입니다.
+#
+#                대신 늘어나는 위험이 하나 있습니다: 갈아끼우기는 되돌릴 수 없습니다.
+#                통과 판정이 나면 그 자리에서 wait_signal을 건너뛰므로 신호를 더 이상 보지
+#                않고, 통과한 뒤 신호가 초록 -> 빨강으로 바뀌어도 그대로 지나갑니다.
+#                15 m / 2.22 m/s면 약 6.8초의 노출입니다(6 m/s 시절에는 2.5초였습니다).
+#                이 값을 키운다는 것은 그 창을 넓힌다는 뜻이므로, 신호 주기를 생각하며
+#                정하세요. vx_max를 2.5로 내리면서 같은 거리가 2.4배 긴 시간이 됐으므로,
+#                신호 주기가 짧다면 prearm_distance_m를 6~8 m로 줄이는 것을 검토하세요.
+#
+#   branch       차선 안내 신호를 보고 두 갈래(routes) 중 하나를 골라 그리로 갑니다.
+#                코스 끝의 갈림길처럼 "표지가 알려 주는 대로 가야 하는" 곳에 씁니다.
+#
+#                wait_signal과 결정적으로 다른 점은 "못 봤다"의 안전한 답이 없다는 것입니다.
+#                신호등은 못 보면 서 있으면 되지만 갈림길에서는 어디로든 가야 합니다.
+#                그래서 `default`가 필수이고, timeout_s는 신호등의 120초와 달리 짧게 잡습니다
+#                (더 기다린다고 더 나은 답이 나오지 않습니다). 못 고르고 timeout이 지나면
+#                경고를 남기고 default 갈래로 갑니다.
+#
+#                판정은 "같은 값이 debounce_frames 연속"입니다. wait_signal의 "허용 목록
+#                안이기만 하면 됨"과 다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기
+#                때문입니다. 두 표지가 번갈아 보이면 어느 쪽도 확정되지 않고 default로
+#                갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다.
+#
+#                prearm_distance_m: wait_signal과 같습니다. 0보다 크면 앞 drive 스텝의 골까지
+#                이만큼 남았을 때부터 표지를 미리 보고, 확인되면 서지 않고 그대로 갈래로
+#                들어갑니다(골을 "지금 위치 -> 분기 지점 -> 고른 갈래의 끝"으로 갈아끼웁니다).
+#                확인이 안 되면 원래 골 그대로 분기 지점에 서고, 거기서 branch가 다시 봅니다.
+#
+#                cases의 value에 쉼표를 넣어 한 갈래에 여러 값을 허용할 수 있습니다.
+#                같은 값이 두 갈래에 나오면 로드 시점에 거부합니다(어디로 갈지가 순서에
+#                숨는 것을 막습니다).
+#
+#                갈래(routes)가 끝나면 branch 뒤의 main 스텝으로 합류하고, branch가 main의
+#                마지막 스텝이면 미션이 끝납니다. route 안에 또 branch를 두는 것은 지원하지
+#                않습니다(합류 지점이 모호해집니다).
+#
+# 장애물 회피는 step이 아닙니다 -- 이미 MPPI costmap 안에서 처리되므로
+# 해당 구간 drive step 안에서 자동으로 일어납니다.
+steps:
+  # 1) 출발 -> 첫 정지선
+  - {type: drive, until: stopline_1, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: stop, duration_s: 5.0}
+
+  # 2) 첫 신호등
+  - {type: drive, until: light_1, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
+     prearm_distance_m: 15.0}
+
+  # 3) 장애물 회피 구간 통과 -> 두 번째 신호등 (회피는 MPPI가 처리)
+  - {type: drive, until: light_2, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
+     prearm_distance_m: 15.0}
+
+  # 4) T자 주차: 진입 -> 후진 입고 -> 정차
+  # 출차는 별도 스텝이 아닙니다. 방향 전환 경계는 park_t_spot이 이미 만들고 있고,
+  # 그 뒤 "전진 출차 -> 코스 복귀 -> 신호등"은 전부 전진이라 한 세그먼트로 이어집니다.
+  # 진입 스텝에 프로파일이 필요한 이유는 위 decel_profile_a 설명 참고 -- 안 켜면 MPPI가
+  # 마지막 10 m를 기어들어가고(v = 남은거리 / 2.8 s), 차가 서기 전에 goal checker가 먼저
+  # 만족돼 후진이 시작됩니다. cancel_on_arrival_m는 정지선(0.4)보다 작게 잡습니다:
+  # 진입에서 덜 간 거리가 그대로 칸 안 정지 오차에 더해집니다.
+  - {type: drive, until: park_t_entry, decel_profile_a: 1.5, cancel_on_arrival_m: 0.15}
+  - {type: drive, until: park_t_spot, controller: ReverseFollowPath, reverse: true,
+     goal_checker: park_goal_checker}
+  - {type: stop, duration_s: 3.0}
+
+  # 5) 출차하며 세 번째 신호등까지
+  - {type: drive, until: light_3, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  # light_3은 좌회전 신호등입니다 -- 이 신호 직후 코스가 왼쪽으로 약 105도 꺾입니다
+  # (wp 810 기준 다음 20 m의 누적 헤딩 변화). 그래서 여기서는 초록불이 아니라 좌회전
+  # 화살표가 켜지며, value: green만 기다리면 영영 매칭되지 않습니다.
+  # 그 경우 timeout_s(120초)를 통째로 서 있다가 proceed_on_signal_timeout: true 때문에
+  # 경고만 남기고 출발합니다 -- 즉 "동작은 하는데 120초를 버리는" 형태로 조용히 실패합니다.
+  # 화살표와 초록불을 모두 허용합니다(perception이 내는 값은 left_arrow입니다).
+  #
+  # prearm 주의: 여기 직후가 좌회전이라, 멀리서는 화살표가 켜졌는지 판별하기 어렵습니다.
+  # 다른 두 신호등보다 짧게 잡았습니다. 실주행에서 통과가 잘 안 걸리면 줄이지 말고
+  # (줄이면 감속이 이미 시작된 뒤라 이득이 없습니다) 인식 쪽 신뢰도를 먼저 보세요.
+  - {type: wait_signal, value: "green,left_arrow", timeout_s: 120.0, debounce_frames: 3,
+     prearm_distance_m: 12.0}
+  - {type: drive, until: accel_start, goal_checker: precise_goal_checker,
+       cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+  # 6) 가속 구간: 여기만 전진 RPP(ForwardFollowPath) + 막힘 유지입니다.
+  # MPPI는 장애물을 만나면 비켜서 지나갑니다. 이 구간은 장애물 앞에서 반드시 서야 하므로
+  # 경로를 벗어나지 않고 충돌이 보이면 제어를 포기(= 정지)하는 RPP를 씁니다.
+  # obstacle_hold_s: 그 정지를 미션 실패가 아니라 대기로 다룹니다 -- 서 있다가 1초마다 골을
+  # 다시 보내 보고, 치워지면 그 자리에서 이어서 갑니다. 30초 넘게 계속 막혀 있으면 실패.
+  # decel_profile_a는 여기서 선택이 아닙니다: RPP는 스스로 라벨 앞에서 감속하지 않고
+  # /speed_limit 프로파일만이 차를 세웁니다.
+  - {type: drive, until: accel_end, controller: ForwardFollowPath,
+       goal_checker: precise_goal_checker, obstacle_hold_s: 30.0,
+       cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+  # 7) 평행 주차: 진입 -> 후진 입고 -> 정차 (출차는 T자와 같은 이유로 아래 스텩에 포함)
+  - {type: drive, until: park_p_entry, decel_profile_a: 1.5, cancel_on_arrival_m: 0.15}
+  - {type: drive, until: park_p_spot, controller: ReverseFollowPath, reverse: true,
+     goal_checker: park_goal_checker}
+  - {type: stop, duration_s: 3.0}
+
+  # 8) sim1 끝(= 갈림길)까지 주행
+  # finish는 이제 sim1.csv의 마지막 웨이포인트이자 갈림길 지점입니다(wp #1468).
+  # 여기서 카메라로 'allow'/'ban' 표지를 보고 두 차선 중 하나로 들어갑니다.
+  - {type: drive, until: finish, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+  # 9) 차선 안내 표지에 따른 분기
+  # 'allow'와 'ban' 표지가 한 프레임에 같이 보일 때, object_detection이 둘의 좌우
+  # 배치를 보고 신호를 냅니다(object_detection_node.py의 publish_lane_fork_sign):
+  #   allow가 ban보다 왼쪽  -> 'allow_left'  -> sim_left  (left_route)
+  #   allow가 ban보다 오른쪽 -> 'allow_right' -> sim_right (right_route)
+  # 표지를 하나만 보거나 못 보면 어느 case에도 안 맞아, timeout 뒤 default로 갑니다.
+  - type: branch
+    default: right_route         # 표지를 못 읽었을 때 갈 곳. 필수입니다.
+    timeout_s: 8.0               # 신호등의 120초와 달리 짧게 -- 더 기다려도 답이 안 나옵니다.
+    debounce_frames: 3
+    prearm_distance_m: 12.0      # 서지 않고 그대로 갈래로 들어갑니다. 0이면 서서 읽습니다.
+    cases:
+      - {value: "allow_left",  goto: left_route}
+      - {value: "allow_right", goto: right_route}
+
+courses:
+  sim_left:
+    csv: sim_left.csv
+    labels:
+      sim_left_end: last
+  sim_right:
+    csv: sim_right.csv
+    labels:
+      sim_right_end: last
+
+routes:
+  left_route:
+    - {type: drive, course: sim_left, until: sim_left_end,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  right_route:
+    - {type: drive, course: sim_right, until: sim_right_end,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}

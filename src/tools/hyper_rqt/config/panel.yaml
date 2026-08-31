@@ -1,0 +1,141 @@
+# HYPER Panel -- rqt 버튼 정의
+#
+# 이 파일이 패널의 전부입니다. 서비스를 새로 만들면 여기에 몇 줄 적으면
+# 버튼이 생깁니다(코드는 건드리지 않습니다). 적용하려면
+#   colcon build --packages-select hyper_rqt && source install/setup.bash
+# 후 rqt를 다시 띄우세요. 이 파일만 고치는 경우 --symlink-install로 빌드해
+# 두었다면 rqt 재시작만으로 반영됩니다.
+#
+# 다른 파일을 쓰려면:
+#   ros2 run hyper_rqt hyper_panel --config /경로/panel.yaml
+#   또는 rqt 안에서 패널 우상단 톱니바퀴(설정) -> config 경로 지정
+#
+# ---------------------------------------------------------------------
+# 스키마
+#
+# status_topic: std_msgs/String 토픽. 패널 맨 위에 그대로 표시합니다. (선택)
+#
+# groups[].name        그룹 상자 제목
+# groups[].selects[]   호출 전에 "어떤 대상인지" 고르는 콤보 박스. 고르는 즉시
+#                      대상 노드의 파라미터를 set_parameters로 바꿉니다.
+#                      = 요청 필드가 없는 Trigger 서비스에 인자를 주는 방법이고,
+#                        model_service가 이미 쓰고 있는 방식입니다.
+#     label            콤보 왼쪽 라벨
+#     node             파라미터를 바꿀 노드 이름 (예: /model_service)
+#     param            (짧은 형태) 바꿀 파라미터 하나의 이름
+#     options          param과 함께 쓰면 값 목록.
+#                      또는 프리셋 목록: [{label: 표시이름, params: {이름: 값, ...}}]
+#     default          시작 시 선택할 항목의 label (선택, 기본값은 첫 항목)
+#     apply_on_start   true면 패널이 뜰 때 현재 선택을 한 번 적용합니다 (기본 false)
+#
+# groups[].buttons[]
+#     label            버튼 글자
+#     service          서비스 이름
+#     type             서비스 타입 (기본 std_srvs/srv/Trigger)
+#     request          요청 필드 (선택). 타입이 Trigger가 아닐 때 dict로 채웁니다.
+#     style            go(초록) / stop(빨강) / warn(주황) / 없으면 기본
+#     confirm          true면 누를 때 확인 창을 띄웁니다
+#     tooltip          마우스를 올렸을 때 설명
+# ---------------------------------------------------------------------
+
+status_topic: /mission_manager/status
+
+groups:
+  - name: 미션 (mission_manager)
+    buttons:
+      - label: Start
+        service: /mission_manager/start
+        style: go
+        tooltip: 첫 스텝부터 미션 주행을 시작합니다 (auto_start=false라 이걸 눌러야 출발).
+      - label: Cancel
+        service: /mission_manager/cancel
+        style: stop
+        tooltip: 실행 중인 골을 취소하고 미션을 멈춥니다.
+      - label: Skip step
+        service: /mission_manager/skip
+        style: warn
+        tooltip: 현재 스텝을 건너뛰고 다음 스텝으로 넘어갑니다.
+      - label: Restart
+        service: /mission_manager/restart
+        confirm: true
+        tooltip: 미션을 처음 스텝부터 다시 시작합니다.
+
+  - name: 시뮬레이터 모델 (model_service)
+    selects:
+      - label: 모델
+        node: /model_service
+        apply_on_start: true
+        options:
+          - label: 가속구간 보행자
+            params:
+              model_name: accel_pedestrian
+              model_uri: model://person_standing
+              static: true
+              pose: [-37.77, 3.72, 0.0, 0.0, 0.0, 1.5708]
+    buttons:
+      - label: Spawn
+        service: /model_service/spawn
+        style: go
+        tooltip: 위에서 고른 모델을 gz 월드에 띄웁니다.
+      - label: Remove
+        service: /model_service/remove
+        style: stop
+        tooltip: 위에서 고른 모델을 gz 월드에서 지웁니다.
+
+  - name: 순간이동 (teleport_service, sim 전용)
+    selects:
+      - label: 목적지
+        node: /teleport_service
+        param: label
+        apply_on_start: true
+        options:
+          - stopline_1
+          - light_1
+          - light_2
+          - park_t_entry
+          - park_t_spot
+          - light_3
+          - accel_start
+          - accel_end
+          - park_p_entry
+          - park_p_spot
+          - finish
+      - label: 라벨 기준 오프셋
+        node: /teleport_service
+        param: offset_m
+        apply_on_start: true
+        # 음수 = 라벨 앞쪽(아직 도달 전). 스텝 하나를 처음부터 보려면 -10 쯤.
+        options: [0.0, -5.0, -10.0, -20.0, -40.0]
+    buttons:
+      - label: Teleport
+        service: /teleport_service/teleport
+        style: warn
+        confirm: true
+        tooltip: |
+          차량 모델을 위 라벨 위치로 옮깁니다(gz set_pose). 차를 세워 놓고 누르세요 --
+          속도는 리셋되지 않아 달리는 중에 부르면 옮겨진 자리에서 그대로 굴러갑니다.
+          EKF도 리셋하지 않으므로, ekf_global이 점프한 GPS를 물고 자리를 잡을 때까지
+          몇 초 기다린 뒤에 미션을 시작하세요.
+
+  - name: 차로 제어 표지판 (lane_sign_service, sim 전용)
+    buttons:
+      - label: Swap signs
+        service: /lane_sign_service/swap
+        style: warn
+        tooltip: |
+          초록 화살표(lane_sign_arrow_1)와 빨간 X(lane_sign_x_1)의 위치를 서로
+          맞바꿉니다. 지금 시뮬레이터에 있는 pose를 읽어 교환하므로, GUI에서
+          표지판을 옮겨 놓았어도 그 자리 기준으로 바뀝니다. 두 번 누르면 원위치.
+
+  - name: 카메라 캡처 (image_saver_service)
+    buttons:
+      - label: Save frame
+        service: /image_saver_service/save
+        style: go
+        tooltip: |
+          지금 /camera_object/image_raw 의 최신 프레임을 ~/Pictures/object_detection
+          에 PNG로 저장합니다. 파일 이름은 objdet_날짜_시각.png 로 자동으로 붙고,
+          같은 초에 여러 번 눌러도 _001, _002 … 가 붙어 겹치지 않습니다.
+
+# 서비스를 새로 만들면 위와 같은 그룹을 하나 더 적으면 됩니다. 코드는 건드리지
+# 않습니다.

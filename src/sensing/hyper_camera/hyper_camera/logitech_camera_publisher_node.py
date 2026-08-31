@@ -21,8 +21,12 @@ class LogitechCameraPublisher(Node):
         super().__init__('logitech_camera_publisher')
 
         self.declare_parameter('video_device', '/dev/video_logitech')
-        self.declare_parameter('image_width', 1280)
-        self.declare_parameter('image_height', 720)
+        # 640x360, not the C920's 1280x720. object_detection_node letterboxes every frame into
+        # the YOLO model's own input size anyway, so the extra pixels buy nothing downstream and
+        # cost USB bandwidth, MJPEG decode and battery. 16:9 is kept so the framing -- and with it
+        # how large a traffic light is in the model's input -- does not change.
+        self.declare_parameter('image_width', 640)
+        self.declare_parameter('image_height', 360)
         self.declare_parameter('framerate', 30.0)
         self.declare_parameter('frame_id', 'camera_object')
 

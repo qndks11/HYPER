@@ -213,57 +213,34 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 다른 Logitech 모델을 쓴다면 idVendor/idProduct가 다를 수 있으니 `lsusb`와 `udevadm info -a -n /dev/videoN | grep -E "idVendor|idProduct"`로 직접 확인 후 값을 맞춰주세요. 규칙 적용 후 `object_detection_node`의 `video_device` 파라미터가 기본값으로 `/dev/video_logitech`를 사용하므로 USB 포트가 바뀌어도 흔들리지 않습니다. 해상도·프레임레이트는 `image_width`/`image_height`/`framerate` 파라미터로 조정합니다 (기본값은 `hyper_camera`의 `config/params_logitech.yaml`과 동일).
 
-### RealSense D435i
-
-`realsense2_camera`(rosdep으로 설치되는 apt 패키지, `sudo apt install ros-humble-realsense2-camera`)가 D435i를 구동합니다. 이 저장소에는 전용 패키지가 없고, `hyper_launch`의 `sensors.launch.py`가 `realsense2_camera`의 `rs_launch.py`를 직접 include해서 EKF용 `/imu`(`unite_imu_method:=1`로 합성된 gyro+accel)로만 사용합니다 — 객체 인식 카메라 역할은 위 Logitech C920으로 옮겨갔으므로 `enable_color:=false`, `enable_depth:=false`로 컬러/뎁스 스트림은 꺼둡니다.
-
-```bash
-ros2 launch realsense2_camera rs_launch.py camera_name:=camera_object camera_namespace:='' enable_gyro:=true enable_accel:=true unite_imu_method:=1 enable_color:=false enable_depth:=false
-```
-
 ## 차량 제어 보드 설치 (실차)
 
-`hyper_control`의 `Stm32SystemInterface`(ros2_control 하드웨어 인터페이스)가 시리얼로 STM32 보드에 조향/구동 명령을 보냅니다. STM32의 ST-Link 내장 VCP가 `/dev/ttyACM0` 등으로 잡히는데, 다른 USB 장치와 함께 꽂으면 포트 번호가 바뀔 수 있으므로 GPS/카메라와 동일하게 idVendor/idProduct(+serial) 기준 udev 심볼릭 링크로 고정합니다.
+`hyper_interface`의 `arduino_interface_node`가 `/velocity`[m/s], `/steering_angle`[rad] 명령 토픽을 그대로 구독해서 시리얼로 Arduino 보드에 전달하고, Arduino(`hyper_motor_interface.ino`)가 BTS7960(구동)/L298N(조향) 모터드라이버를 닫힌 루프로 구동합니다. `ros2_control` 경유 없이 명령 토픽 → Arduino로 직접 연결되는 구조입니다. 상세 배선/프로토콜/파라미터는 `src/interface/hyper_interface/README.md` 참고.
 
-### 1. 장치 udev 규칙
+### 1. 장치 확인 및 의존성
 
 ```bash
 sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
+sudo apt install python3-serial  # 또는 pip install pyserial
 ```
 
-`/etc/udev/rules.d/99-hyper-stm32.rules` 생성:
-
-```
-KERNEL=="ttyACM[0-9]*", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", ATTRS{serial}=="<보드의 시리얼 번호>", SYMLINK+="stm32", GROUP="dialout", MODE="0666"
-```
-
-`idVendor:idProduct`(`0483:374b`)는 ST-Link V2.1을 쓰는 모든 Nucleo/Discovery 보드가 공유하는 값이라, 다른 STM32 보드를 동시에 꽂으면(예: 별도 보드 펌웨어 플래싱) 충돌할 수 있습니다. `ATTRS{serial}`까지 넣어 이 차량의 보드 하나만 고정합니다.
+Arduino를 연결한 상태에서 포트를 확인합니다. GPS/카메라처럼 고정 심볼릭 링크를 만들어도 되지만, USB 시리얼 장치가 이거 하나뿐이면 `ls /dev/serial/by-id/`로 안정적인 이름을 바로 쓸 수 있습니다:
 
 ```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
+ls /dev/serial/by-id/
 ```
 
-보드를 연결한 상태에서 아래로 직접 값을 확인 후 규칙에 채워 넣습니다:
+### 2. 펌웨어 업로드
+
+Arduino IDE로 `src/interface/hyper_interface/arduino/hyper_motor_interface/hyper_motor_interface.ino`를 보드에 업로드합니다.
+
+### 3. 실행
 
 ```bash
-udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct|serial\}" | head -3
+ros2 launch hyper_interface interface.launch.py serial_port:=/dev/ttyACM0
 ```
 
-규칙 적용 후 `ls -la /dev/stm32`로 심볼릭 링크가 생겼는지 확인합니다. `hyper_control`의 `urdf/vehicle.xacro` (`serial_port` 인자)와 `Stm32SystemInterface`(`stm32_system_interface.cpp`) 둘 다 기본값으로 `/dev/stm32`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다. 다른 포트를 쓰려면 `ros2 launch ... serial_port:=/dev/ttyUSB0`처럼 launch 인자로 덮어씁니다.
-
-### 2. 실행
-
-`hyper_control/launch/real_control.launch.py`가 `use_sim:=false`로 로봇 설명을 다시 생성해 `Stm32SystemInterface`용 `controller_manager`(`ros2_control_node`)를 띄우고, `joint_state_broadcaster`/`forward_position_controller`/`forward_velocity_controller`를 스폰합니다 — `real.launch.py`가 기본으로 이걸 포함하므로 보통 따로 실행할 필요는 없습니다. 단독 실행/디버깅 시:
-
-```bash
-ros2 launch hyper_control real_control.launch.py
-```
-
-`joint_state_broadcaster` 패키지가 설치돼 있지 않으면(`ros-humble-joint-state-broadcaster`) 컨트롤러 로딩이 실패하니 미리 설치합니다:
-
-```bash
-sudo apt install ros-humble-joint-state-broadcaster
-```
+`real.launch.py`가 기본으로 이걸 포함하므로(behavior 단계와 함께 시작) 보통 따로 실행할 필요는 없습니다. `hyper_control`/`hyper_planner`의 `max_velocity`/`max_steering_angle`과 `hyper_interface/config/parameters.yaml`의 동일 파라미터가 어긋나면 Arduino가 튜닝 범위 밖의 명령을 받을 수 있으니 값을 맞춰둡니다.
 
 ---
 
@@ -285,7 +262,7 @@ ros2 launch hyper_launch simulation.launch.py
 ros2 launch hyper_launch real.launch.py
 ```
 
-`sim` 대신 `sensors`(D435i + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 전방 ELP와 객체 인식용 Logitech C920 둘 다 `sensors`가 아니라 `perception` 단계에서 각각 `hyper_lane_detection`/`object_detection_node`가 직접 열므로, `sensors.launch.py`에는 더 이상 포함되지 않습니다.
+`sim` 대신 `sensors`(WitMotion IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
 
 스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
 
@@ -305,13 +282,16 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 센서 | 패키지 | 최종 토픽 |
 |------|--------|-----------|
-| RealSense D435i | `realsense2_camera` | `/imu` (EKF, `enable_color`/`enable_depth`는 꺼둠) |
+| WitMotion WT901BLE | `witmotion_ros2` | `/imu` (EKF) |
 | RPLidar | `hyper_lidar` | `/scan` |
 | u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
 
-전방 ELP와 객체 인식용 Logitech C920은 둘 다 여기 포함되지 않습니다 — 대신 `perception.launch.py`가 `hyper_camera`의 드라이버 노드로 각각 엽니다: `ElpCameraPublisherNode`(`/dev/video_elp`, 자체 rectify까지 수행)는 `lane_detection_node`와 같은 `ComposableNodeContainer`에 로드되어 intra-process로 넘어가고, `logitech_camera_publisher_node`(`/dev/video_logitech`, rectify 없음)는 별도 프로세스로 떠서 일반 토픽으로 `object_detection_node`에 연결됩니다.
+카메라는 둘 다 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 전방 ELP와 `lane_detection`을 함께 로드하고, 객체 인식용 Logitech C920만 별도 프로세스로 띄웁니다:
 
-후방 카메라(`/camera_rear/image_raw`)는 아직 실물이 없고, `intra_process`는 애초에 후방 경로가 없습니다 — `hyper_lane_detection`은 후방 프레임 없이도 동작해야 합니다.
+| 카메라 | 노드 | 토픽 | 전달 방식 |
+|--------|------|------|-----------|
+| 전방 ELP | `hyper_camera`의 `ElpCameraPublisherNode` (자체 rectify) | `/camera/image_raw` | intra-process (zero-copy) |
+| 객체 인식 Logitech C920 | `hyper_camera`의 `logitech_camera_publisher_node` (rectify 없음) | `/camera_object/image_raw` | 일반 토픽 (rclpy에는 zero-copy 경로 없음) |
 
 ## 패키지 구성
 
@@ -327,6 +307,7 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
 | `hyper_lidar` | 실차 RPLidar 등 2D LiDAR 드라이버 실행 (시뮬레이션에서는 미사용) |
 | `hyper_camera` | 실차 ELP/Logitech USB 카메라 드라이버 노드(`ElpCameraPublisherNode` C++ 컴포넌트, `logitech_camera_publisher_node` rclpy 노드) + 설정 파일(보정 파일 + 참고용 파라미터 yaml) 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
+| `hyper_interface` | 실차 ROS 2 ↔ Arduino 시리얼 브릿지 (`arduino_interface_node`) — `/velocity`, `/steering_angle`을 구독해 Arduino(`hyper_motor_interface.ino`)로 전달, BTS7960/L298N 모터드라이버를 닫힌 루프로 구동 |
 ---
 
 ## 주요 토픽
@@ -335,15 +316,17 @@ ros2 launch hyper_launch behavior.launch.py
 |------|------|------|------|
 | `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → hyper_lane_detection (실차) | 전방 카메라 영상 (차선 인식이 구독). 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `ElpCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서는 같은 `ComposableNodeContainer` 안에서 zero-copy로 전달되므로 이 토픽이 DDS까지 나가지 않음 |
 | `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → object_detection_node (실차) | 객체 인식용 카메라 영상 (`object_detection_node`가 항상 구독). 시뮬레이션은 ros_gz_bridge, 실차 기본 경로(`object_input_backend:=usb_camera`)는 `hyper_camera`의 `logitech_camera_publisher_node`가 일반 토픽으로 발행 |
-| `/camera_rear/image_raw` | `sensor_msgs/Image` | Gazebo → ROS | 후방 카메라 영상 (시뮬레이션만 — 실차 후방 카메라 미장착, `intra_process`는 후방 경로 자체가 없음) |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
 | `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |
-| `/steering_angle` | `std_msgs/Float64` | → vehicle_controller_node | 목표 조향각 [rad] (teleop / planner / waypoint_tracker가 발행) |
-| `/velocity` | `std_msgs/Float64` | → vehicle_controller_node | 목표 속도 [m/s] (teleop / planner / waypoint_tracker가 발행) |
-| `/forward_position_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 앞바퀴 조향각 (Ackermann 변환) |
-| `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환) |
-| `/odom` | `nav_msgs/Odometry` | Gazebo → ROS | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / realsense2_camera → ROS (실차, D435i 내장 IMU) | IMU |
+| `/steering_angle` | `std_msgs/Float64` | → vehicle_controller_node (시뮬레이션) / arduino_interface_node (실차) | 목표 조향각 [rad] (teleop / planner / waypoint_tracker가 발행) |
+| `/velocity` | `std_msgs/Float64` | → vehicle_controller_node (시뮬레이션) / arduino_interface_node (실차) | 목표 속도 [m/s] (teleop / planner / waypoint_tracker가 발행) |
+| `/forward_position_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 앞바퀴 조향각 (Ackermann 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
+| `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
+| `/velocity_actual`, `/steering_angle_actual` | `std_msgs/Float64` | arduino_interface_node → | Arduino의 인코더/조향각 센서로 측정한 실제 값 (실차 전용, 닫힌 루프 피드백) |
+| `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `witmotion_ros2` → ROS (실차, WT901BLE) | IMU |
+| `/imu/raw` | `sensor_msgs/Imu` | `witmotion_ros2` → `imu_enu_relay` | 실차 전용. 드라이버 원본(나침반식 yaw). relay가 ENU로 고쳐 `/imu`로 다시 발행 |
+| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → `ekf_global` | yaw 전용 절대 방위. 정지 중에는 `datums.yaml`의 `initial_heading_deg`, 주행 중에는 GPS 진행방향. 지자기 yaw는 어느 EKF도 안 쓰며, 이 토픽이 유일한 방위 기준 |

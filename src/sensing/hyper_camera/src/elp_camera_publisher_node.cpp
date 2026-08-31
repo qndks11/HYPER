@@ -16,8 +16,13 @@ ElpCameraPublisherNode::ElpCameraPublisherNode(const rclcpp::NodeOptions & optio
 {
   ElpCameraCapture::Config config;
   config.device = declare_parameter<std::string>("video_device", "/dev/video_elp");
-  config.width = declare_parameter<int>("image_width", 1280);
-  config.height = declare_parameter<int>("image_height", 720);
+  // 640x360, not the sensor's 1280x720: half the linear resolution is a quarter of the pixels
+  // to pull over USB, MJPEG-decode and remap every frame, which is the single biggest lever on
+  // this camera's power draw. Kept at the calibration's 16:9 so ElpCameraCapture can rescale the
+  // intrinsics rather than crop the field of view (see elp_camera_capture.cpp). Raising this
+  // means rescaling hyper_lane_detection's bev_real.yaml intrinsics to match.
+  config.width = declare_parameter<int>("image_width", 640);
+  config.height = declare_parameter<int>("image_height", 360);
   config.framerate = declare_parameter<double>("framerate", 30.0);
   config.calibration_file = declare_parameter<std::string>(
     "calibration_file",

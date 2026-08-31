@@ -1,20 +1,19 @@
-# navsat_transform 원점(datum) 후보 목록.
+# navsat_transform 원점(datum) 목록 + 사이트별 IMU/heading 보정값.
 # odometry.launch.py 실행 시 `datum_site:=sim|school|track` 인자로 선택합니다.
 #
-# heading_deg: ENU 프레임 X축(East)이 진북(true north) 대비 얼마나 회전해 있는지(도, 시계방향).
-#              보통 0으로 둡니다 -- world/실측 좌표계가 이미 East-North으로 정렬돼 있다면 그대로 둡니다.
+# ── heading_deg ────────────────────────────────────────────────────────────
+# navsat_transform datum의 세 번째 값(robot_localization의 datum[2]). 0으로 둡니다.
+# wait_for_datum: true일 때 navsat_transform은 "datum 지점에서 차량의 map 프레임
+# yaw가 0"이라고 못박고 map<-UTM 회전을 datum[2]로 정합니다(navsat_transform.cpp의
+# setManualDatum + computeTransform). 즉 이 값은 차량의 초기 방위가 아니라 map 축을
+# ENU 대비 얼마나 돌릴지입니다. 0이면 map X=East, Y=North로 ENU와 완전히 정렬되고,
+# rviz_satellite 앵커/위경도 웨이포인트 계산과도 그대로 맞습니다. 건드리지 마세요.
 #
-# magnetic_declination_deg/yaw_offset_deg: navsat_transform이 datum의 heading에 얹어 더하는
-# IMU 보정값 (robot_localization의 magnetic_declination_radians/yaw_offset과 동일, 여기서는
-# 도 단위로 적어서 launch가 라디안으로 변환). IMU가 실제로 참북 기준 ENU(동쪽=0 yaw)를 직접
-# 보고한다면(Gazebo 시뮬레이션처럼 지자기 모델이 없는 경우) 둘 다 0으로 둡니다. 실제 자기
-# 나침반 기반 IMU를 쓴다면 자편각(NOAA 계산기 등)과 IMU 장착/컨벤션에 맞는 offset을 채우세요.
-#
-# sim의 latitude_deg/longitude_deg/heading_deg는 hyper_gazebo/worlds/track.world의
-# <spherical_coordinates>와 반드시 일치해야 시뮬레이션 GPS 좌표와 EKF 추정치가 어긋나지
-# 않습니다. magnetic_declination_deg/yaw_offset_deg는 Gazebo IMU에 지자기 모델이 없으므로
-# 0/0 -- 0이 아니면 GPS 기반 위치가 datum 원점을 축으로 회전해 실제 오도메트리와 어긋나며
-# ekf_global이 발산합니다.
+# ── 초기 yaw ───────────────────────────────────────────────────────────────
+# 측량 상수(initial_heading_deg)는 없앴습니다. 부팅 직후 yaw는 "알 수 없음"이고,
+# gps_accuracy_gui의 "Calibrate initial yaw"(0.5 m 굴려 GPS 변위로 측정) 또는
+# 주행 중 첫 GPS 진행방향이 gps_heading을 통해 /imu/heading으로 절대 yaw를
+# 세울 때까지 자이로 적분만으로 이어집니다.
 datums:
   sim:
     latitude_deg: 37.5665
@@ -23,20 +22,22 @@ datums:
     magnetic_declination_deg: 0.0
     yaw_offset_deg: 0.0
 
-  # TODO: 한라대학교 실측 원점으로 교체하세요 (예: 출발선 GPS 좌표).
-  # magnetic_declination_deg/yaw_offset_deg는 실제 IMU로 교체 시 확인 후 채우세요 (아래
-  # 값은 이전 실차 설정에서 쓰던 근사값 -- 한국(서울) 자편각과 IMU 장착 offset).
   school:
-    latitude_deg: 0.0
-    longitude_deg: 0.0
+    latitude_deg: 37.555047
+    longitude_deg: 127.045522
     heading_deg: 0.0
-    magnetic_declination_deg: -8.02
-    yaw_offset_deg: 90.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+    imu_yaw_sign:  1.0
+    imu_yaw_offset_deg: -91.5
+    imu_flip_gyro_z: false
 
-  # TODO: 대회 트랙 실측 원점으로 교체하세요.
   track:
-    latitude_deg: 0.0
-    longitude_deg: 0.0
+    latitude_deg: 37.2887947
+    longitude_deg: 127.1072418
     heading_deg: 0.0
-    magnetic_declination_deg: -8.02
-    yaw_offset_deg: 90.0
+    magnetic_declination_deg: 0.0
+    yaw_offset_deg: 0.0
+    imu_yaw_sign: 1.0
+    imu_yaw_offset_deg: -91.5
+    imu_flip_gyro_z: false

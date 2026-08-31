@@ -4,7 +4,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import FrontendLaunchDescriptionSource, PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 
 # Same Gazebo sim as sim.launch.py (spawns the vehicle + vehicle_controller_node, which already
 # subscribes to /velocity and /steering_angle std_msgs/Float64), plus a rosbridge_websocket
@@ -35,6 +35,20 @@ def generate_launch_description():
         }.items(),
     )
 
+    # Waypoint recorder + GUI, same as phone_control_real.launch.py. auto_start:=false so the
+    # recorder waits for the GUI's Record button -- recording start is a CSV truncate, so just
+    # launching the stack doesn't wipe a previous run.
+    waypoint_record_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_waypoint'),
+            'launch', 'record.launch.py')),
+        launch_arguments={
+            'waypoint_csv': LaunchConfiguration('waypoint_csv'),
+            'min_spacing_m': LaunchConfiguration('min_spacing_m'),
+            'use_record_gui': LaunchConfiguration('use_record_gui'),
+        }.items(),
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'world', default_value=default_world_path,
@@ -52,6 +66,18 @@ def generate_launch_description():
             'datum_site', default_value='sim',
             description="GPS origin for navsat_transform, keyed into hyper_localization's "
                         "config/datums.yaml (e.g. 'sim', 'school', 'track')."),
+        DeclareLaunchArgument(
+            'waypoint_csv',
+            default_value=PathJoinSubstitution([
+                EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
+                'waypoints', 'sim.csv']),
+            description='CSV to write recorded waypoints to (truncated when Record is pressed)'),
+        DeclareLaunchArgument(
+            'min_spacing_m', default_value='0.5',
+            description='Only record a point after moving at least this far (m)'),
+        DeclareLaunchArgument(
+            'use_record_gui', default_value='true',
+            description='Also launch the waypoint recording control-panel GUI'),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
@@ -70,4 +96,5 @@ def generate_launch_description():
 
         odometry_launch,
         rosbridge_launch,
+        waypoint_record_launch,
     ])

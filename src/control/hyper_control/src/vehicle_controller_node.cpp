@@ -25,27 +25,23 @@ VehicleController::VehicleController(const double timer_period, const double tim
   declare_parameter<double>("body_length", 0.0);
   declare_parameter<double>("wheel_radius", 0.0);
   declare_parameter<double>("wheel_width", 0.0);
+  declare_parameter<double>("wheel_base", 0.0);
   declare_parameter<double>("max_steering_angle", 0.0);
   declare_parameter<double>("max_velocity", 0.0);
-  declare_parameter<bool>("single_output", false);
 
   // Get parameters on startup
   get_parameter("body_width", body_width_);
   get_parameter("body_length", body_length_);
   get_parameter("wheel_radius", wheel_radius_);
   get_parameter("wheel_width", wheel_width_);
+  get_parameter("wheel_base", wheel_base_);
   get_parameter("max_steering_angle", max_steering_angle_);
   get_parameter("max_velocity", max_velocity_);
-  get_parameter("single_output", single_output_);
 
-  // Set the track width and wheel base
+  // Track width from the body/wheel geometry; wheel base is the measured
+  // front-to-rear axle distance (matches urdf wheel_offset = wheel_base/2 and
+  // the real vehicle), not a value derived from body_length.
   track_width_ = body_width_ + (2 * wheel_width_ / 2);
-  wheel_base_ = body_length_ - (2 * wheel_radius_);
-
-  if (single_output_) {
-    wheel_angular_velocity_ = {0.0};
-    wheel_steering_angle_ = {0.0};
-  }
 
   // Subscribers
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
@@ -176,11 +172,6 @@ void VehicleController::steering_angle_callback(const std_msgs::msg::Float64::Sh
     steering_angle_ = msg->data;
   }
 
-  if (single_output_) {
-    wheel_steering_angle_ = {steering_angle_};
-    return;
-  }
-
   const auto wheel_angles{ackermann_steering_angle()};
 
   wheel_steering_angle_ = {wheel_angles.first, wheel_angles.second};
@@ -196,11 +187,6 @@ void VehicleController::velocity_callback(const std_msgs::msg::Float64::SharedPt
     velocity_ = -max_velocity_;
   } else {
     velocity_ = msg->data;
-  }
-
-  if (single_output_) {
-    wheel_angular_velocity_ = {velocity_ / wheel_radius_};
-    return;
   }
 
   const auto wheel_velocity{rear_differential_velocity()};

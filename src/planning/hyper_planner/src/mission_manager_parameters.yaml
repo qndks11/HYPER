@@ -1,0 +1,300 @@
+# mission_manager 노드의 파라미터 정의. generate_parameter_library가 이 파일에서
+# mission_manager_parameters.hpp를 생성합니다.
+#
+# read_only: true의 의미는 "런타임에 바꿔도 소용없다"입니다. 대부분은 로드 시점에
+# steps로 구워지거나(cancel_on_arrival_m, decel_profile_a), 생성자에서 한 번만
+# 읽히는(speed_limit_topic, auto_start) 값입니다. 이걸 표시해 두지 않으면
+# `ros2 param set`이 성공했다고 답하면서 실제로는 아무 일도 안 합니다.
+#
+# read_only가 없는 값은 주행 중에 `ros2 param set`으로 바로 반영됩니다 -- tick()이
+# 매 주기 스냅샷을 갱신합니다.
+mission_manager:
+  # ----------------------------------------------------------- 입력 파일 / 프레임
+  mission_yaml:
+    type: string
+    default_value: ""
+    read_only: true
+    description: |
+      실행할 스텝 큐가 든 mission.yaml 경로. 시작 시 한 번만 읽습니다.
+      일부러 not_empty 검증을 걸지 않았습니다 -- 비어 있으면 load_mission이 훨씬 친절한
+      메시지를 남기고, 노드는 살아남아 launch 로그에서 이유를 볼 수 있습니다.
+
+  waypoint_csv:
+    type: string
+    default_value: ""
+    read_only: true
+    description: "hyper_waypoint가 녹화한 코스 CSV 경로. 시작 시 한 번만 읽습니다."
+
+  frame_id:
+    type: string
+    default_value: "map"
+    read_only: true
+    description: "CSV에 frame_id가 없을 때 쓰는 기본 프레임. 골 경로와 SpeedLimit 헤더에 들어갑니다."
+    validation:
+      not_empty<>: []
+
+  robot_base_frame:
+    type: string
+    default_value: "body_link"
+    read_only: true
+    description: "차량 위치를 조회할 tf 프레임. 진행도 계산과 경로 다듬기에 씁니다."
+    validation:
+      not_empty<>: []
+
+  min_spacing_m:
+    type: double
+    default_value: 0.0
+    read_only: true
+    description: "CSV를 읽을 때 이 간격보다 촘촘한 점을 버립니다(0 = 끔). 로드 시점에만 적용됩니다."
+    validation:
+      gt_eq<>: [0.0]
+
+  # ----------------------------------------------------------- 인터페이스 이름
+  action_name:
+    type: string
+    default_value: "follow_path"
+    read_only: true
+    description: "nav2 controller_server의 FollowPath 액션 이름. 생성자에서 클라이언트를 만듭니다."
+    validation:
+      not_empty<>: []
+
+  sign_topic:
+    type: string
+    default_value: "/perception/sign"
+    read_only: true
+    description: "신호등 인식 결과(std_msgs/String) 토픽. 생성자에서 구독합니다."
+    validation:
+      not_empty<>: []
+
+  speed_limit_topic:
+    type: string
+    default_value: "/speed_limit"
+    read_only: true
+    description: |
+      decel 프로파일을 실어 보낼 토픽. controller_server의 speed_limit_topic과 같아야 합니다
+      (nav2 기본값 'speed_limit'는 루트 네임스페이스에서 /speed_limit으로 풀립니다).
+      생성자에서 퍼블리셔를 만들므로 런타임 변경은 불가합니다.
+    validation:
+      not_empty<>: []
+
+  controller_id:
+    type: string
+    default_value: "FollowPath"
+    read_only: true
+    description: "mission.yaml의 drive 스텝이 controller를 안 적었을 때 쓰는 기본값. 로드 시점에 각 스텝으로 구워집니다."
+    validation:
+      not_empty<>: []
+
+  goal_checker_id:
+    type: string
+    default_value: "general_goal_checker"
+    read_only: true
+    description: "mission.yaml의 drive 스텝이 goal_checker를 안 적었을 때 쓰는 기본값. 로드 시점에 각 스텝으로 구워집니다."
+    validation:
+      not_empty<>: []
+
+  auto_start:
+    type: bool
+    default_value: false
+    read_only: true
+    description: "true면 생성자에서 바로 미션을 시작합니다. false면 '~/start' 호출을 기다립니다(실차에서는 이쪽이 안전)."
+
+  # ----------------------------------------------- 로드 시점에 스텝으로 구워지는 값
+  cancel_on_arrival_m:
+    type: double
+    default_value: 0.0
+    read_only: true
+    description: |
+      mission.yaml의 drive 스텝이 cancel_on_arrival_m를 안 적었을 때 쓰는 기본값(0 = 끔).
+      로드 시점에 각 스텝으로 복사되므로 런타임에 바꿔도 실행 중인 미션에는 영향이 없습니다.
+      기본을 끔으로 둔 이유: 주차처럼 공차를 정확히 맞춰야 하는 스텝에서 실수로 켜지면
+      0.4 m 짧게 서 버립니다. 켤 스텝만 mission.yaml에서 명시적으로 켜세요.
+    validation:
+      gt_eq<>: [0.0]
+
+  decel_profile_a:
+    type: double
+    default_value: 0.0
+    read_only: true
+    description: |
+      mission.yaml의 drive 스텝이 decel_profile_a를 안 적었을 때 쓰는 등감속(m/s^2) 기본값(0 = 끔).
+      로드 시점에 각 스텝으로 복사되고 resolve_decel_tails가 이미 반영하므로 런타임 변경 불가.
+    validation:
+      gt_eq<>: [0.0]
+
+  decel_profile_lookahead_m:
+    type: double
+    default_value: 12.0
+    read_only: true
+    description: |
+      프로파일을 쓰는 스텝에서 골 경로를 라벨보다 이만큼 뒤까지 늘립니다. MPPI가 경로 끝을
+      보고 스스로 감속하지 않게 하려는 것이므로, local costmap 반지름
+      (nav2_controller.yaml의 local_costmap width/height의 절반 = 10 m)보다 커야 합니다.
+      늘리는 부분은 녹화 코스가 아니라 라벨의 진행 방향으로 뻗은 직선이므로(path_loader.hpp의
+      append_straight_tail) 코스가 라벨 뒤에서 무엇을 하든 항상 정확히 이 길이만큼 붙습니다.
+      로드 시점에 각 스텝의 꼬리 길이로 구워지므로 런타임 변경 불가.
+    validation:
+      gt<>: [0.0]
+
+  # ------------------------------------------------------ 주행 중 튜닝 가능한 값
+  tf_timeout_sec:
+    type: double
+    default_value: 5.0
+    description: "골을 보낼 때 차량 위치를 기다리는 시간. 진행도 조회(0.1초 고정)와는 별개입니다."
+    validation:
+      gt<>: [0.0]
+
+  lead_in_spacing_m:
+    type: double
+    default_value: 0.5
+    description: "경로가 차량 뒤에서 시작할 때 덧붙이는 진입 경로의 점 간격. 전진 세그먼트에만 적용됩니다."
+    validation:
+      gt<>: [0.0]
+
+  lead_in_tangent_gain:
+    type: double
+    default_value: 1.0
+    description: |
+      진입 경로(3차 Hermite 곡선)의 접선 크기 배율. 양 끝 접선 크기가
+      gain * (차량-첫점 거리)입니다. 크게 하면 양 끝 헤딩을 더 오래 유지하며 완만하게
+      휘고, 작게 하면 직선에 가까워집니다.
+    validation:
+      gt<>: [0.0]
+
+  path_resample_spacing_m:
+    type: double
+    default_value: 0.25
+    description: |
+      골로 보내기 직전에 경로를 이 간격으로 다시 깝니다(0이면 끔). 녹화 CSV의 약 0.59 m
+      간격은 MPPI PathAlignCritic이 '가장 가까운 경로 점까지의 거리'를 벌점으로 쓰기 때문에
+      ±0.3 m의 코너 컷 사각지대를 만듭니다(path_loader.hpp의 resample_path 주석 참고).
+      이 값을 바꾸면 nav2_controller.yaml에서 '점 개수'로 세는 파라미터
+      (PathFollow/PathAngle/PathAlign의 offset_from_furthest)도 같이 조정해야 합니다.
+    validation:
+      gt_eq<>: [0.0]
+
+  max_start_distance_m:
+    type: double
+    default_value: 0.0
+    description: "차량이 세그먼트에서 이보다 멀면 골을 거부합니다(0 = 끔)."
+    validation:
+      gt_eq<>: [0.0]
+
+  loop_close_distance_m:
+    type: double
+    default_value: 2.0
+    description: |
+      닫힌 코스(한 세그먼트로 코스를 통째로 보내는 simple 미션 등) 보정용(0 = 끔).
+      경로의 첫 점과 끝 점이 이 거리 안으로 붙어 있으면 루프로 봅니다. 이때 출발선에
+      선 차는 코스 끝점에도 그만큼 가까워서, trim_to_robot의 최근접 탐색이 끝점에 붙으면
+      코스 전체가 이미 지나온 구간으로 잘려 나가고 골이 출발점 옆에 놓입니다 -- goal
+      checker가 곧바로 도착으로 판정해 출발하자마자 완주가 됩니다. 최근접점이 경로
+      끝자락(끝에서 잰 arc 길이가 이 값 이내)에 붙었으면 커서를 경로 앞쪽으로 되돌려
+      한 바퀴를 통째로 보냅니다. 세그먼트를 여러 개로 쪼갠 mission.yaml에서는 각
+      세그먼트의 양 끝이 멀어 발동하지 않습니다.
+    validation:
+      gt_eq<>: [0.0]
+
+  server_wait_timeout_sec:
+    type: double
+    default_value: 30.0
+    description: "액션 서버를 기다리는(그리고 차량 위치를 못 찾은 채 재시도하는) 최대 시간."
+    validation:
+      gt<>: [0.0]
+
+  arrival_slack_m:
+    type: double
+    default_value: 0.6
+    description: |
+      컨트롤러가 abort 했지만 차가 이미 세그먼트 끝 이 거리 안에 있으면 도착으로 칩니다.
+      goal checker 공차를 조금 못 맞춰 progress checker에 걸리는 흔한 경우에서,
+      같은 골을 무한 재전송하며 미션이 죽는 걸 막습니다.
+    validation:
+      gt_eq<>: [0.0]
+
+  goal_retry_limit:
+    type: int
+    default_value: 2
+    description: "컨트롤러가 abort 했을 때 같은 골을 다시 보낼 최대 횟수."
+    validation:
+      gt_eq<>: [0]
+
+  obstacle_retry_period_sec:
+    type: double
+    default_value: 1.0
+    description: |
+      obstacle_hold_s를 켠 스텝이 막혀서 섰을 때, 같은 골을 다시 보내 보는 주기(초).
+      다시 보낸 골은 앞이 아직 막혀 있으면 컨트롤러가 곧바로 다시 abort 하므로,
+      이 주기가 곧 장애물이 치워졌는지 확인하는 주기입니다. 너무 짧게 잡으면 매번
+      controller_server의 failure_tolerance만큼 붙잡혔다 풀리는 것을 반복합니다.
+    validation:
+      gt<>: [0.0]
+
+  unblocked_speed:
+    type: double
+    default_value: 0.3
+    description: |
+      막힘 상태에서 골을 다시 보낸 뒤, 피드백 속도가 이 값을 넘으면 다시 굴러가기
+      시작한 것으로 보고 막힘 타이머(obstacle_hold_s)를 0으로 되돌립니다. 한 스텝 안에서
+      장애물을 여러 번 만나도 매번 처음부터 기다려 줍니다.
+    validation:
+      gt<>: [0.0]
+
+  proceed_on_signal_timeout:
+    type: bool
+    default_value: true
+    description: "신호를 timeout_s 안에 못 보면 true면 그냥 출발(대회에서 멈춰 서는 것보다 낫다), false면 미션 실패로 정지."
+
+  cancel_on_arrival_speed:
+    type: double
+    default_value: 0.5
+    description: |
+      취소가 실제 0 속도로 이어지기까지의 짧은 지연(한 제어 주기 + 액션 왕복) 동안 굴러가는
+      거리를 제한합니다. 아직 빠를 때 취소하면 그만큼 정지선을 넘어갑니다. 이 값 위에서는
+      취소하지 않고 MPPI가 더 줄이도록 둡니다. decel_profile_min_speed보다 높아야 합니다.
+    validation:
+      gt<>: [0.0]
+
+  progress_search_window_m:
+    type: double
+    default_value: 5.0
+    description: |
+      경로 위 진행 커서를 옮길 때 앞으로 훑는 거리. 커서는 뒤로 가지 않으므로, 코스가
+      자기 자신에 가까워지는 구간(주차 진입/출차처럼 같은 길을 되짚는 곳)에서도 엉뚱한
+      점에 붙지 않습니다. tick(10 Hz) 사이에 차가 갈 수 있는 거리보다 넉넉하면 됩니다
+      (2.5 m/s면 0.25 m).
+    validation:
+      gt<>: [0.0]
+
+  decel_profile_min_speed:
+    type: double
+    default_value: 0.4
+    description: |
+      프로파일이 내려보내는 속도의 하한. 0으로 두면 안 됩니다 -- SpeedLimit의 0.0은
+      nav2에서 NO_SPEED_LIMIT('제한 해제')이라 정반대로 동작합니다. 또 vx_std(0.42)보다
+      너무 낮으면 MPPI 샘플이 상한에 계속 잘려 스로틀이 거칠어집니다.
+      cancel_on_arrival_speed보다 낮게 두세요(그래야 정지점에서 취소 조건이 열립니다).
+      이 관계는 gpl이 검사하지 못하므로 노드가 시작 시 직접 확인합니다.
+    validation:
+      gt<>: [0.0]
+
+  controller_vx_max:
+    type: double
+    default_value: 1.0
+    description: |
+      nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
+      ratio = speed_limit / vx_max로 vx_max/vx_min/wz를 한꺼번에 곱하므로, vx_max보다 큰
+      값을 실어 보내면 설정한 vx_max를 오히려 올려 버립니다. 그래서 여기서 잘라 보내고,
+      잘릴 만큼 빠른 구간에서는 아예 제한을 해제(0.0)합니다.
+    validation:
+      gt<>: [0.0]
+
+  progress_stale_cancel_sec:
+    type: double
+    default_value: 1.0
+    description: |
+      프로파일 주행 중 진행도(tf)가 이 시간 동안 안 잡히면 골을 취소해 차를 세웁니다.
+      경로 끝이 라벨보다 뒤에 있어 goal checker가 받쳐 주지 않으므로, 여기서 손을 놓으면
+      차가 정지선을 그냥 지나갑니다.
+    validation:
+      gt<>: [0.0]

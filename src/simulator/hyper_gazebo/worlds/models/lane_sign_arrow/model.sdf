@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="lane_sign_arrow">
+    <static>true</static>
+
+    <!-- Panel sits with its face along +X. Origin is at the panel centre;
+         raise the model in the world with <pose> to mount it overhead. -->
+    <link name="panel">
+      <gravity>false</gravity>
+
+      <!-- 1 x 1 m black background square, 5 cm thick. -->
+      <visual name="background">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.05 1.0 1.0</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.02 0.02 0.02 1</ambient>
+          <diffuse>0.02 0.02 0.02 1</diffuse>
+          <specular>0.05 0.05 0.05 1</specular>
+        </material>
+      </visual>
+
+      <!-- Green downward arrow, built from three bars standing proud of the panel. -->
+      <visual name="arrow_shaft">
+        <pose>0.03 0 0.08 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.02 0.16 0.62</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0 0.1 0 1</ambient>
+          <diffuse>0 0.8 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0.9 0 1</emissive>
+        </material>
+      </visual>
+
+      <visual name="arrow_head_left">
+        <pose>0.03 -0.14 -0.21 0.7854 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.02 0.16 0.42</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0 0.1 0 1</ambient>
+          <diffuse>0 0.8 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0.9 0 1</emissive>
+        </material>
+      </visual>
+
+      <visual name="arrow_head_right">
+        <pose>0.03 0.14 -0.21 -0.7854 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.02 0.16 0.42</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0 0.1 0 1</ambient>
+          <diffuse>0 0.8 0 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <emissive>0 0.9 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

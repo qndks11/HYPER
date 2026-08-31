@@ -49,7 +49,39 @@ bool ElpCameraCapture::open(const Config & config)
   // camera matrix cv::fisheye::initUndistortRectifyMap expects as `P`.
   cv::Mat p(3, 4, CV_64F);
   std::copy(cam_info.p.begin(), cam_info.p.end(), p.ptr<double>());
-  const cv::Mat new_k = p(cv::Rect(0, 0, 3, 3)).clone();
+  cv::Mat new_k = p(cv::Rect(0, 0, 3, 3)).clone();
+
+  // The calibration was measured at one resolution (cam_info.width/height, 1280x720 for the ELP);
+  // the camera may be opened at another -- it runs at 640x360 by default now, halving the USB
+  // bandwidth and the per-frame decode+remap cost, which is where this camera's share of the
+  // battery goes. A pinhole camera matrix scales linearly with the sampling grid, so both K (the
+  // distorted model) and P's 3x3 (the rectified one it maps into) are rescaled by the capture /
+  // calibration ratio. The distortion coefficients d are dimensionless in normalized coordinates
+  // and stay as they are.
+  //
+  // Only a scale is applied, never a crop: this is valid exactly while the capture keeps the
+  // calibration's aspect ratio (640x360 and 1280x720 are both 16:9). Choosing a 4:3 mode instead
+  // would change the field of view rather than just the sampling, and neither this scaling nor
+  // hyper_lane_detection's bev_real.yaml intrinsics would describe the result.
+  if (cam_info.width > 0 && cam_info.height > 0 &&
+    (static_cast<int>(cam_info.width) != config.width ||
+    static_cast<int>(cam_info.height) != config.height))
+  {
+    const double scale_x = static_cast<double>(config.width) / static_cast<double>(cam_info.width);
+    const double scale_y =
+      static_cast<double>(config.height) / static_cast<double>(cam_info.height);
+    for (cv::Mat * m : {&k, &new_k}) {
+      m->at<double>(0, 0) *= scale_x;  // fx
+      m->at<double>(0, 2) *= scale_x;  // cx
+      m->at<double>(1, 1) *= scale_y;  // fy
+      m->at<double>(1, 2) *= scale_y;  // cy
+    }
+    RCLCPP_INFO(
+      logger_,
+      "elp_camera_publisher: calibration is %ux%u, capturing at %dx%d -- intrinsics scaled by "
+      "%.4f x %.4f. hyper_lane_detection's bev_real.yaml must carry the same scale.",
+      cam_info.width, cam_info.height, config.width, config.height, scale_x, scale_y);
+  }
 
   const cv::Size image_size(config.width, config.height);
   cv::fisheye::initUndistortRectifyMap(k, d, r, new_k, image_size, CV_16SC2, map1_, map2_);

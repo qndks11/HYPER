@@ -4,12 +4,11 @@
 
   <!-- Arguments -->
   <xacro:arg name="use_sim" default="true" />
-  <xacro:arg name="serial_port" default="/dev/stm32" />
-  <xacro:arg name="baud_rate" default="115200" />
   <xacro:arg name="body_length" default="2.0" />
   <xacro:arg name="body_width" default="1.0" />
   <xacro:arg name="body_height" default="0.5" />
   <xacro:arg name="body_density" default="1000.0" />
+  <xacro:arg name="wheel_base" default="1.4" />
   <xacro:arg name="wheel_radius" default="0.3" />
   <xacro:arg name="wheel_width" default="0.1" />
   <xacro:arg name="wheel_density" default="1000.0" />
@@ -39,6 +38,7 @@
   <xacro:property name="body_width" value="$(arg body_width)"/>
   <xacro:property name="body_height" value="$(arg body_height)"/>
   <xacro:property name="body_density" value="$(arg body_density)"/>
+  <xacro:property name="wheel_base" value="$(arg wheel_base)"/>
   <xacro:property name="wheel_radius" value="$(arg wheel_radius)"/>
   <xacro:property name="wheel_width" value="$(arg wheel_width)"/>
   <xacro:property name="wheel_density" value="$(arg wheel_density)"/>
@@ -65,7 +65,9 @@
   <xacro:property name="body_inertia_y" value="${1.0/12.0 * body_mass * (body_length*body_length + body_height*body_height)}"/>
   <xacro:property name="body_inertia_z" value="${1.0/12.0 * body_mass * (body_length*body_length + body_width*body_width)}"/>
   <xacro:property name="wheel_separation" value="${body_width + wheel_width}"/>
-  <xacro:property name="wheel_offset" value="${body_length/2 - wheel_radius}"/>
+  <!-- Front/rear axle half-spacing. Driven by the measured wheel_base, NOT body_length,
+       so the sim Ackermann kinematics match the real vehicle (wheel_base != body_length). -->
+  <xacro:property name="wheel_offset" value="${wheel_base/2}"/>
   <xacro:property name="wheel_mass" value="${wheel_density * PI * wheel_radius * wheel_radius * wheel_width}"/>
   <xacro:property name="wheel_inertia_x" value="${1.0/12.0 * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
   <xacro:property name="wheel_inertia_y" value="${1.0/12.0 * wheel_mass * (3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"/>
@@ -296,33 +298,6 @@
     </inertial>
   </link>
 
-  <!-- Rear Camera Link -->
-  <link name="rear_camera_link">
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
-      </geometry>
-    </collision>
-
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
-      </geometry>
-
-      <material name="rear_camera_material">
-        <color rgba="0.0 0.0 0.0 1.0"/>
-      </material>
-    </visual>
-
-    <inertial>
-      <mass value="1e-5" />
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
-    </inertial>
-  </link>
-
   <link name="lidar_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -374,15 +349,32 @@
   </link>
 
 <!-- GPS Fixed Joint -->
+  <!-- 실측(2026-08-30): 안테나가 body_link 중심에서 뒤로 0.23 m, 좌우 중앙, 지면 위 1.118 m
+       (라이드 하이트 0.171 m을 빼면 body_link 기준 0.947 m). body_height 수식 대신 리터럴로
+       박아 넣었습니다 — body_height 자체가 아직 실측 전(placeholder 0.40)이라 수식으로는
+       실측치를 정확히 못 담습니다. gps_link는 시각화(RViz)용일 뿐 navsat_transform 등
+       어떤 로컬라이제이션 코드도 이 TF를 안 씁니다(안테나 레버암 보정이 없음) — 그래도
+       실측치를 넣어 두는 이유는 나중에 레버암 보정을 추가하게 되거나 시각화 정확도가
+       필요해질 때를 위해서입니다. -->
   <joint name="gps_joint" type="fixed">
-    <origin xyz="0 0 ${body_height/2 + 0.25}" rpy="0 0 0"/>
+    <origin xyz="-0.23 0 0.947" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="gps_link"/>
   </joint>
 
 <!-- LiDAR Fixed Joint -->
+  <!-- 스캔 평면 높이 = wheel_radius*1.5 + body_height/2 + 이 오프셋
+       = 0.30 + 0.20 + 0.15 = 지면 위 0.65 m (parameters.yaml 기준값).
+       0.25 -> 0.15으로 10 cm 낮췄습니다. 이유:
+         - 이전 높이(0.75 m)는 hatchback 장애물 지붕(0.778 m)의 위쪽 2.8 cm를 스치기만 해서,
+           피치에 따라 반사가 들어왔다 말았다 했습니다(= local costmap이 비어 MPPI가 직진).
+           0.65 m면 지붕보다 12.8 cm 아래라 차체를 확실히 때립니다.
+         - 아래로는 차체 박스 윗면(0.50 m)보다 15 cm 위여야 gpu_lidar가 자기 차체에
+           가리지 않습니다.
+       주의: 이 xacro는 real.launch.py도 같이 씁니다. 실차 라이다를 실제로 0.65 m로
+       내려 달지 않으면 body_link->lidar_link TF가 실측과 어긋납니다. -->
   <joint name="lidar_joint" type="fixed">
-    <origin xyz="0.15 0 ${body_height/2 + 0.25}" rpy="0 0 0"/>
+    <origin xyz="0.15 0 ${body_height/2 + 0.15}" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="lidar_link"/>
   </joint>
@@ -465,14 +457,6 @@
     <child link="object_camera_link"/>
   </joint>
 
-  <!-- Rear Camera Joint -->
-  <joint name="rear_camera_joint" type="fixed">
-    <axis xyz="0 1 0" />
-    <origin xyz="${-(body_length/2 - camera_box_size/2 - camera_setback)} 0.0 ${camera_height}" rpy="0 ${camera_pitch} ${PI}"/>
-    <parent link="body_link"/>
-    <child link="rear_camera_link"/>
-  </joint>
-
   <gazebo reference="body_link">
     <mu1>0.0001</mu1>
     <mu2>0.0001</mu2>
@@ -551,35 +535,6 @@
     </ros2_control>
   </xacro:if>
 
-  <!-- Real Vehicle Control (STM32) -->
-  <xacro:unless value="$(arg use_sim)">
-    <ros2_control name="control" type="system">
-      <hardware>
-        <plugin>hyper_control/Stm32SystemInterface</plugin>
-        <param name="serial_port">$(arg serial_port)</param>
-        <param name="baud_rate">$(arg baud_rate)</param>
-      </hardware>
-
-      <joint name="steering_joint">
-        <command_interface name="position">
-          <param name="min">${-max_steering_angle}</param>
-          <param name="max">${max_steering_angle}</param>
-        </command_interface>
-
-        <state_interface name="position"/>
-      </joint>
-
-      <joint name="rear_axle_joint">
-        <command_interface name="velocity">
-          <param name="min">${-max_wheel_angular_velocity}</param>
-          <param name="max">${max_wheel_angular_velocity}</param>
-        </command_interface>
-
-        <state_interface name="velocity"/>
-      </joint>
-    </ros2_control>
-  </xacro:unless>
-
   <!-- Gazebo Plugins -->
   <gazebo>
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
@@ -614,6 +569,12 @@
       <update_rate>${camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera</topic>
+      <!-- ign publishes the image on <topic> and its camera_info on <topic>_info; both are
+           bridged in hyper_gazebo's ros_gz_bridge.yaml (camera -> /camera/image_raw,
+           camera_info -> /camera/info). The libgazebo_ros_camera.so plugin this sensor used
+           to carry was Gazebo Classic config, inert under ign-gazebo, so it is not carried
+           over; its frameName is what the gz_frame_id below replaces. -->
+      <gz_frame_id>camera_link</gz_frame_id>
 
       <camera name="head">
         <horizontal_fov>${camera_fov}</horizontal_fov>
@@ -632,18 +593,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>vehicle_front_camera</cameraName>
-        <frameName>camera_link</frameName>
-        <hackBaseline>0.07</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 
@@ -653,6 +602,9 @@
       <update_rate>${camera_fps}</update_rate>
       <visualize>true</visualize>
       <topic>camera_object</topic>
+      <!-- Bridged as camera_object -> /camera_object/image_raw and camera_object_info ->
+           /camera_object/info. Same Classic-plugin removal as the front camera above. -->
+      <gz_frame_id>object_camera_link</gz_frame_id>
 
       <camera name="object">
         <horizontal_fov>${object_camera_fov}</horizontal_fov>
@@ -671,57 +623,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="object_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>vehicle_object_camera</cameraName>
-        <frameName>object_camera_link</frameName>
-        <hackBaseline>0.07</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
-    </sensor>
-  </gazebo>
-
-  <!-- Rear Camera -->
-  <gazebo reference="rear_camera_link">
-    <sensor type="camera" name="vehicle_rear_camera">
-      <update_rate>${camera_fps}</update_rate>
-      <visualize>true</visualize>
-      <topic>camera_rear</topic>
-
-      <camera name="rear">
-        <horizontal_fov>${camera_fov}</horizontal_fov>
-        <image>
-          <width>${image_width}</width>
-          <height>${image_height}</height>
-          <format>R8G8B8</format>
-        </image>
-        <clip>
-          <near>0.02</near>
-          <far>550</far>
-        </clip>
-        <noise>
-          <type>gaussian</type>
-          <mean>0.0</mean>
-          <stddev>0.007</stddev>
-        </noise>
-      </camera>
-      <plugin name="rear_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>vehicle_rear_camera</cameraName>
-        <frameName>rear_camera_link</frameName>
-        <hackBaseline>0.07</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 
@@ -806,11 +707,22 @@
 
       <lidar>
         <scan>
+          <!-- Forward 180 deg only, not the full 360 the RPLidar's turret actually sweeps.
+               The unit sits on the bumper, so the vehicle's own body occludes everything behind
+               it; modelling that as a narrowed FOV is closer to the truth than letting the sim
+               return clean rear beams the real car will never have.
+               samples 720 -> 360 keeps the angular resolution at 0.5 deg/sample. Halving the
+               arc does not sharpen the sensor, so the sample count has to halve with it.
+               Consequence, deliberately: nothing raytrace-clears the rear of the local costmap
+               at all, now that the rear camera (and with it /scan_rear) is gone. Cells marked
+               while driving forward survive behind the vehicle until the costmap's rolling
+               window drops them. See the scan block in
+               hyper_planner/config/nav2_controller.yaml. -->
           <horizontal>
-            <samples>720</samples>
+            <samples>360</samples>
             <resolution>1</resolution>
-            <min_angle>-3.14159265</min_angle>
-            <max_angle>3.14159265</max_angle>
+            <min_angle>-1.57079633</min_angle>
+            <max_angle>1.57079633</max_angle>
           </horizontal>
         </scan>
 

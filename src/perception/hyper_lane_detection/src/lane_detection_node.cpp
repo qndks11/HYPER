@@ -1,90 +1,55 @@
 #include "hyper_lane_detection/lane_detection_node.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 #include <cv_bridge/cv_bridge.h>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
+using hyper_lane_detection::CameraExtrinsics;
+using hyper_lane_detection::CameraIntrinsics;
+using hyper_lane_detection::GroundProjection;
+using hyper_lane_detection::GroundRegion;
 using hyper_lane_detection::InputBackend;
 using hyper_lane_detection::parse_input_backend;
 using hyper_lane_detection::to_string;
 
 namespace
 {
-// One camera's IPM (inverse perspective mapping) setup: a trapezoidal ROI, as (row_ratio,
-// col_ratio) of the source image, warped via getPerspectiveTransform() to a bird's-eye view whose
-// output height is `bev_height_scale` times the source frame height (width left unscaled). Bottom
-// corner ratios outside [0, 1] flare past the frame's own edges to capture more near-field width
-// than the frame alone shows at that row -- but warpPerspective can only sample pixels that
-// actually exist in the source frame, so the wider that flare, the more of bird_eye()'s output is
-// unavoidably black (see its corner triangles).
+// How often to repeat the "this camera has no usable ground projection" complaint [ms]. A
+// misconfigured region fails on every single frame, and at camera rate that would bury the log.
+constexpr int kProjectionErrorThrottleMs = 5000;
+
+// Default BEV geometry for the simulated front camera, matching what hyper_control's
+// parameters.yaml actually configures the Gazebo sensor with (153 deg HFOV, 15 deg of downward
+// pitch, 0.145 m ahead of body_link's origin once camera_setback and the housing are taken off
+// body_length/2). These are only defaults: the values are ROS parameters, and the numbers
+// themselves live in parameters.yaml and vehicle.xacro, which is where they should be changed.
+// They are duplicated here solely so the node still produces a metrically correct overlay when
+// launched with no configuration at all.
 //
-// A homography like this implicitly assumes a specific camera FOV/lens-distortion/mounting
-// geometry -- it's tuned by picking corners that happen to trace a flat rectangle on the ground
-// for *one particular camera*, not derived from first principles. That assumption does not carry
-// over between cameras with different geometry, so every distinct camera the node can see through
-// gets its own RoiConfig instead of sharing one: front vs. rear (mounting position/pitch differ)
-// *and* real vs. sim (the real ELP is a ~170 deg fisheye rectified down to a much narrower
-// rectilinear projection -- see ELP-USBGS1200P01-KL170.yaml's P vs. K -- while Gazebo's camera is
-// a plain rectilinear model at its own 153 deg HFOV and 640x400 16:10 resolution, vs. the real
-// camera's 1280x720 16:9). Reusing one camera's numbers for another only coincidentally lines up.
-struct RoiConfig
-{
-  double top_left_row, top_left_col;
-  double top_right_row, top_right_col;
-  double bottom_left_row, bottom_left_col;
-  double bottom_right_row, bottom_right_col;
-  double bev_height_scale;
-};
-
-// Real ELP front camera (input_backend intra_process). Tune against actual ELP footage.
-constexpr RoiConfig kRealFrontRoi{0.48, 0.35, 0.48, 0.65, 1, -2, 1, 3, 0.5};
-
-// Real rear camera equivalent -- no physical rear camera exists yet, kept for when one is added.
-// Reaches farther/closer to the horizon than the front (top row 0.48 -> 0.30, pulling in ground
-// closer to the vehicle) and is stretched across more output rows (height scale 0.5 -> 0.8) for
-// finer pixel resolution during the (comparatively slow, close-range) parking maneuver than the
-// front's ordinary-road-speed settings need. Top col ratios and the bottom flare are left matching
-// the front's, since the concern here is depth, not width. Tune against actual rear footage.
-constexpr RoiConfig kRealRearRoi{0.30, 0.35, 0.30, 0.65, 1, -2, 1, 3, 0.8};
-
-// Gazebo sim front camera (input_backend ros_raw). Copied from kRealFrontRoi as a starting point
-// only -- the real ELP and the sim camera do not share a lens model, FOV, or resolution (see this
-// struct's own doc comment above), so a homography tuned for one has no reason to fit the other.
-// TUNE against actual Gazebo footage before trusting this for anything but "doesn't crash".
-constexpr RoiConfig kSimFrontRoi{0.48, 0.35, 0.48, 0.65, 1, -2, 1, 3, 0.5};
-
-// Gazebo sim rear camera (input_backend ros_raw) -- same caveat as kSimFrontRoi, copied from
-// kRealRearRoi as an untuned starting point.
-constexpr RoiConfig kSimRearRoi{0.30, 0.35, 0.30, 0.65, 1, -2, 1, 3, 0.8};
-
-/// Picks the RoiConfig matching this frame's camera side and camera model. See RoiConfig's own
-/// doc comment for why these four aren't just one shared set of constants.
-const RoiConfig & select_roi_config(bool use_rear_roi, bool use_sim_roi)
-{
-  if (use_rear_roi) {
-    return use_sim_roi ? kSimRearRoi : kRealRearRoi;
-  }
-  return use_sim_roi ? kSimFrontRoi : kRealFrontRoi;
-}
-
-constexpr int kWindowWidth = 420;
-constexpr int kWindowHeight = 300;
-
-// Height [px] of the black strip appended below the BEV image to hold the overlay text. Fixed
-// regardless of the incoming frame size so the 8 possible lines (6 top-anchored, 2 bottom-
-// anchored) always have enough pitch between them -- the overlap this fixes came from anchoring
-// text directly onto the BEV image, whose height shrinks with the active RoiConfig's
-// bev_height_scale and the source frame size, and can end up shorter than the text block itself.
-constexpr int kTextPanelHeight = 360;
-
-// Row margin [px] pushing the vehicle's reference point (origin, in process_frame) below the
-// BEV frame's bottom edge, rather than pinning it exactly to the last visible row. The camera's
-// visible bottom row isn't necessarily where the vehicle physically sits (e.g. a hood/bumper gap
-// the camera doesn't capture), so this treats that row as the zero point and moves the true
-// reference point this many pixels closer to the vehicle (i.e. "behind" the frame).
-constexpr double kOriginBelowFrameMarginPx = 0.0;
+// !! The height is the one number that is NOT a straight copy of parameters.yaml. Its
+// camera_height (1.2) is the camera joint's z in *body_link*, whereas CameraExtrinsics::height_m
+// is height above the *ground plane* -- and body_link rides 0.3 m up, because vehicle.xacro hangs
+// the wheel joints at -wheel_radius/2 (-0.1) and the wheels have radius 0.2. Gazebo confirms it:
+// the spawned model's world z is exactly 0.3000. So the camera is 1.2 + 0.3 = 1.5 m over the
+// ground. Copying the 1.2 straight across drew the whole overlay at 1.2/1.5 = 0.80x true
+// distance, since dx scales linearly with height (see GroundProjection). Anything that changes
+// wheel_radius changes this constant too.
+//
+// The ground region reproduces roughly the coverage the old hand-picked ROI happened to have
+// (about 0.3..7.6 m ahead, +/-9 m across) at about its true pixel scale.
+constexpr double kSimFrontHorizontalFovRad = 2.67;
+constexpr double kSimFrontCameraHeightM = 1.5;
+constexpr double kSimFrontCameraPitchRad = 0.2617994;
+constexpr double kSimFrontCameraOffsetM = 0.145;
+constexpr double kSimFrontNearM = 0.3;
+constexpr double kSimFrontFarM = 7.6;
+constexpr double kSimFrontHalfWidthM = 9.0;
+constexpr double kSimFrontMetersPerPixel = 0.028125;
 
 }  // namespace
 
@@ -103,26 +68,38 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   }
   input_backend_ = *backend;
 
-  lane_center_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>("/lane/center", 10);
-  stopline_publisher_ =
-    create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/detection", 10);
-  rear_lane_center_publisher_ =
-    create_publisher<std_msgs::msg::Float64MultiArray>("/lane/rear_center", 10);
-  rear_stopline_publisher_ =
-    create_publisher<std_msgs::msg::Float64MultiArray>("/stopline/rear_detection", 10);
+  // The front camera's BEV geometry. The defaults describe the simulated camera; a real vehicle
+  // overrides them (notably with explicit fx/fy/cx/cy, since a rectified real lens has neither a
+  // centered principal point nor equal focal lengths -- see hyper_camera's ELP calibration).
+  BevSettings front_defaults;
+  front_defaults.horizontal_fov_rad = kSimFrontHorizontalFovRad;
+  front_defaults.extrinsics = CameraExtrinsics{
+    kSimFrontCameraHeightM, kSimFrontCameraPitchRad, kSimFrontCameraOffsetM};
+  front_defaults.region = GroundRegion{
+    kSimFrontNearM, kSimFrontFarM, kSimFrontHalfWidthM, kSimFrontMetersPerPixel};
+  front_bev_settings_ = declare_bev_settings("bev", front_defaults);
 
-  // Only ros_raw is ever the Gazebo sim; intra_process is always the real ELP camera. Selects
-  // which of the four RoiConfig instances (see the anonymous namespace above) bird_eye() warps
-  // against for each side.
-  const bool is_sim = input_backend_ == InputBackend::kRosRaw;
+  bev_cloud_frame_id_ = declare_parameter<std::string>("bev_cloud_frame_id", "body_link");
+  bev_cloud_stride_ = std::max(1, static_cast<int>(declare_parameter<int>("bev_cloud_stride", 2)));
+  // -0.02 -> -0.15. 2 cm는 RViz가 코스트맵(alpha 0.4)과 이 오버레이(alpha 0.9)를 둘 다
+  // 반투명으로 -- 즉 깊이 기록 없이 카메라 거리순으로 -- 그리기에는 너무 얇아서, 시점에
+  // 따라 오버레이가 코스트맵 위로 올라오곤 했습니다. 15 cm면 어느 시점에서도 정렬이
+  // 뒤집히지 않습니다. 지면보다 아래일 뿐 BEV의 x/y 기하는 그대로이므로 거리 해석에는
+  // 영향이 없습니다.
+  bev_cloud_z_m_ = declare_parameter<double>("bev_cloud_z_m", -0.15);
 
-  cv::namedWindow("LaneDetection", cv::WINDOW_NORMAL);
-  cv::resizeWindow(
-    "LaneDetection", kWindowWidth,
-    static_cast<int>(kWindowHeight * select_roi_config(false, is_sim).bev_height_scale) +
-      kTextPanelHeight);
+  // Depth 1 + best-effort (the usual image-stream profile): a debug view is only ever worth
+  // showing at its newest frame, and a slow/absent viewer (RViz on another machine) must never
+  // push back on the detection pipeline the way a reliable, queued image topic would. Note this
+  // means an RViz Image display left on "System Default" reliability (= Reliable) will not match
+  // this publisher and shows nothing -- set its Reliability Policy to Best Effort.
+  const auto debug_image_qos = rclcpp::SensorDataQoS().keep_last(1);
+  bev_image_publisher_ =
+    create_publisher<sensor_msgs::msg::Image>("/lane/bev/image_raw", debug_image_qos);
+  bev_cloud_publisher_ =
+    create_publisher<sensor_msgs::msg::PointCloud2>("/lane/bev/points", debug_image_qos);
 
-  // Front camera: a plain sensor_msgs/Image subscription either way -- under ros_raw this is
+  // A plain sensor_msgs/Image subscription either way -- under ros_raw this is
   // Gazebo's bridged sim frame; under intra_process it's hyper_camera's ElpCameraPublisherNode
   // component, loaded into the same ComposableNodeContainer as this node (see
   // hyper_object_detection's perception.launch.py), so the frame arrives by pointer instead of
@@ -130,58 +107,264 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
     "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
 
-  // Rear camera: only ros_raw ever has one -- intra_process (real vehicle) has no rear camera
-  // yet, so skip both the subscription and the window that would otherwise just sit blank.
-  if (input_backend_ == InputBackend::kRosRaw) {
-    raw_rear_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
-      "/rear_image_raw", 10,
-      std::bind(&LaneDetection::raw_rear_image_callback, this, std::placeholders::_1));
+  // ---- Drivable-area classification (see drivable_area.hpp) ----
+  // Off unless a launch file asks for it: unlike this node's other outputs, this one is consumed
+  // by the local costmap and therefore steers the vehicle, so it should not switch itself on just
+  // because someone started the node to look at a BEV.
+  drivable_enabled_ = declare_parameter<bool>("drivable.enabled", false);
+  drivable_max_range_m_ = declare_parameter<double>("drivable.max_range", 9.0);
+  drivable_max_lateral_m_ = declare_parameter<double>("drivable.max_lateral", 6.0);
 
-    cv::namedWindow("LaneDetectionRear", cv::WINDOW_NORMAL);
-    cv::resizeWindow(
-      "LaneDetectionRear", kWindowWidth,
-      static_cast<int>(kWindowHeight * select_roi_config(true, is_sim).bev_height_scale) +
-        kTextPanelHeight);
+  hyper_lane_detection::DrivableAreaSettings drivable_settings;
+  drivable_settings.surface_max_saturation = declare_parameter<int>(
+    "drivable.surface_max_saturation", drivable_settings.surface_max_saturation);
+  drivable_settings.paint_hue_min =
+    declare_parameter<int>("drivable.paint_hue_min", drivable_settings.paint_hue_min);
+  drivable_settings.paint_hue_max =
+    declare_parameter<int>("drivable.paint_hue_max", drivable_settings.paint_hue_max);
+  drivable_settings.paint_min_saturation = declare_parameter<int>(
+    "drivable.paint_min_saturation", drivable_settings.paint_min_saturation);
+  drivable_settings.close_radius_m =
+    declare_parameter<double>("drivable.close_radius", drivable_settings.close_radius_m);
+  drivable_settings.open_radius_m =
+    declare_parameter<double>("drivable.open_radius", drivable_settings.open_radius_m);
+  drivable_settings.seed_width_m =
+    declare_parameter<double>("drivable.seed_width", drivable_settings.seed_width_m);
+  drivable_settings.seed_depth_m =
+    declare_parameter<double>("drivable.seed_depth", drivable_settings.seed_depth_m);
+  drivable_settings.min_seed_coverage =
+    declare_parameter<double>("drivable.min_seed_coverage", drivable_settings.min_seed_coverage);
+  drivable_detector_ = hyper_lane_detection::DrivableAreaDetector{drivable_settings};
+
+  if (drivable_enabled_) {
+    // Reliable, depth 1. The BEV streams above are best-effort because a dropped debug frame
+    // costs nothing; a dropped classification frame instead quietly ages the costmap layer's
+    // belief, and that layer's decay would read the silence as "the road went away".
+    drivable_grid_publisher_ =
+      create_publisher<nav_msgs::msg::OccupancyGrid>("/lane/drivable_area", rclcpp::QoS(1));
+    drivable_image_publisher_ =
+      create_publisher<sensor_msgs::msg::Image>("/lane/drivable/image_raw", debug_image_qos);
   }
 
   RCLCPP_INFO(
-    get_logger(), "LaneDetection started (input_backend=%s)", to_string(input_backend_).c_str());
+    get_logger(), "LaneDetection started (input_backend=%s, bev_cloud_frame_id=%s)",
+    to_string(input_backend_).c_str(), bev_cloud_frame_id_.c_str());
 }
 
-cv::Mat LaneDetection::build_transform(
-  int src_height, int src_width, int dst_height, int dst_width, bool use_rear_roi,
-  bool use_sim_roi) const
+LaneDetection::BevSettings LaneDetection::declare_bev_settings(
+  const std::string & prefix, const BevSettings & defaults)
 {
-  const RoiConfig & roi = select_roi_config(use_rear_roi, use_sim_roi);
+  BevSettings settings;
 
-  const std::vector<cv::Point2f> src{
-    {static_cast<float>(src_width * roi.top_left_col),
-     static_cast<float>(src_height * roi.top_left_row)},
-    {static_cast<float>(src_width * roi.top_right_col),
-     static_cast<float>(src_height * roi.top_right_row)},
-    {static_cast<float>(src_width * roi.bottom_right_col),
-     static_cast<float>(src_height * roi.bottom_right_row)},
-    {static_cast<float>(src_width * roi.bottom_left_col),
-     static_cast<float>(src_height * roi.bottom_left_row)}};
+  // Intrinsics, two ways. horizontal_fov is enough for an ideal centered pinhole with square
+  // pixels (Gazebo); fx/fy/cx/cy are needed for anything else, and win when fx is set.
+  settings.horizontal_fov_rad =
+    declare_parameter<double>(prefix + ".horizontal_fov", defaults.horizontal_fov_rad);
+  settings.intrinsics.fx = declare_parameter<double>(prefix + ".fx", defaults.intrinsics.fx);
+  settings.intrinsics.fy = declare_parameter<double>(prefix + ".fy", defaults.intrinsics.fy);
+  settings.intrinsics.cx = declare_parameter<double>(prefix + ".cx", defaults.intrinsics.cx);
+  settings.intrinsics.cy = declare_parameter<double>(prefix + ".cy", defaults.intrinsics.cy);
 
-  const std::vector<cv::Point2f> dst{
-    {0.0f, 0.0f},
-    {static_cast<float>(dst_width), 0.0f},
-    {static_cast<float>(dst_width), static_cast<float>(dst_height)},
-    {0.0f, static_cast<float>(dst_height)}};
+  settings.extrinsics.height_m =
+    declare_parameter<double>(prefix + ".camera_height", defaults.extrinsics.height_m);
+  settings.extrinsics.pitch_rad =
+    declare_parameter<double>(prefix + ".camera_pitch", defaults.extrinsics.pitch_rad);
+  settings.extrinsics.longitudinal_offset_m = declare_parameter<double>(
+    prefix + ".camera_longitudinal_offset", defaults.extrinsics.longitudinal_offset_m);
 
-  return cv::getPerspectiveTransform(src, dst);
+  settings.region.near_m = declare_parameter<double>(prefix + ".near", defaults.region.near_m);
+  settings.region.far_m = declare_parameter<double>(prefix + ".far", defaults.region.far_m);
+  settings.region.half_width_m =
+    declare_parameter<double>(prefix + ".half_width", defaults.region.half_width_m);
+  settings.region.meters_per_pixel =
+    declare_parameter<double>(prefix + ".meters_per_pixel", defaults.region.meters_per_pixel);
+
+  return settings;
 }
 
-cv::Mat LaneDetection::bird_eye(const cv::Mat & image, bool use_rear_roi, bool use_sim_roi) const
+const GroundProjection * LaneDetection::projection_for(const cv::Size & source)
 {
-  const double height_scale = select_roi_config(use_rear_roi, use_sim_roi).bev_height_scale;
-  const cv::Size dst_size(image.cols, static_cast<int>(image.rows * height_scale));
-  const cv::Mat transform = build_transform(
-    image.rows, image.cols, dst_size.height, dst_size.width, use_rear_roi, use_sim_roi);
-  cv::Mat warped;
-  cv::warpPerspective(image, warped, transform, dst_size);
-  return warped;
+  auto & cached = front_projection_;
+  auto & cached_source = front_projection_source_;
+  const BevSettings & settings = front_bev_settings_;
+
+  if (cached && cached_source == source) {
+    return &cached.value();
+  }
+
+  // Explicit intrinsics win when given; otherwise derive an ideal pinhole from the FOV and this
+  // frame's own dimensions, which is why this cannot happen before the first frame arrives.
+  CameraIntrinsics intrinsics = settings.intrinsics;
+  if (!intrinsics.is_set()) {
+    intrinsics = CameraIntrinsics::from_horizontal_fov(settings.horizontal_fov_rad, source);
+  }
+
+  std::string error;
+  auto projection = GroundProjection::create(intrinsics, settings.extrinsics, settings.region,
+      error);
+  if (!projection) {
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
+      "Front camera has no usable ground projection for a %dx%d frame: %s -- frames dropped",
+      source.width, source.height, error.c_str());
+    cached.reset();
+    return nullptr;
+  }
+
+  cached = std::move(projection);
+  cached_source = source;
+  RCLCPP_INFO(
+    get_logger(), "Front camera BEV projection (%dx%d source): %s",
+    source.width, source.height, cached->describe(source).c_str());
+  return &cached.value();
+}
+
+void LaneDetection::publish_bev_cloud(
+  const cv::Mat & view, const std_msgs::msg::Header & header,
+  const GroundProjection & projection)
+{
+  const auto & publisher = bev_cloud_publisher_;
+  if (!publisher || publisher->get_subscription_count() == 0) {
+    return;
+  }
+
+  // Same scale and same origin that built the warp, so the isotropy this arithmetic assumes is a
+  // property of the raster rather than a hope: GroundProjection lays the output out in meters
+  // before any pixel is sampled.
+  const double meters_per_pixel = projection.meters_per_pixel();
+  const cv::Point2d origin = projection.origin_px();
+
+  sensor_msgs::msg::PointCloud2 cloud;
+  cloud.header = header;
+  cloud.header.frame_id = bev_cloud_frame_id_;
+  cloud.is_dense = true;
+
+  sensor_msgs::PointCloud2Modifier modifier(cloud);
+  modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
+  const int rows = (view.rows + bev_cloud_stride_ - 1) / bev_cloud_stride_;
+  const int cols = (view.cols + bev_cloud_stride_ - 1) / bev_cloud_stride_;
+  modifier.resize(static_cast<size_t>(rows) * static_cast<size_t>(cols));
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_rgb(cloud, "rgb");
+
+  size_t point_count = 0;
+  for (int row = 0; row < view.rows; row += bev_cloud_stride_) {
+    const cv::Vec3b * view_row = view.ptr<cv::Vec3b>(row);
+    for (int col = 0; col < view.cols; col += bev_cloud_stride_) {
+      const cv::Vec3b & bgr = view_row[col];
+      // Un-sampled warp corners -- "no data", not black ground. See publish_bev_cloud()'s docs.
+      if (bgr[0] == 0 && bgr[1] == 0 && bgr[2] == 0) {
+        continue;
+      }
+      *iter_x = static_cast<float>((origin.y - row) * meters_per_pixel);
+      *iter_y = static_cast<float>((origin.x - col) * meters_per_pixel);
+      *iter_z = static_cast<float>(bev_cloud_z_m_);
+      // PointCloud2's packed "rgb" float is byte-ordered b, g, r -- the same order cv::Vec3b
+      // already holds a BGR pixel in, so this copies straight across.
+      iter_rgb[0] = bgr[0];
+      iter_rgb[1] = bgr[1];
+      iter_rgb[2] = bgr[2];
+      ++iter_x;
+      ++iter_y;
+      ++iter_z;
+      ++iter_rgb;
+      ++point_count;
+    }
+  }
+
+  // Shrink to what actually survived the black-pixel skip; the iterators are done with by now.
+  modifier.resize(point_count);
+  publisher->publish(cloud);
+}
+
+void LaneDetection::publish_drivable_area(
+  const cv::Mat & view, const std_msgs::msg::Header & header, const GroundProjection & projection)
+{
+  if (!drivable_grid_publisher_) {
+    return;
+  }
+
+  const double meters_per_pixel = projection.meters_per_pixel();
+  const cv::Point2d origin = projection.origin_px();
+
+  // Crop to the box actually worth publishing, before classifying. The BEV is 18 m wide at the
+  // configured half_width of 9 m, and its outer columns are stretched out of a handful of source
+  // pixels near the frame edge -- keeping them would cost four times the work to hand the flood
+  // fill its least trustworthy input. Rows are clipped from the far end (small row index = far
+  // ground); columns symmetrically about the vehicle's own column.
+  const int far_row =
+    static_cast<int>(std::ceil(origin.y - drivable_max_range_m_ / meters_per_pixel));
+  const int lateral_px =
+    static_cast<int>(std::lround(drivable_max_lateral_m_ / meters_per_pixel));
+  cv::Rect crop(
+    static_cast<int>(std::lround(origin.x)) - lateral_px, std::max(0, far_row),
+    2 * lateral_px + 1, view.rows - std::max(0, far_row));
+  crop &= cv::Rect(cv::Point(0, 0), view.size());
+  if (crop.empty()) {
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
+      "drivable.max_range/max_lateral select nothing inside the %dx%d BEV -- no grid published",
+      view.cols, view.rows);
+    return;
+  }
+
+  const cv::Mat cropped = view(crop);
+  // The vehicle origin, expressed in the cropped raster's own pixels.
+  const cv::Point2d crop_origin(origin.x - crop.x, origin.y - crop.y);
+  const auto result = drivable_detector_.detect(cropped, crop_origin, meters_per_pixel);
+
+  if (!result.seeded) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
+      "No drivable surface under the vehicle -- publishing the grid as all-unknown. Either the "
+      "vehicle is genuinely off-course, or drivable.surface_max_saturation does not match this "
+      "camera's road.");
+  }
+
+  // BEV -> OccupancyGrid. The grid's x axis is the vehicle's, so it indexes BEV *rows*: width is
+  // the longitudinal cell count and height the lateral one, which reads backwards until you
+  // remember an OccupancyGrid is indexed in its own frame, not in image order.
+  //
+  //   BEV row r is at x = (origin.y - r) * mpp, so i = (rows - 1 - r) makes x grow with i.
+  //   BEV col c is at y = (origin.x - c) * mpp, so j = (cols - 1 - c) makes y grow with j.
+  //
+  // Both axes therefore run opposite to the image's, and the grid's own origin is its minimum
+  // corner, half a cell out from the first cell's center.
+  const int rows = result.classes.rows;
+  const int cols = result.classes.cols;
+
+  nav_msgs::msg::OccupancyGrid grid;
+  grid.header = header;
+  grid.header.frame_id = bev_cloud_frame_id_;
+  grid.info.map_load_time = header.stamp;
+  grid.info.resolution = static_cast<float>(meters_per_pixel);
+  grid.info.width = static_cast<uint32_t>(rows);
+  grid.info.height = static_cast<uint32_t>(cols);
+  grid.info.origin.position.x = (crop_origin.y - rows + 0.5) * meters_per_pixel;
+  grid.info.origin.position.y = (crop_origin.x - cols + 0.5) * meters_per_pixel;
+  grid.info.origin.position.z = 0.0;
+  grid.info.origin.orientation.w = 1.0;
+
+  grid.data.resize(static_cast<size_t>(rows) * static_cast<size_t>(cols));
+  for (int r = 0; r < rows; ++r) {
+    const int8_t * class_row = result.classes.ptr<int8_t>(r);
+    const size_t i = static_cast<size_t>(rows - 1 - r);
+    for (int c = 0; c < cols; ++c) {
+      const size_t j = static_cast<size_t>(cols - 1 - c);
+      grid.data[j * static_cast<size_t>(rows) + i] = class_row[c];
+    }
+  }
+  drivable_grid_publisher_->publish(grid);
+
+  if (drivable_image_publisher_ && drivable_image_publisher_->get_subscription_count() > 0) {
+    cv::Mat annotated = cropped.clone();
+    drivable_detector_.draw(result, crop_origin, meters_per_pixel, annotated);
+    drivable_image_publisher_->publish(
+      *cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
+  }
 }
 
 void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
@@ -193,74 +376,40 @@ void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstShare
     RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
     return;
   }
-  process_frame(cv_ptr->image, msg->header.stamp, CameraSide::kFront);
-}
-
-void LaneDetection::raw_rear_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
-{
-  cv_bridge::CvImageConstPtr cv_ptr;
-  try {
-    cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
-  } catch (const cv_bridge::Exception & e) {
-    RCLCPP_ERROR(get_logger(), "cv_bridge exception (rear): %s", e.what());
-    return;
-  }
-  process_frame(cv_ptr->image, msg->header.stamp, CameraSide::kRear);
+  process_frame(cv_ptr->image, msg->header);
 }
 
 void LaneDetection::process_frame(
-  const cv::Mat & image, const rclcpp::Time & stamp, CameraSide side)
+  const cv::Mat & image, const std_msgs::msg::Header & header)
 {
-  // Reserved for future header-stamped outputs / latency logging -- the current output messages
-  // (std_msgs/Float64MultiArray) carry no header of their own to stamp.
-  (void)stamp;
+  const auto & bev_image_publisher = bev_image_publisher_;
 
-  const bool is_rear = side == CameraSide::kRear;
-  // Only ros_raw is ever the Gazebo sim; intra_process is always the real ELP camera -- see
-  // RoiConfig's doc comment for why the two need separate ROI/BEV-scale constants.
-  const bool is_sim = input_backend_ == InputBackend::kRosRaw;
-  const auto & lane_publisher = is_rear ? rear_lane_center_publisher_ : lane_center_publisher_;
-  const auto & stopline_publisher = is_rear ? rear_stopline_publisher_ : stopline_publisher_;
-  const std::string window_name = is_rear ? "LaneDetectionRear" : "LaneDetection";
+  // The warp is the camera's own ground projection rather than a set of ROI corner ratios picked
+  // per camera model: the same code path serves the sim and the real vehicle, and the difference
+  // between them lives entirely in parameters.
+  const GroundProjection * projection = projection_for(image.size());
+  if (!projection) {
+    return;  // reason already logged (throttled) by projection_for()
+  }
 
-  const cv::Mat warped = bird_eye(image, /*use_rear_roi=*/is_rear, is_sim);
-  const cv::Point2d origin(warped.cols / 2.0, warped.rows - 1.0 + kOriginBelowFrameMarginPx);
+  cv::Mat warped;
+  cv::warpPerspective(image, warped, projection->homography(), projection->bev_size());
 
-  const cv::Mat yellow = lane_detector_.yellow_mask(warped);
-  const cv::Mat white = stopline_detector_.white_mask(warped);
+  publish_bev_cloud(warped, header, *projection);
 
-  // Single shared debug view: both masks are highlighted first (different colors so the two
-  // don't read as one blob), before either detector's annotations are drawn on top -- so a mask
-  // fill never overwrites an annotation drawn earlier.
-  cv::Mat view = warped.clone();
-  view.setTo(cv::Scalar(0, 255, 0), yellow);
-  view.setTo(cv::Scalar(180, 180, 180), white);
+  if (drivable_enabled_) {
+    publish_drivable_area(warped, header, *projection);
+  }
 
-  const auto lane_result =
-    lane_detector_.detect_and_draw(yellow, origin, warped.cols, is_rear, view);
-  std_msgs::msg::Float64MultiArray lane_msg;
-  lane_msg.data = {
-    lane_result.left.steering_angle_deg, lane_result.left.offset_m,
-    lane_result.left.valid ? 1.0 : 0.0, lane_result.right.steering_angle_deg,
-    lane_result.right.offset_m, lane_result.right.valid ? 1.0 : 0.0};
-  lane_publisher->publish(lane_msg);
-
-  const auto stopline_result = stopline_detector_.detect_and_draw(white, origin, view);
-  std_msgs::msg::Float64MultiArray stopline_msg;
-  stopline_msg.data = {stopline_result.distance_m, stopline_result.valid ? 1.0 : 0.0};
-  stopline_publisher->publish(stopline_msg);
-
-  // Dedicated black strip below the BEV image for all overlay text, sized independently of the
-  // BEV image's own (config-dependent) height so the lines below never run out of room.
-  cv::copyMakeBorder(
-    view, view, 0, kTextPanelHeight, 0, 0, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
-  const int panel_top = view.rows - kTextPanelHeight;
-
-  lane_detector_.draw_text(lane_result, view, panel_top);
-  stopline_detector_.draw_text(stopline_result, view, panel_top);
-
-  cv::imshow(window_name, view);
-  cv::waitKey(1);
+  // The BEV view's only sink: a topic, read by RViz's Image display (or rqt_image_view). This
+  // node deliberately opens no cv::imshow window of its own -- a GUI window pins the node to a
+  // local X display, which the headless vehicle doesn't have. Published under the source frame's
+  // own header so a viewer can line it up with the rest of the stack; skipped entirely when
+  // nothing has subscribed.
+  if (bev_image_publisher && bev_image_publisher->get_subscription_count() > 0) {
+    bev_image_publisher->publish(
+      *cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, warped).toImageMsg());
+  }
 }
 
 // Registers LaneDetection as a loadable rclcpp component (see CMakeLists.txt's

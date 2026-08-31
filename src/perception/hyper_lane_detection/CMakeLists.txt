@@ -14,6 +14,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 
@@ -26,6 +27,8 @@ include_directories(include)
 # generates the plain `lane_detection_node` executable used for input_backend:=ros_raw.
 add_library(lane_detection_component SHARED
   src/lane_detection_node.cpp
+  src/ground_projection.cpp
+  src/drivable_area.cpp
   src/lane_detector.cpp
   src/stopline_detector.cpp
   src/input_backend.cpp
@@ -35,10 +38,14 @@ target_include_directories(lane_detection_component PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(lane_detection_component
-  rclcpp rclcpp_components std_msgs sensor_msgs cv_bridge OpenCV)
+  rclcpp rclcpp_components std_msgs sensor_msgs nav_msgs cv_bridge OpenCV)
 rclcpp_components_register_node(lane_detection_component
   PLUGIN "LaneDetection"
   EXECUTABLE lane_detection_node)
+
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
 
 install(TARGETS lane_detection_component
   ARCHIVE DESTINATION lib
