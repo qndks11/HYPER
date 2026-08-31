@@ -1,0 +1,23 @@
+ebimu_node:
+  ros__parameters:
+    port: "/dev/ttyUSB0"
+    baudrate: 115200
+    frame_id: imu_link
+    topic: imu
+    # 1ms~1000ms (sensor's own "sor" command, spec 6-1-2). 10 = 100Hz.
+    output_rate_ms: 10
+    reconnect_wait_seconds: 2.0
+    # Placeholder covariances (roll/pitch/accel tighter than yaw, since
+    # yaw depends on the magnetometer's own environment-dependent quality
+    # per spec 8-1). Tune against real vehicle data the same way
+    # sensors.launch.py tunes the WitMotion orientation_covariance for
+    # EKF fusion -- these defaults have not been validated on hardware.
+    orientation_covariance: [0.01, 0.0, 0.0,
+                             0.0, 0.01, 0.0,
+                             0.0, 0.0, 0.02]
+    angular_velocity_covariance: [0.0025, 0.0, 0.0,
+                                  0.0, 0.0025, 0.0,
+                                  0.0, 0.0, 0.0025]
+    linear_acceleration_covariance: [0.01, 0.0, 0.0,
+                                     0.0, 0.01, 0.0,
+                                     0.0, 0.0, 0.01]
