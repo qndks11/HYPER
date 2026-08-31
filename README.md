@@ -329,4 +329,4 @@ ros2 launch hyper_launch behavior.launch.py
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
 | `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `witmotion_ros2` → ROS (실차, WT901BLE) | IMU |
 | `/imu/raw` | `sensor_msgs/Imu` | `witmotion_ros2` → `imu_enu_relay` | 실차 전용. 드라이버 원본(나침반식 yaw). relay가 ENU로 고쳐 `/imu`로 다시 발행 |
-| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → `ekf_global` | yaw 전용 절대 방위. 정지 중에는 `datums.yaml`의 `initial_heading_deg`, 주행 중에는 GPS 진행방향. 지자기 yaw는 어느 EKF도 안 쓰며, 이 토픽이 유일한 방위 기준 |
+| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → (없음) | RTK 진행방향 기반 yaw. **현재 비활성** — `gps_heading` 노드는 `odometry.launch.py`에서 주석 처리했고 EKF도 구독하지 않는다. 절대 방위는 `ekf_global`이 `/imu`의 지자기 yaw로 잡는다 (되돌리려면 launch 주석 해제 + `dual_ekf_navsat.yaml`의 `imu1` 블록 복원 + `imu0_config` yaw를 false로) |

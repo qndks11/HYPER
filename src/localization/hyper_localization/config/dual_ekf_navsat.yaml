@@ -30,8 +30,9 @@ ekf_local:
     odom0_relative: false
 
     imu0: imu
-    # yaw(인덱스 5)는 false -- odom 프레임은 "연속적"이어야 하므로 절대 방위(자기
-    # 나침반) 기준을 여기에 넣으면 안 됩니다. 지자기 교란/차량 모터 근처에서 yaw가
+    # yaw(인덱스 5)는 false -- ekf_global이 지자기 yaw를 절대 방위로 먹기 시작한
+    # 뒤에도 여기는 그대로 false입니다. odom 프레임은 "연속적"이어야 하므로 절대
+    # 방위(자기 나침반) 기준을 여기에 넣으면 안 됩니다. 지자기 교란/차량 모터 근처에서 yaw가
     # 튀면 그 점프가 그대로 odom 프레임에 들어가고, odom을 연속 좌표계로 가정하는
     # 하위 노드(로컬 플래너/코스트맵)가 깨집니다. roll/pitch는 중력으로 관측되므로
     # 신뢰할 수 있어 true로 둡니다. 여기 yaw는 vyaw(자이로 z) 적분으로만 결정되며,
@@ -121,18 +122,19 @@ ekf_global:
     odom1_relative: false
 
     imu0: imu
-    # yaw(인덱스 5)는 ekf_local과 마찬가지로 false. WT901BLE는 6축 모드로 돌아
-    # yaw가 자북이 아니라 "전원 인가 시점 자세" 기준으로 적분되고 분당 0.5도씩
-    # 밀린다. 이걸 절대 방위로 먹이면 map 프레임 heading이 서서히 통째로 돌아가고,
-    # RTK 위치해와 싸운다. 그래서 지자기/드라이버 yaw는 어느 필터에도 안 넣는다.
-    # 대신 절대 yaw는 imu1(gps_heading 노드)에서만 온다:
-    #   초기값 = 없음 -- 부팅 직후 yaw는 알 수 없고 아래 vyaw 적분만으로 이어진다
-    #   확립   = gps_accuracy_gui의 0.5 m 캘리브레이션(1회 주입) 또는 첫 GPS 진행방향
-    #   전파   = 아래 vyaw(자이로 z)
-    #   보정   = 주행 중 GPS 진행방향(course over ground)
+    # yaw(인덱스 5) = true -- 이 필터의 절대 방위 기준은 IMU(지자기) yaw다.
+    # map 프레임은 점프해도 되는 좌표계이므로(연속성은 ekf_local이 만드는 odom이
+    # 책임진다) 절대 방위를 여기에서만 먹인다. 지자기 교란으로 yaw가 튀면 map->odom
+    # 변환이 같이 튀지만 odom 프레임 자체는 흔들리지 않는다.
+    # 실차에서는 드라이버 원본이 REP-103 ENU가 아니라서 /imu/raw -> imu_enu_relay -> /imu
+    # 로 들어오므로, 여기 들어오는 yaw의 부호와 원점은 datums.yaml의
+    # imu_yaw_sign / imu_yaw_offset_deg가 결정한다. 사이트마다 실측해서 채워야 하고,
+    # 틀리면 map 프레임 heading이 그 각도만큼 통째로 돌아간 채 출발한다.
+    # 부팅 직후부터 절대 yaw가 있으므로 초기 yaw 캘리브레이션(0.5 m 굴리기)은
+    # 필요 없다 -- WT901BLE가 9축(지자기 포함) 모드인지만 확인할 것.
     # roll/pitch는 중력으로 관측되므로 그대로 신뢰한다.
     imu0_config: [false, false, false,
-                  true,  true,  false,
+                  true,  true,  true,
                   false, false, false,
                   true,  true,  true,
                   true,  true,  true]
@@ -142,23 +144,25 @@ ekf_global:
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
 
-    # gps_heading 노드(hyper_localization/scripts/gps_heading.py)가 내보내는
-    # yaw 전용 Imu. 이 필터의 유일한 절대 방위 기준이다. 주행 중 GPS 진행방향을
-    # (u-blox headAcc에서 뽑은 공분산과 함께) 실을 때만, 그리고 gps_accuracy_gui의
-    # 캘리브레이션이 1회 주입할 때만 publish된다 -- 그 전/느릴 때는 자이로가 yaw를 잇는다.
-    # ekf_local에는 넣지 않는다: odom 프레임은 연속이어야 하므로 절대 방위 점프가
-    # 들어가면 안 된다 (map->odom이 흡수하도록 여기 global에만 넣는다).
-    imu1: imu/heading
-    imu1_config: [false, false, false,
-                  false, false, true,
-                  false, false, false,
-                  false, false, false,
-                  false, false, false]
-    imu1_nodelay: true
-    imu1_differential: false
-    imu1_relative: false
-    imu1_queue_size: 10
-    imu1_remove_gravitational_acceleration: false
+    # RTK GNSS 진행방향(u-blox NavPVT headMot)을 절대 yaw로 먹이던 imu1(/imu/heading,
+    # gps_heading 노드)은 지금 빼 두었다 -- 위 imu0의 지자기 yaw가 그 역할을 한다.
+    # 같이 꺼지는 것: gps_accuracy_gui의 "Calibrate initial yaw"도 /imu/heading으로
+    # 주입하므로 이제 EKF에 닿지 않는다(GUI 표시용으로는 그대로 동작한다).
+    # 되돌리는 법: odometry.launch.py의 gps_heading 노드 주석을 풀고 여기에 아래를
+    # 다시 넣는다 (스크립트 hyper_localization/scripts/gps_heading.py는 그대로 있다).
+    #   imu1: imu/heading
+    #   imu1_config: [false, false, false,
+    #                 false, false, true,
+    #                 false, false, false,
+    #                 false, false, false,
+    #                 false, false, false]
+    #   imu1_nodelay: true
+    #   imu1_differential: false
+    #   imu1_relative: false
+    #   imu1_queue_size: 10
+    #   imu1_remove_gravitational_acceleration: false
+    # 둘을 동시에 켜면 절대 방위 관측이 두 개가 되어 서로 싸우므로, 되돌릴 때는
+    # imu0_config의 인덱스 5(yaw)를 다시 false로 내려야 한다.
 
     use_control: false
 

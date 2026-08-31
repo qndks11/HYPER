@@ -11,17 +11,18 @@ The correction applied here is:
 
     out_yaw = yaw_sign * in_yaw + yaw_offset_rad
 
-Note that no EKF fuses this yaw as an absolute heading any more: the WT901BLE
-runs in 6-axis mode, so its yaw drifts ~0.5 deg/min from wherever it was powered
-on (see config/datums.yaml). Absolute heading now comes from gps_heading.py
-instead, and imu0_config index 5 is false in both filters. The yaw fixed up here
-is only for display and sanity checks.
+ekf_global fuses this yaw as its absolute heading (imu0_config index 5 is true
+there; ekf_local keeps it false so the odom frame stays continuous), so yaw_sign
+and yaw_offset_rad *are* the map-frame heading -- measure them per site and put
+them in config/datums.yaml. Watch out for the WT901BLE running in 6-axis mode:
+its yaw then integrates from wherever it was powered on and drifts ~0.5 deg/min,
+which walks the map heading around. Confirm the sensor is in 9-axis (magnetometer)
+mode before trusting it.
 
-What still matters a great deal is flip_angular_velocity_z. With the
-magnetometer gone, yaw is *propagated* purely by integrating the z gyro, so a
-flipped sign turns every left turn into an estimated right turn. Verify on the
-car: rotate it counter-clockwise and check that
-`ros2 topic echo /imu --field angular_velocity` reports positive z. If it is
+flip_angular_velocity_z still matters: yaw is *propagated* by integrating the z
+gyro between heading corrections, so a flipped sign turns every left turn into an
+estimated right turn. Verify on the car: rotate it counter-clockwise and check
+that `ros2 topic echo /imu --field angular_velocity` reports positive z. If it is
 negative, flip imu_flip_gyro_z in datums.yaml.
 
 roll, pitch, accel and the covariances are passed through untouched.
