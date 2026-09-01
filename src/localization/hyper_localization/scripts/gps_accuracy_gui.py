@@ -26,6 +26,7 @@
 #
 # 초기 yaw: 6축 IMU에는 절대 방위가 없다(gps_heading.py 참고). "Calibrate initial yaw"
 # 버튼은 차를 앞으로 0.5 m 굴려 GPS 변위로 ENU yaw를 잰 뒤 출발점으로 되돌린다
+# (되돌아오는 구간은 /odom 전진속도 적분으로 끝낸다 -- YawCalibrator 주석 참고)
 # (YawCalibrator). 실차를 움직이므로 확인 대화상자를 거친다. 나침반은 평소 EKF yaw
 # (/odometry/filtered_map, GPS가 끊겨도 odom으로 propagate됨)를 그리고, 캘리브레이션이
 # 도는 동안에만 UNKNOWN으로 표시한다.
@@ -110,12 +111,25 @@ CALIB_HEADING_FRAME = 'body_link'   # /imu/heading frame_id (gps_heading 기본�
 CALIB_POS_STDDEV_M = 0.10   # GPS 위치 잡음 가정 -> 기선 길이로 나눠 각도 불확실도로
 CALIB_MIN_HEADING_STDDEV_DEG = 3.0  # 각도 불확실도 하한
 CALIB_HEADING_REPUBLISH = 20        # 측정 후 /imu/heading를 몇 tick 재발행할지(~2초)
+# 복귀는 /odom의 부호 있는 전진속도(twist.linear.x, 아두이노가 재는 실제 바퀴속도)를
+# 적분해 "출발점까지 남은 거리"로 끝낸다. GPS 근접 판정은 스칼라 거리라 출발점을
+# 지나쳐 버리면 거리가 다시 늘어 워치독까지 가 버리지만, 적분값은 부호가 있어
+# 지나친 만큼 음수로 떨어진다. 아래 톨러런스는 명령 지연(~100 ms)과 제동거리 몫이다.
+CALIB_ODOM_RETURN_TOL_M = 0.05
+CALIB_ODOM_MAX_DT_S = 0.5   # /odom이 끊긴 구간을 통째로 적분하지 않기 위한 dt 상한
 _HUGE_VARIANCE = 1e6
 
 
 class YawCalibrator:
     """차를 CALIB_DISTANCE_M만큼 앞으로 굴려 GPS 변위로 ENU yaw를 재고, 다시
     출발점으로 되돌린다.
+
+    전진 구간의 종료 조건은 반드시 GPS 변위다: yaw 불확실도가 atan2(위치잡음,
+    기선길이)라 기선을 실제로 확보했는지는 GPS만 답할 수 있다. 반면 복귀 구간은
+    측정에 아무 기여도 하지 않으므로 /odom의 부호 있는 전진속도를 적분한
+    추측항법으로 끝낸다(on_odom). 그래서 측정 직후 GPS가 끊겨도 차는 제자리로
+    돌아오고, 출발점을 지나쳐도 적분값이 음수로 내려가 바로 멈춘다.
+    /odom이 아예 없으면 예전처럼 GPS 근접 판정과 워치독만으로 동작한다.
 
     /odometry/gps 위치가 상태 기계를 진행시키고, GUI의 QTimer가 CALIB_TICK_MS
     마다 tick()을 불러 주행 명령(/velocity, /steering_angle)을 재발행한다.
@@ -144,6 +158,9 @@ class YawCalibrator:
         self._deadline = None
         self._stop_ticks = 0
         self._heading_ticks = 0         # 남은 /imu/heading 재발행 횟수
+        self._travel = 0.0              # 출발점 기준 전방 이동거리 [m] (/odom 적분)
+        self._travel_stamp = None       # 마지막으로 적분한 /odom 타임스탬프 [s]
+        self._odom_seen = False         # 이번 캘리브레이션에서 /odom을 적분해 봤는가
 
     # ---- ROS 스레드에서 호출 ----
     def on_gps(self, x, y):
@@ -165,13 +182,40 @@ class YawCalibrator:
                 self._heading_ticks = CALIB_HEADING_REPUBLISH
                 self.state = self.RETURN
                 self._deadline = time.monotonic() + CALIB_TIMEOUT_S
+                how = 'odometry' if self._odom_seen else 'GPS (no /odom)'
                 self.message = (
                     f'measured {math.degrees(self.yaw):+.1f} deg ENU '
                     f'(+/-{math.degrees(self._yaw_stddev):.0f}) over {dist:.2f} m '
-                    '-- injecting /imu/heading, returning to start')
+                    f'-- injecting /imu/heading, returning to start by {how}')
                 self._logger.info(self.message)
             elif self.state == self.RETURN and dist <= CALIB_RETURN_TOL_M:
+                # 적분보다 GPS가 먼저 "이미 출발점"이라고 하면 그대로 멈춘다.
+                # 지나친 경우에는 이 조건이 영영 참이 되지 않으므로 on_odom이 받는다.
                 self._finish_locked(self.DONE, f'{math.degrees(self.yaw):+.1f} deg ENU')
+
+    def on_odom(self, stamp_s, forward_speed):
+        """/odom의 부호 있는 twist.linear.x를 적분해 출발점까지 남은 거리를 센다.
+
+        전진 구간부터 계속 쌓으므로 self._travel은 곧 "출발점 기준 전방 변위"이고,
+        복귀 중에는 후진이라 vx가 음수여서 0을 향해 줄어든다. 0 근처로 오면 복귀 완료.
+        """
+        with self._lock:
+            if self.state not in self._ACTIVE:
+                self._travel_stamp = None
+                return
+            last, self._travel_stamp = self._travel_stamp, stamp_s
+            if last is None:
+                return                      # 첫 샘플은 dt를 만들 수 없다
+            dt = stamp_s - last
+            if dt <= 0.0 or dt > CALIB_ODOM_MAX_DT_S:
+                return                      # 시계 역행/BLE 끊김 등은 통째로 버린다
+            self._odom_seen = True
+            self._travel += forward_speed * dt
+            if self.state == self.RETURN and self._travel <= CALIB_ODOM_RETURN_TOL_M:
+                self._finish_locked(
+                    self.DONE,
+                    '%+.1f deg ENU (returned by odometry, %+.2f m from start)'
+                    % (math.degrees(self.yaw), self._travel))
 
     # ---- Qt 스레드에서 호출 ----
     def start(self):
@@ -189,6 +233,9 @@ class YawCalibrator:
             self._heading_ticks = 0
             self._deadline = time.monotonic() + CALIB_TIMEOUT_S
             self._stop_ticks = 0
+            self._travel = 0.0
+            self._travel_stamp = None
+            self._odom_seen = False
             self.message = 'rolling forward...'
         self._logger.info('yaw calibration: rolling forward %.2f m' % CALIB_DISTANCE_M)
         return True
@@ -221,10 +268,12 @@ class YawCalibrator:
         elif state == self.RETURN:
             if timed_out:
                 with self._lock:
+                    left = (' -- %+.2f m from start' % self._travel
+                            if self._odom_seen else '')
                     self._finish_locked(
                         self.DONE,
-                        '%+.1f deg ENU (return timed out -- nudge back by hand)'
-                        % math.degrees(self.yaw))
+                        '%+.1f deg ENU (return timed out%s -- nudge back by hand)'
+                        % (math.degrees(self.yaw), left))
             else:
                 self._drive(-CALIB_SPEED_MS)
         elif self._stop_ticks > 0:
@@ -811,6 +860,10 @@ class GpsAccuracyNode(Node):
         # witmotion_ros2가 내는 원본 토픽. sensors.launch.py에서 topic:=/imu/raw로
         # 띄우고, imu_enu_relay가 이걸 받아 /imu로 다시 낸다.
         self.imu_topic = param('imu_topic', '/imu/raw')
+        # 캘리브레이션 복귀 구간의 추측항법 소스. 아두이노 브리지가 재는 실제 바퀴속도라
+        # (hyper_interface/arduino_interface_node.py) 명령속도가 안 따라줘도 실제 이동량을
+        # 센다. gps_heading이 진행방향 게이트로 쓰는 것과 같은 토픽/같은 필드다.
+        self.odom_topic = param('odom_topic', '/odom')
         # gps_heading이 내는 절대 yaw. 이게 한 번 오면 yaw가 확립된 것.
         self.heading_topic = param('heading_topic', '/imu/heading')
 
@@ -826,6 +879,8 @@ class GpsAccuracyNode(Node):
             Odometry, self.gps_topic, self._on_gps_odom, 10)
         self.create_subscription(
             Odometry, self.ekf_topic, lambda m: window.ekf_odom.emit(m), 10)
+        # GUI는 /odom을 그리지 않는다 -- 캘리브레이터만 쓴다.
+        self.create_subscription(Odometry, self.odom_topic, self._on_odom, 10)
 
         # 드라이버는 create_publisher<Imu>(topic, 10) -- 기본 RELIABLE이라 여기도
         # 기본 QoS로 맞춘다. 콜백은 카운터만 올린다(ImuLinkMonitor 주석 참고).
@@ -839,6 +894,11 @@ class GpsAccuracyNode(Node):
         self.get_logger().info(
             f'GPS GUI: {self.navpvt_topic} | {self.gps_topic} | {self.ekf_topic} | '
             f'{self.imu_topic}')
+
+    def _on_odom(self, msg):
+        stamp = msg.header.stamp
+        self.calibrator.on_odom(
+            stamp.sec + stamp.nanosec * 1e-9, msg.twist.twist.linear.x)
 
     def _on_gps_odom(self, msg):
         p = msg.pose.pose.position
