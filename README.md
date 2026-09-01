@@ -55,7 +55,7 @@ rosdep install --from-paths src --ignore-src -r -y
 
 ### 5. pip 의존성 설치
 
-`ultralytics`(YOLO, `hyper_object_detection`)와 `bleak`(BLE, `hyper_imu`)는 rosdep으로 해석되지 않는 순수 pip 패키지라 별도로 설치해야 합니다. 저장소 루트의 `requirements.txt`에 정리되어 있습니다:
+`ultralytics`(YOLO, `hyper_object_detection`)는 rosdep으로 해석되지 않는 순수 pip 패키지라 별도로 설치해야 합니다. 저장소 루트의 `requirements.txt`에 정리되어 있습니다:
 
 ```bash
 pip install -r ~/HYPER/requirements.txt
@@ -94,7 +94,32 @@ source ~/.bashrc
 
 ## 센서 설치 (실차)
 
-시뮬레이션만 쓴다면 이 절은 건너뛰어도 됩니다. 실차에서 GPS(RTK), LiDAR, USB 카메라를 쓰려면 아래를 순서대로 진행합니다.
+시뮬레이션만 쓴다면 이 절은 건너뛰어도 됩니다. 실차에서 GPS(RTK), IMU, LiDAR, USB 카메라를 쓰려면 아래를 순서대로 진행합니다.
+
+### USB 시리얼 포트 고정 (udev) — 먼저 하세요
+
+차에는 USB 시리얼 장치가 셋 물려 있습니다: RTK 수신기, IMU(EBIMU) USB-UART 어댑터, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 IMU와 Arduino가 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 세 장치에 고정 이름을 붙입니다:
+
+| 심볼릭 링크 | 장치 | 쓰는 곳 |
+|---|---|---|
+| `/dev/tty_Ardusimple` | Ardusimple simpleRTK2B (u-blox ZED-F9P) | `hyper_rtk/launch/rtk.launch.py` |
+| `/dev/tty_ebimu` | EBIMU-9DOFV5 USB-UART 어댑터 | `hyper_ebimu/config/ebimu.yaml` |
+| `/dev/tty_arduino` | Arduino 제어 보드 (CH340) | `hyper_interface/config/parameters.yaml` |
+
+```bash
+sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
+sudo cp ~/HYPER/udev/99-hyper-serial.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/tty_Ardusimple /dev/tty_ebimu /dev/tty_arduino
+```
+
+세 링크가 다 보이면 끝입니다. 안 보이면 장치의 실제 칩 ID가 규칙과 다른 것이므로, 지금 꽂혀 있는 장치들의 값을 뽑아서 규칙 파일을 고칩니다:
+
+```bash
+~/HYPER/udev/show-serial-ids.sh
+```
+
+**주의**: IMU 어댑터와 Arduino 보드가 둘 다 CH340(`1a86:7523`)이면 칩 ID만으로는 구분되지 않아 심볼릭 링크가 한쪽으로 덮입니다. 이때는 `ATTRS{serial}`이나 물리 USB 포트(`KERNELS`)를 같이 걸어야 하며, 방법은 규칙 파일 상단 주석에 적어 뒀습니다.
 
 ### GPS (RTK)
 
@@ -102,21 +127,13 @@ source ~/.bashrc
 
 #### 1. GPS 장치 권한 / udev 규칙
 
-```bash
-sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
-```
-
-launch 파일(`rtk.launch.py`)이 장치를 고정 이름 `/dev/tty_Ardusimple`로 찾으므로, USB 포트 번호가 바뀌어도 안 흔들리도록 udev 규칙을 등록합니다. `/etc/udev/rules.d/99-ardusimple.rules` 생성:
-
-```
-KERNEL=="ttyACM[0-9]*", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK="tty_Ardusimple", GROUP="dialout", MODE="0666"
-```
+위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)에서 규칙을 이미 깔았다면 `/dev/tty_Ardusimple`이 만들어져 있고, `rtk.launch.py`가 그 이름으로 장치를 찾습니다. 확인:
 
 ```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/tty_Ardusimple
 ```
 
-다른 Ardusimple 보드/케이블을 쓴다면 `idVendor`/`idProduct`가 다를 수 있으니, 장치를 연결한 상태에서 아래로 직접 확인 후 값을 맞춰주세요:
+다른 Ardusimple 보드/케이블을 쓰면 `idVendor`/`idProduct`가 다를 수 있으니, 링크가 없으면 장치를 연결한 상태에서 값을 확인해 `udev/99-hyper-serial.rules`를 고칩니다:
 
 ```bash
 udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct" | head -2
@@ -156,6 +173,27 @@ ros2 launch hyper_rtk rtk.launch.py
 ```
 
 정상 동작하면 `ublox_gps_node`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다.
+
+### IMU (EBIMU-9DOFV5)
+
+`hyper_ebimu`(`src/sensing/hyper_ebimu`)가 E2BOX EBIMU-9DOFV5 AHRS 모듈의 UART/ASCII 프로토콜을 직접 파싱해 `/imu`(`sensor_msgs/Imu`, `body_link` 프레임)로 퍼블리시합니다. 모듈에 USB가 없어 USB-UART 어댑터로 물립니다 — 배선표와 센서 설정 명령은 `src/sensing/hyper_ebimu/README.md` 참고.
+
+```bash
+sudo apt install python3-serial     # 또는 pip install pyserial
+ros2 launch hyper_ebimu ebimu.launch.py
+ros2 topic hz /imu                  # 100 Hz 근처 (output_rate_ms=10)
+```
+
+포트는 `config/ebimu.yaml`의 `port`이고 기본값은 udev 규칙이 만드는 `/dev/tty_ebimu`입니다.
+
+9축(지자기 융합) AHRS라 켜는 순간부터 절대 방위가 나오고, `ekf_global`이 이 yaw를 map 프레임 방위 기준으로 그대로 씁니다(`dual_ekf_navsat.yaml`의 `imu0_config` 인덱스 5 = true). **그래서 축 방향을 실차에서 반드시 확인해야 합니다** — 드라이버는 센서 body frame을 재매핑 없이 내보내므로 REP-103 ENU(0=East, 반시계 +)와 어긋나면 map heading이 통째로 돌아갑니다:
+
+```bash
+ros2 topic echo /imu --field orientation        # 아는 방위로 세우고 (북 = 90deg)
+ros2 topic echo /imu --field angular_velocity   # 반시계로 돌릴 때 z > 0
+```
+
+어긋나면 `ebimu.yaml`의 `topic`을 `imu/raw`로 바꾸고 `odometry.launch.py`의 `imu_enu_relay` 주석을 풀어 `datums.yaml`의 사이트별 보정값으로 고칩니다(방법은 두 파일 주석에 있습니다).
 
 ### LiDAR
 
@@ -224,10 +262,10 @@ sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
 sudo apt install python3-serial  # 또는 pip install pyserial
 ```
 
-Arduino를 연결한 상태에서 포트를 확인합니다. GPS/카메라처럼 고정 심볼릭 링크를 만들어도 되지만, USB 시리얼 장치가 이거 하나뿐이면 `ls /dev/serial/by-id/`로 안정적인 이름을 바로 쓸 수 있습니다:
+포트는 udev 규칙이 만드는 `/dev/tty_arduino`입니다([USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요) 참고). 이 보드는 CH340 칩이라 `/dev/ttyUSB*`로 잡히고, IMU 어댑터도 같은 자리를 노리므로 번호로 잡으면 안 됩니다:
 
 ```bash
-ls /dev/serial/by-id/
+ls -l /dev/tty_arduino
 ```
 
 ### 2. 펌웨어 업로드
@@ -237,7 +275,7 @@ Arduino IDE로 `src/interface/hyper_interface/arduino/hyper_motor_interface/hype
 ### 3. 실행
 
 ```bash
-ros2 launch hyper_interface interface.launch.py serial_port:=/dev/ttyACM0
+ros2 launch hyper_interface interface.launch.py     # 기본 포트 /dev/tty_arduino
 ```
 
 `real.launch.py`가 기본으로 이걸 포함하므로(behavior 단계와 함께 시작) 보통 따로 실행할 필요는 없습니다. `hyper_control`/`hyper_planner`의 `max_velocity`/`max_steering_angle`과 `hyper_interface/config/parameters.yaml`의 동일 파라미터가 어긋나면 Arduino가 튜닝 범위 밖의 명령을 받을 수 있으니 값을 맞춰둡니다.
@@ -262,7 +300,7 @@ ros2 launch hyper_launch simulation.launch.py
 ros2 launch hyper_launch real.launch.py
 ```
 
-`sim` 대신 `sensors`(WitMotion IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
+`sim` 대신 `sensors`(EBIMU-9DOFV5 IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
 
 스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
 
@@ -282,7 +320,7 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 센서 | 패키지 | 최종 토픽 |
 |------|--------|-----------|
-| WitMotion WT901BLE | `witmotion_ros2` | `/imu` (EKF) |
+| E2BOX EBIMU-9DOFV5 | `hyper_ebimu` | `/imu` (EKF) |
 | RPLidar | `hyper_lidar` | `/scan` |
 | u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
 
@@ -327,6 +365,5 @@ ros2 launch hyper_launch behavior.launch.py
 | `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
 | `/velocity_actual`, `/steering_angle_actual` | `std_msgs/Float64` | arduino_interface_node → | Arduino의 인코더/조향각 센서로 측정한 실제 값 (실차 전용, 닫힌 루프 피드백) |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `witmotion_ros2` → ROS (실차, WT901BLE) | IMU |
-| `/imu/raw` | `sensor_msgs/Imu` | `witmotion_ros2` → `imu_enu_relay` | 실차 전용. 드라이버 원본(나침반식 yaw). relay가 ENU로 고쳐 `/imu`로 다시 발행 |
-| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → `ekf_global` | yaw 전용 절대 방위. 정지 중에는 `datums.yaml`의 `initial_heading_deg`, 주행 중에는 GPS 진행방향. 지자기 yaw는 어느 EKF도 안 쓰며, 이 토픽이 유일한 방위 기준 |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `hyper_ebimu` → ROS (실차, EBIMU-9DOFV5) | IMU. yaw(지자기 융합)가 `ekf_global`의 절대 방위 기준. 실차 축이 REP-103 ENU와 어긋나면 `odometry.launch.py`의 `imu_enu_relay` 주석을 참고해 보정 |
+| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → (없음) | RTK 진행방향 기반 yaw. **현재 비활성** — `gps_heading` 노드는 `odometry.launch.py`에서 주석 처리했고 EKF도 구독하지 않는다. 절대 방위는 `ekf_global`이 `/imu`의 지자기 yaw로 잡는다 (되돌리려면 launch 주석 해제 + `dual_ekf_navsat.yaml`의 `imu1` 블록 복원 + `imu0_config` yaw를 false로) |

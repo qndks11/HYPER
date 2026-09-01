@@ -53,7 +53,7 @@ def generate_launch_description():
     )
 
     # GPS 정확도 모니터. /ublox_gps_node/navpvt의 hAcc/vAcc를 큰 글씨로 띄우고,
-    # WitMotion WT901BLE의 BLE 링크 상태(/imu/raw 수신 여부와 Hz)도 같이 보여줍니다.
+    # IMU(E2BOX EBIMU-9DOFV5) 링크 상태(/imu 수신 여부와 Hz)도 같이 보여줍니다.
     # 조건 없이 항상 뜹니다 -- 어떤 토픽도 publish하지 않는 순수 구독자라 nav2든
     # 조이스틱이든 아무것과도 충돌하지 않고, 실차에서 "지금 GPS를 믿어도 되는가"는
     # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node)보다 먼저

@@ -55,12 +55,10 @@ def generate_launch_description():
     # 대상이 없습니다.
     # GPS 정확도 + 위치/방위 모니터. real.launch.py와 같은 노드입니다. 시뮬에서도
     # /odometry/gps(navsat_transform)와 /odometry/filtered_map이 나오므로 그대로
-    # 쓸모가 있고, 특히 "초기 yaw 캘리브레이션" 버튼 -- 차를 앞으로 0.5 m 굴려 GPS
-    # 변위로 ENU yaw를 재고 되돌아오는 -- 을 실차에 쓰기 전에 여기서 검증할 수 있습니다.
-    # 이 버튼은 /velocity, /steering_angle을 잠깐 publish하고, 측정한 yaw를
-    # /imu/heading으로 1회 주입하므로 미션(nav2) 주행 중에는 누르지 마세요.
+    # 쓸모가 있습니다(hAcc/vAcc, GPS vs EKF 좌표 차이, EKF yaw 나침반, IMU 링크 Hz).
+    # 아무 토픽도 publish하지 않는 순수 구독자라 미션 주행 중에 띄워도 안전합니다.
     # use_gps_gui:=false로 끌 수 있습니다(헤드리스 CI 등).
-    # use_sim_time=true: 주입하는 /imu/heading 스탬프가 sim 시계여야 ekf_global이 받습니다.
+    # use_sim_time=true: 구독하는 토픽 스탬프가 sim 시계이므로 맞춰 줍니다.
     gps_accuracy_gui = Node(
         package='hyper_localization',
         executable='gps_accuracy_gui.py',

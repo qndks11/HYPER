@@ -6,30 +6,25 @@
 #   /ublox_gps_node/navpvt   (ublox_msgs/NavPVT)  -> hAcc/vAcc, fix, RTK, 위성수
 #   /odometry/gps            (nav_msgs/Odometry)  -> GPS만으로 푼 map 좌표 x/y
 #   /odometry/filtered_map   (nav_msgs/Odometry)  -> EKF 융합 map 좌표 x/y + yaw
-#   /imu/raw                 (sensor_msgs/Imu)    -> WitMotion WT901BLE의 BLE 링크 상태
+#   /imu                     (sensor_msgs/Imu)    -> E2BOX EBIMU-9DOFV5 링크 상태
 #
 # x/y를 두 벌 다 띄우는 이유: navsat_transform이 내는 /odometry/gps는 GPS만의
 # 답이고 ekf_global이 내는 /odometry/filtered_map은 IMU/엔코더까지 섞은 답이라,
 # 둘이 벌어지는 정도가 곧 추측항법 드리프트다. 한쪽만 보면 EKF가 발산해도
 # 눈치채기 어렵다.
 #
-# BLE 상태는 witmotion_ros2가 따로 토픽으로 내주지 않는다(연결/끊김을 로그로만
-# 찍는다). 게다가 그 드라이버는 deps.repos로 가져오는 별도 저장소라 여기서 상태
-# publisher를 심어도 다음 vcs import 때 사라진다. 그래서 "드라이버가 내는 원본
-# 토픽이 지금 흐르고 있는가"로 링크 상태를 대신 본다 -- BLE가 끊기면 드라이버는
-# 재연결될 때까지 아무것도 publish하지 않으므로 실질적으로 같은 신호다.
-# /imu(relay 출력)가 아니라 /imu/raw를 보는 이유: relay가 죽은 것과 BLE가 끊긴
-# 것을 구분하기 위해서다.
+# 링크 상태는 hyper_ebimu 드라이버가 따로 토픽으로 내주지 않는다(연결/끊김을 로그로만
+# 찍는다). 그래서 "드라이버가 내는 토픽이 지금 흐르고 있는가"로 대신 본다 -- USB-UART가
+# 빠지거나 센서가 멈추면 드라이버는 재연결될 때까지 아무것도 publish하지 않으므로
+# 실질적으로 같은 신호다.
 #
 # hAcc/vAcc는 NavPVT에서만 온다. NavSatFix(/gps/fix)의 position_covariance로
 # hAcc는 역산되지만(covariance = hAcc^2) vAcc/fix_type/num_sv/RTK 비트는 없다.
 #
-# 초기 yaw: 6축 IMU에는 절대 방위가 없다(gps_heading.py 참고). "Calibrate initial yaw"
-# 버튼은 차를 앞으로 0.5 m 굴려 GPS 변위로 ENU yaw를 잰 뒤 출발점으로 되돌린다
-# (되돌아오는 구간은 /odom 전진속도 적분으로 끝낸다 -- YawCalibrator 주석 참고)
-# (YawCalibrator). 실차를 움직이므로 확인 대화상자를 거친다. 나침반은 평소 EKF yaw
-# (/odometry/filtered_map, GPS가 끊겨도 odom으로 propagate됨)를 그리고, 캘리브레이션이
-# 도는 동안에만 UNKNOWN으로 표시한다.
+# yaw: EBIMU-9DOFV5는 지자기 융합 9축이라 켜는 순간부터 절대 방위가 있고, ekf_global이
+# 그 yaw를 그대로 먹는다(dual_ekf_navsat.yaml). 그래서 초기 yaw 캘리브레이션 절차는
+# 없앴다. 나침반은 EKF yaw(/odometry/filtered_map, GPS가 끊겨도 odom으로 propagate됨)를
+# 그린다.
 #
 # 실행:
 #   ros2 run hyper_localization gps_accuracy_gui.py
@@ -49,14 +44,12 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
-from std_msgs.msg import Float64
 from ublox_msgs.msg import NavPVT
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import (
-    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QVBoxLayout, QWidget)
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget)
 
 FIX_TYPES = {
     0: 'NO FIX',
@@ -87,242 +80,13 @@ COLOR_EKF = '#bc8cff'    # /odometry/filtered_map 계열
 STALE_MS = 2000
 
 # IMU 링크는 GPS보다 훨씬 빠르게(수십~수백 Hz) 도는 토픽이라 잠깐만 끊겨도 바로
-# 티가 난다. 1초면 재연결 대기(reconnect_wait_seconds 기본 5초)보다 짧아서
-# 끊김을 곧바로 잡아내면서도 BLE 알림 지터에 오탐하지 않는다.
+# 티가 난다. 1초면 재연결 대기(hyper_ebimu의 reconnect_wait_seconds 기본 2초)보다
+# 짧아서 끊김을 곧바로 잡아내면서도 시리얼 지터에 오탐하지 않는다.
 IMU_STALE_S = 1.0
 IMU_POLL_MS = 500
-# Hz는 여러 폴링 구간에 걸쳐 평균낸다. 드라이버가 BLE notify 한 번에 들어온
-# 샘플을 한꺼번에 publish하기 때문에, 500ms 창 하나만 보면 같은 50Hz 센서가
-# 27Hz -> 144Hz로 튄다.
+# Hz는 여러 폴링 구간에 걸쳐 평균낸다. 시리얼 버퍼에 몰려 있던 샘플이 한꺼번에
+# 올라오면 500ms 창 하나만으로는 같은 100Hz 센서가 27Hz -> 144Hz로 튄다.
 IMU_RATE_WINDOW = 4
-
-# ---- 초기 yaw 캘리브레이션 ----------------------------------------------------
-# 6축 IMU에는 절대 방위가 없고 측량 상수도 없앴으므로(gps_heading.py 참고),
-# 이 절차가 ekf_global의 초기 yaw를 세우는 유일한 수단이다: 차를 앞으로
-# CALIB_DISTANCE_M 굴려 GPS 변위 벡터의 방향을 yaw로 재고, /imu/heading으로 1회
-# 주입한 뒤 출발점으로 되돌린다. (gps_heading이 내는 /imu/heading과 같은 형식)
-CALIB_DISTANCE_M = 0.5      # 앞으로 굴릴 거리
-CALIB_SPEED_MS = 0.35       # 굴릴 때 속도(전/후진 공통, 부호만 반대)
-CALIB_RETURN_TOL_M = 0.10   # 이 안으로 돌아오면 복귀 완료로 본다
-CALIB_TIMEOUT_S = 15.0      # 전진/복귀 구간 워치독 -- 넘으면 정지
-CALIB_STOP_TICKS = 5        # 정지 후 0을 몇 tick 더 내보내 확실히 멈춘다
-CALIB_TICK_MS = 100         # tick 주기(주행 명령 재발행 + 워치독)
-CALIB_HEADING_FRAME = 'body_link'   # /imu/heading frame_id (gps_heading 기본값과 동일)
-CALIB_POS_STDDEV_M = 0.10   # GPS 위치 잡음 가정 -> 기선 길이로 나눠 각도 불확실도로
-CALIB_MIN_HEADING_STDDEV_DEG = 3.0  # 각도 불확실도 하한
-CALIB_HEADING_REPUBLISH = 20        # 측정 후 /imu/heading를 몇 tick 재발행할지(~2초)
-# 복귀는 /odom의 부호 있는 전진속도(twist.linear.x, 아두이노가 재는 실제 바퀴속도)를
-# 적분해 "출발점까지 남은 거리"로 끝낸다. GPS 근접 판정은 스칼라 거리라 출발점을
-# 지나쳐 버리면 거리가 다시 늘어 워치독까지 가 버리지만, 적분값은 부호가 있어
-# 지나친 만큼 음수로 떨어진다. 아래 톨러런스는 명령 지연(~100 ms)과 제동거리 몫이다.
-CALIB_ODOM_RETURN_TOL_M = 0.05
-CALIB_ODOM_MAX_DT_S = 0.5   # /odom이 끊긴 구간을 통째로 적분하지 않기 위한 dt 상한
-_HUGE_VARIANCE = 1e6
-
-
-class YawCalibrator:
-    """차를 CALIB_DISTANCE_M만큼 앞으로 굴려 GPS 변위로 ENU yaw를 재고, 다시
-    출발점으로 되돌린다.
-
-    전진 구간의 종료 조건은 반드시 GPS 변위다: yaw 불확실도가 atan2(위치잡음,
-    기선길이)라 기선을 실제로 확보했는지는 GPS만 답할 수 있다. 반면 복귀 구간은
-    측정에 아무 기여도 하지 않으므로 /odom의 부호 있는 전진속도를 적분한
-    추측항법으로 끝낸다(on_odom). 그래서 측정 직후 GPS가 끊겨도 차는 제자리로
-    돌아오고, 출발점을 지나쳐도 적분값이 음수로 내려가 바로 멈춘다.
-    /odom이 아예 없으면 예전처럼 GPS 근접 판정과 워치독만으로 동작한다.
-
-    /odometry/gps 위치가 상태 기계를 진행시키고, GUI의 QTimer가 CALIB_TICK_MS
-    마다 tick()을 불러 주행 명령(/velocity, /steering_angle)을 재발행한다.
-    tick() 호출이 멈추면 주행 명령도 더 나가지 않는다(명령 자체가 재발행식이라
-    cmd_vel timeout이 곧 정지로 이어진다). GPS가 안 오면 워치독이 정지시킨다.
-
-    실제 차량을 움직이므로 GUI에서 확인 대화상자를 거친 뒤에만 start()한다.
-    """
-
-    IDLE, FORWARD, RETURN, DONE, FAILED = range(5)
-    _ACTIVE = (FORWARD, RETURN)
-
-    def __init__(self, node):
-        self._vel_pub = node.create_publisher(Float64, '/velocity', 1)
-        self._steer_pub = node.create_publisher(Float64, '/steering_angle', 1)
-        self._heading_pub = node.create_publisher(Imu, '/imu/heading', 10)
-        self._clock = node.get_clock()
-        self._logger = node.get_logger()
-        self._lock = threading.Lock()
-        self.state = self.IDLE
-        self.yaw = None                 # 측정된 초기 yaw [rad, ENU]
-        self._yaw_stddev = None
-        self.message = 'not run'
-        self._start = None              # 전진 시작 시점의 GPS 좌표
-        self._last_pos = None
-        self._deadline = None
-        self._stop_ticks = 0
-        self._heading_ticks = 0         # 남은 /imu/heading 재발행 횟수
-        self._travel = 0.0              # 출발점 기준 전방 이동거리 [m] (/odom 적분)
-        self._travel_stamp = None       # 마지막으로 적분한 /odom 타임스탬프 [s]
-        self._odom_seen = False         # 이번 캘리브레이션에서 /odom을 적분해 봤는가
-
-    # ---- ROS 스레드에서 호출 ----
-    def on_gps(self, x, y):
-        with self._lock:
-            self._last_pos = (x, y)
-            if self.state not in self._ACTIVE:
-                return
-            if self._start is None:
-                self._start = (x, y)
-                return
-            dx = x - self._start[0]
-            dy = y - self._start[1]
-            dist = math.hypot(dx, dy)
-            if self.state == self.FORWARD and dist >= CALIB_DISTANCE_M:
-                self.yaw = math.atan2(dy, dx)
-                self._yaw_stddev = max(
-                    math.atan2(CALIB_POS_STDDEV_M, dist),
-                    math.radians(CALIB_MIN_HEADING_STDDEV_DEG))
-                self._heading_ticks = CALIB_HEADING_REPUBLISH
-                self.state = self.RETURN
-                self._deadline = time.monotonic() + CALIB_TIMEOUT_S
-                how = 'odometry' if self._odom_seen else 'GPS (no /odom)'
-                self.message = (
-                    f'measured {math.degrees(self.yaw):+.1f} deg ENU '
-                    f'(+/-{math.degrees(self._yaw_stddev):.0f}) over {dist:.2f} m '
-                    f'-- injecting /imu/heading, returning to start by {how}')
-                self._logger.info(self.message)
-            elif self.state == self.RETURN and dist <= CALIB_RETURN_TOL_M:
-                # 적분보다 GPS가 먼저 "이미 출발점"이라고 하면 그대로 멈춘다.
-                # 지나친 경우에는 이 조건이 영영 참이 되지 않으므로 on_odom이 받는다.
-                self._finish_locked(self.DONE, f'{math.degrees(self.yaw):+.1f} deg ENU')
-
-    def on_odom(self, stamp_s, forward_speed):
-        """/odom의 부호 있는 twist.linear.x를 적분해 출발점까지 남은 거리를 센다.
-
-        전진 구간부터 계속 쌓으므로 self._travel은 곧 "출발점 기준 전방 변위"이고,
-        복귀 중에는 후진이라 vx가 음수여서 0을 향해 줄어든다. 0 근처로 오면 복귀 완료.
-        """
-        with self._lock:
-            if self.state not in self._ACTIVE:
-                self._travel_stamp = None
-                return
-            last, self._travel_stamp = self._travel_stamp, stamp_s
-            if last is None:
-                return                      # 첫 샘플은 dt를 만들 수 없다
-            dt = stamp_s - last
-            if dt <= 0.0 or dt > CALIB_ODOM_MAX_DT_S:
-                return                      # 시계 역행/BLE 끊김 등은 통째로 버린다
-            self._odom_seen = True
-            self._travel += forward_speed * dt
-            if self.state == self.RETURN and self._travel <= CALIB_ODOM_RETURN_TOL_M:
-                self._finish_locked(
-                    self.DONE,
-                    '%+.1f deg ENU (returned by odometry, %+.2f m from start)'
-                    % (math.degrees(self.yaw), self._travel))
-
-    # ---- Qt 스레드에서 호출 ----
-    def start(self):
-        with self._lock:
-            if self.state in self._ACTIVE:
-                return False
-            if self._last_pos is None:
-                self.state = self.FAILED
-                self.message = 'no /odometry/gps -- need a GPS fix first'
-                return False
-            self.state = self.FORWARD
-            self._start = None
-            self.yaw = None
-            self._yaw_stddev = None
-            self._heading_ticks = 0
-            self._deadline = time.monotonic() + CALIB_TIMEOUT_S
-            self._stop_ticks = 0
-            self._travel = 0.0
-            self._travel_stamp = None
-            self._odom_seen = False
-            self.message = 'rolling forward...'
-        self._logger.info('yaw calibration: rolling forward %.2f m' % CALIB_DISTANCE_M)
-        return True
-
-    def abort(self):
-        with self._lock:
-            if self.state not in self._ACTIVE:
-                return
-            if self.yaw is not None:
-                # 이미 yaw를 쟀다(복귀 중) -- 결과는 살리고 복귀만 멈춘다.
-                self._finish_locked(
-                    self.DONE,
-                    f'{math.degrees(self.yaw):+.1f} deg ENU (return aborted)')
-            else:
-                self._finish_locked(self.FAILED, 'aborted -- reposition by hand')
-
-    def tick(self):
-        with self._lock:
-            state, deadline = self.state, self._deadline
-            timed_out = deadline is not None and time.monotonic() > deadline
-        if state == self.FORWARD:
-            if timed_out:
-                with self._lock:
-                    self._finish_locked(
-                        self.FAILED,
-                        'timed out before travelling %.2f m -- check GPS/motion'
-                        % CALIB_DISTANCE_M)
-            else:
-                self._drive(CALIB_SPEED_MS)
-        elif state == self.RETURN:
-            if timed_out:
-                with self._lock:
-                    left = (' -- %+.2f m from start' % self._travel
-                            if self._odom_seen else '')
-                    self._finish_locked(
-                        self.DONE,
-                        '%+.1f deg ENU (return timed out%s -- nudge back by hand)'
-                        % (math.degrees(self.yaw), left))
-            else:
-                self._drive(-CALIB_SPEED_MS)
-        elif self._stop_ticks > 0:
-            self._stop_ticks -= 1
-            self._drive(0.0)
-
-        # 측정된 yaw를 /imu/heading으로 잠깐 재발행한다(한 메시지가 유실돼도
-        # ekf_global이 받도록). 자이로가 그 뒤를 잇고 GPS 코스가 이어받는다.
-        with self._lock:
-            if self._heading_ticks > 0 and self.yaw is not None:
-                self._heading_ticks -= 1
-                yaw, stddev = self.yaw, self._yaw_stddev
-            else:
-                yaw = None
-        if yaw is not None:
-            self._publish_heading(yaw, stddev)
-
-    @property
-    def active(self):
-        return self.state in self._ACTIVE
-
-    # ---- 내부 ----
-    def _finish_locked(self, state, message):
-        self.state = state
-        self.message = message
-        self._deadline = None
-        self._stop_ticks = CALIB_STOP_TICKS
-        self._logger.info(f'yaw calibration: {message}')
-
-    def _publish_heading(self, yaw, stddev):
-        """gps_heading._publish와 같은 형식의 yaw 전용 Imu -> /imu/heading."""
-        msg = Imu()
-        msg.header.stamp = self._clock.now().to_msg()
-        msg.header.frame_id = CALIB_HEADING_FRAME
-        msg.orientation.z = math.sin(yaw * 0.5)
-        msg.orientation.w = math.cos(yaw * 0.5)
-        msg.orientation_covariance = [
-            _HUGE_VARIANCE, 0.0, 0.0,
-            0.0, _HUGE_VARIANCE, 0.0,
-            0.0, 0.0, stddev ** 2,
-        ]
-        msg.angular_velocity_covariance[0] = -1.0       # REP-145: 없음
-        msg.linear_acceleration_covariance[0] = -1.0
-        self._heading_pub.publish(msg)
-
-    def _drive(self, speed):
-        self._steer_pub.publish(Float64(data=0.0))
-        self._vel_pub.publish(Float64(data=float(speed)))
-
 
 def format_accuracy(metres):
     """hAcc/vAcc를 창 폭 안에 들어가는 길이로 찍는다.
@@ -472,7 +236,6 @@ class GpsAccuracyWindow(QWidget):
     navpvt = pyqtSignal(object)
     gps_odom = pyqtSignal(object)
     ekf_odom = pyqtSignal(object)
-    heading = pyqtSignal(object)   # /imu/heading -- 절대 yaw가 확립됐다는 신호
 
     def __init__(self):
         super().__init__()
@@ -492,12 +255,7 @@ class GpsAccuracyWindow(QWidget):
         self._source = QLabel('')
 
         self._imu_monitor = None
-        self._calibrator = None
         self._ekf_yaw = None
-        self._yaw_established = False   # /imu/heading를 한 번이라도 받았는가
-
-        self._calib_btn = QPushButton('Calibrate initial yaw  (roll 0.5 m)')
-        self._calib_status = QLabel('yaw not calibrated')
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 18, 24, 16)
@@ -524,7 +282,7 @@ class GpsAccuracyWindow(QWidget):
 
         imu_row = QHBoxLayout()
         imu_row.setSpacing(10)
-        imu_caption = self._caption('IMU link  WitMotion WT901BLE (BLE)')
+        imu_caption = self._caption('IMU link  E2BOX EBIMU-9DOFV5 (USB-UART)')
         imu_caption.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         imu_row.addWidget(imu_caption)
         self._imu_link.setFont(QFont('DejaVu Sans Mono', 11, QFont.Bold))
@@ -546,16 +304,6 @@ class GpsAccuracyWindow(QWidget):
         self._yaw_text.setAlignment(Qt.AlignCenter)
         self._yaw_text.setStyleSheet(f'color: {COLOR_EKF};')
         compass_col.addWidget(self._yaw_text)
-
-        self._calib_btn.setFont(QFont('DejaVu Sans', 9, QFont.Bold))
-        self._calib_btn.setCursor(Qt.PointingHandCursor)
-        self._calib_btn.clicked.connect(self._on_calib_clicked)
-        compass_col.addWidget(self._calib_btn)
-        self._calib_status.setFont(QFont('DejaVu Sans Mono', 8))
-        self._calib_status.setAlignment(Qt.AlignCenter)
-        self._calib_status.setWordWrap(True)
-        self._calib_status.setStyleSheet(f'color: {COLOR_STALE};')
-        compass_col.addWidget(self._calib_status)
         bottom.addLayout(compass_col)
 
         xy_col = QGridLayout()
@@ -584,7 +332,6 @@ class GpsAccuracyWindow(QWidget):
         self.navpvt.connect(self._render_navpvt)
         self.gps_odom.connect(self._render_gps_odom)
         self.ekf_odom.connect(self._render_ekf_odom)
-        self.heading.connect(self._render_heading)
 
         self._gps_pos = None
         self._ekf_pos = None
@@ -602,10 +349,6 @@ class GpsAccuracyWindow(QWidget):
         self._imu_timer.setInterval(IMU_POLL_MS)
         self._imu_timer.start()
 
-        self._calib_timer = QTimer(self)
-        self._calib_timer.timeout.connect(self._tick_calib)
-        self._calib_timer.setInterval(CALIB_TICK_MS)
-        self._calib_timer.start()
         self._refresh_yaw()
 
     # ---------- 위젯 헬퍼 ----------
@@ -642,100 +385,21 @@ class GpsAccuracyWindow(QWidget):
     def set_imu_monitor(self, monitor):
         self._imu_monitor = monitor
 
-    def set_calibrator(self, calibrator):
-        self._calibrator = calibrator
-        self._refresh_yaw()
-
-    # ---------- 초기 yaw 캘리브레이션 ----------
-    def _on_calib_clicked(self):
-        calib = self._calibrator
-        if calib is None:
-            return
-        if calib.active:
-            calib.abort()
-            return
-        answer = QMessageBox.question(
-            self, 'Calibrate initial yaw',
-            'The vehicle will drive ITSELF forward about '
-            f'{CALIB_DISTANCE_M:.2f} m at {CALIB_SPEED_MS:.2f} m/s, then reverse '
-            'back to the start.\n\n'
-            'Clear the path, keep the E-stop within reach, then continue.',
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if answer == QMessageBox.Yes:
-            calib.start()
-        self._refresh_calib()
-
-    def _tick_calib(self):
-        calib = self._calibrator
-        if calib is None:
-            return
-        calib.tick()
-        self._refresh_calib()
-
-    def _refresh_calib(self):
-        calib = self._calibrator
-        if calib is None:
-            self._calib_btn.setEnabled(False)
-            return
-        self._calib_btn.setEnabled(True)
-        if calib.active:
-            self._calib_btn.setText('ABORT calibration')
-            self._calib_btn.setStyleSheet(
-                f'background: {COLOR_BAD}; color: {COLOR_BG}; padding: 4px;')
-        else:
-            self._calib_btn.setText('Calibrate initial yaw  (roll 0.5 m)')
-            self._calib_btn.setStyleSheet('padding: 4px;')
-        colour = {
-            YawCalibrator.DONE: COLOR_GOOD,
-            YawCalibrator.FAILED: COLOR_BAD,
-        }.get(calib.state, COLOR_OK if calib.active else COLOR_STALE)
-        self._calib_status.setText(calib.message)
-        self._calib_status.setStyleSheet(f'color: {colour};')
-        self._refresh_yaw()
-
     def _refresh_yaw(self):
-        """부팅 직후 절대 yaw는 알 수 없다(측량 상수 없음). /imu/heading가 한 번
-        오면(0.5 m 캘리브레이션 주입 또는 주행 중 첫 GPS 진행방향) 확립된 것으로
-        보고, 그때부터 나침반이 라이브 EKF yaw(/odometry/filtered_map)를 따라간다.
-        캘리브레이션이 도는 동안에는 아직 측정 전이라 UNKNOWN."""
-        calib = self._calibrator
-
-        if calib is not None and calib.active:
+        """EBIMU-9DOFV5는 9축(지자기 융합)이라 켜는 순간부터 절대 yaw가 있고,
+        ekf_global이 그 yaw를 먹는다. 그래서 따로 "확립됐는가"를 따지지 않고
+        라이브 EKF yaw(/odometry/filtered_map)를 그대로 그린다."""
+        if self._ekf_yaw is None:
             self._compass.set_yaw(None)
-            self._yaw_text.setText('UNKNOWN\ncalibrating...')
+            self._yaw_text.setText('--\nno /odometry/filtered_map')
             self._yaw_text.setStyleSheet(f'color: {COLOR_STALE};')
             return
 
-        measured = (calib is not None and calib.state == YawCalibrator.DONE
-                    and calib.yaw is not None)
-
-        if not (self._yaw_established or measured):
-            self._compass.set_yaw(None)
-            self._yaw_text.setText('UNKNOWN\nnot yet established -- calibrate or drive')
-            self._yaw_text.setStyleSheet(f'color: {COLOR_STALE};')
-            return
-
-        if self._ekf_yaw is not None:
-            self._compass.set_yaw(self._ekf_yaw)
-            text = (f'{math.degrees(self._ekf_yaw):+7.1f}d ENU  (live)\n'
-                    f'{self._compass.bearing_deg():6.1f}d bearing')
-            if measured:
-                text += f'\ninitial {math.degrees(calib.yaw):+7.1f}d ENU'
-            self._yaw_text.setText(text)
-            self._yaw_text.setStyleSheet(f'color: {COLOR_EKF};')
-            return
-
-        if measured:
-            self._compass.set_yaw(calib.yaw)
-            self._yaw_text.setText(
-                f'{math.degrees(calib.yaw):+7.1f}d ENU  (measured)\n'
-                f'{self._compass.bearing_deg():6.1f}d bearing')
-            self._yaw_text.setStyleSheet(f'color: {COLOR_EKF};')
-            return
-
-        self._compass.set_yaw(None)
-        self._yaw_text.setText('--\nno /odometry/filtered_map')
-        self._yaw_text.setStyleSheet(f'color: {COLOR_STALE};')
+        self._compass.set_yaw(self._ekf_yaw)
+        self._yaw_text.setText(
+            f'{math.degrees(self._ekf_yaw):+7.1f}d ENU  (live)\n'
+            f'{self._compass.bearing_deg():6.1f}d bearing')
+        self._yaw_text.setStyleSheet(f'color: {COLOR_EKF};')
 
     # ---------- stale ----------
     def _navpvt_stale(self):
@@ -811,13 +475,6 @@ class GpsAccuracyWindow(QWidget):
         self._refresh_yaw()
         self._update_delta()
 
-    def _render_heading(self, _msg):
-        # /imu/heading가 한 번이라도 오면(GUI 캘리브레이션 주입이든 주행 중 첫 GPS
-        # 진행방향이든) 절대 yaw가 확립된 것으로 본다.
-        if not self._yaw_established:
-            self._yaw_established = True
-            self._refresh_yaw()
-
     def _render_imu_link(self):
         if self._imu_monitor is None:
             return
@@ -826,8 +483,8 @@ class GpsAccuracyWindow(QWidget):
             self._imu_link.setText('NO DATA -- never received')
             self._imu_link.setStyleSheet(f'color: {COLOR_STALE};')
         elif age > IMU_STALE_S:
-            # 드라이버가 살아 있어도 BLE가 끊기면 publish가 멈춘다. 재연결까지는
-            # reconnect_wait_seconds(기본 5초) + 스캔 시간이 걸린다.
+            # 드라이버가 살아 있어도 시리얼이 끊기면 publish가 멈춘다. 재연결까지는
+            # hyper_ebimu의 reconnect_wait_seconds(기본 2초)가 걸린다.
             self._imu_link.setText(f'DISCONNECTED -- silent {age:.1f} s')
             self._imu_link.setStyleSheet(f'color: {COLOR_BAD};')
         else:
@@ -857,26 +514,16 @@ class GpsAccuracyNode(Node):
         self.navpvt_topic = param('navpvt_topic', '/ublox_gps_node/navpvt')
         self.gps_topic = param('gps_odom_topic', '/odometry/gps')
         self.ekf_topic = param('ekf_odom_topic', '/odometry/filtered_map')
-        # witmotion_ros2가 내는 원본 토픽. sensors.launch.py에서 topic:=/imu/raw로
-        # 띄우고, imu_enu_relay가 이걸 받아 /imu로 다시 낸다.
-        self.imu_topic = param('imu_topic', '/imu/raw')
-        # 캘리브레이션 복귀 구간의 추측항법 소스. 아두이노 브리지가 재는 실제 바퀴속도라
-        # (hyper_interface/arduino_interface_node.py) 명령속도가 안 따라줘도 실제 이동량을
-        # 센다. gps_heading이 진행방향 게이트로 쓰는 것과 같은 토픽/같은 필드다.
-        self.odom_topic = param('odom_topic', '/odom')
-        # gps_heading이 내는 절대 yaw. 이게 한 번 오면 yaw가 확립된 것.
-        self.heading_topic = param('heading_topic', '/imu/heading')
+        # hyper_ebimu(EBIMU-9DOFV5)가 내는 토픽. 실차/시뮬레이션 모두 EKF가 먹는
+        # /imu 그대로다 -- 이 토픽이 흐르는지로 센서 링크 상태를 본다.
+        self.imu_topic = param('imu_topic', '/imu')
 
         # ublox_firmware7plus.hpp는 create_publisher<NavPVT>("~/navpvt", 1) --
         # 기본 QoS(RELIABLE/KEEP_LAST)라 여기서도 기본값으로 맞춘다.
-        # 초기 yaw 캘리브레이션: /odometry/gps 위치로 상태 기계를 진행시키고
-        # /velocity, /steering_angle로 차를 살짝 굴린다.
-        self.calibrator = YawCalibrator(self)
-
         self.create_subscription(
             NavPVT, self.navpvt_topic, lambda m: window.navpvt.emit(m), 10)
         self.create_subscription(
-            Odometry, self.gps_topic, self._on_gps_odom, 10)
+            Odometry, self.gps_topic, lambda m: window.gps_odom.emit(m), 10)
         self.create_subscription(
             Odometry, self.ekf_topic, lambda m: window.ekf_odom.emit(m), 10)
         # GUI는 /odom을 그리지 않는다 -- 캘리브레이터만 쓴다.
@@ -887,24 +534,10 @@ class GpsAccuracyNode(Node):
         self.imu_monitor = ImuLinkMonitor()
         self.create_subscription(
             Imu, self.imu_topic, lambda _m: self.imu_monitor.on_message(), 10)
-        self.create_subscription(
-            Imu, self.heading_topic, lambda m: window.heading.emit(m), 10)
 
-        self._window = window
         self.get_logger().info(
             f'GPS GUI: {self.navpvt_topic} | {self.gps_topic} | {self.ekf_topic} | '
             f'{self.imu_topic}')
-
-    def _on_odom(self, msg):
-        stamp = msg.header.stamp
-        self.calibrator.on_odom(
-            stamp.sec + stamp.nanosec * 1e-9, msg.twist.twist.linear.x)
-
-    def _on_gps_odom(self, msg):
-        p = msg.pose.pose.position
-        self.calibrator.on_gps(p.x, p.y)
-        self._window.gps_odom.emit(msg)
-
 
 def main():
     rclpy.init(args=sys.argv)
@@ -917,7 +550,6 @@ def main():
     window.set_topics(node.navpvt_topic, node.gps_topic, node.ekf_topic,
                       node.imu_topic)
     window.set_imu_monitor(node.imu_monitor)
-    window.set_calibrator(node.calibrator)
     window.show()
 
     # rclpy는 별도 스레드에서 spin하고 Qt가 메인 스레드를 잡는다.

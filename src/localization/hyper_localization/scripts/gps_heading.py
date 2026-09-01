@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
 """Absolute yaw for ekf_global from GPS course over ground.
 
-Why this node exists
---------------------
+NOT LAUNCHED RIGHT NOW. The car's IMU is an E2BOX EBIMU-9DOFV5 (hyper_ebimu),
+a 9-axis AHRS whose magnetometer-fused yaw ekf_global takes as its absolute
+heading directly (dual_ekf_navsat.yaml, imu0_config index 5 = true), so this
+node and the imu1 input that consumed its /imu/heading are both commented out.
+Everything below describes the setup it was written for -- the previous 6-axis
+IMU -- and is kept so the GNSS-heading path can be brought back: uncomment the
+node in odometry.launch.py, restore the imu1 block in dual_ekf_navsat.yaml, and
+drop imu0's yaw back to false so the two absolute headings do not fight. The
+"roll 0.5 m" yaw calibration mentioned below no longer exists; it was removed
+from gps_accuracy_gui along with the rest of the initial-yaw machinery.
+
+Why this node exists (for the 6-axis IMU it was written for)
+------------------------------------------------------------
 The WitMotion WT901BLE's yaw is not trustworthy as an absolute heading: it runs
 in 6-axis mode (no usable magnetometer fusion), so its zero is wherever the
 sensor happened to be powered on and it drifts ~0.5 deg/min from there. Feeding

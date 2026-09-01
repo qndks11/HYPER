@@ -9,11 +9,35 @@
 # ENU 대비 얼마나 돌릴지입니다. 0이면 map X=East, Y=North로 ENU와 완전히 정렬되고,
 # rviz_satellite 앵커/위경도 웨이포인트 계산과도 그대로 맞습니다. 건드리지 마세요.
 #
-# ── 초기 yaw ───────────────────────────────────────────────────────────────
-# 측량 상수(initial_heading_deg)는 없앴습니다. 부팅 직후 yaw는 "알 수 없음"이고,
-# gps_accuracy_gui의 "Calibrate initial yaw"(0.5 m 굴려 GPS 변위로 측정) 또는
-# 주행 중 첫 GPS 진행방향이 gps_heading을 통해 /imu/heading으로 절대 yaw를
-# 세울 때까지 자이로 적분만으로 이어집니다.
+# ── 절대 방위(yaw)를 어디서 받는가 ─────────────────────────────────────────
+# ekf_global이 IMU 지자기 yaw를 절대 방위로 먹습니다
+# (dual_ekf_navsat.yaml의 ekf_global imu0_config 인덱스 5 = true).
+# ekf_local은 그대로 false입니다 -- odom 프레임은 연속이어야 하므로 절대 방위 점프가
+# 들어가면 안 되고, 그 점프는 map->odom(ekf_global)이 흡수합니다.
+# 실차 IMU는 E2BOX EBIMU-9DOFV5(hyper_ebimu)이고 9축 융합이라 켜는 순간부터 절대
+# 방위가 나옵니다. 그래서 초기 yaw를 세우는 절차(측량 상수, 0.5 m 굴리기 캘리브레이션)는
+# 모두 없앴습니다.
+#
+# RTK GNSS 진행방향(headMot)을 yaw로 바꿔 주던 gps_heading 노드(/imu/heading, imu1)는
+# 지금 꺼져 있습니다(odometry.launch.py에서 주석 처리). 스크립트는 그대로 남아 있으니
+# 되돌릴 때는 launch 주석을 풀고 yaml에 imu1 블록을 되살린 뒤 imu0의 yaw를 false로
+# 내리면 됩니다(절대 방위 관측이 둘이면 서로 싸웁니다).
+#
+# 확인해야 할 것(실차): EBIMU는 센서 body frame 그대로 내보내며 축을 재매핑하지
+# 않습니다(hyper_ebimu/README.md). 아는 방위로 차를 세우고
+# `ros2 topic echo /imu --field orientation`의 yaw가 그 방위(북=90deg)로 나오는지,
+# 차를 반시계로 돌릴 때 `--field angular_velocity`의 z가 양수인지 보세요.
+#
+# navsat_transform은 wait_for_datum: true면 /imu를 아예 구독하지 않으므로
+# magnetic_declination_deg/yaw_offset_deg는 어디에도 영향을 주지 않습니다(0 유지).
+#
+# ── imu_yaw_sign / imu_yaw_offset_deg / imu_flip_gyro_z (현재 미사용) ──────
+# imu_enu_relay(WitMotion WT901BLE 전용)가 /imu/raw를 ENU로 고쳐 /imu로 내보낼 때 쓰던 값:
+#   out_yaw = imu_yaw_sign * in_yaw + radians(imu_yaw_offset_deg)
+# WitMotion을 더 이상 쓰지 않으므로(sensors.launch.py는 hyper_ebimu를 띄웁니다) relay는
+# 주석 처리돼 있고 이 값들도 지금은 아무 데도 안 읽힙니다. 위 확인에서 EBIMU 축이
+# ENU와 다르게 나오면, ebimu.yaml의 topic을 imu/raw로 바꾸고 relay를 되살려 이 값들로
+# 보정할 수 있습니다(아래 값은 WT901BLE 기준 실측값이라 EBIMU에는 다시 재야 합니다).
 datums:
   sim:
     latitude_deg: 37.5665

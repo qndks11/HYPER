@@ -1,0 +1,62 @@
+# HYPER 실차 USB 시리얼 장치 고정 심볼릭 링크
+#
+# 왜 필요한가: 차에는 USB 시리얼 장치가 최소 셋(RTK 수신기, IMU 어댑터, Arduino
+# 인터페이스 보드) 꽂혀 있는데 /dev/ttyUSB* 번호는 꽂힌 순서/부팅 타이밍으로 정해진다.
+# 번호로 잡아 두면 어느 날 IMU가 안 붙거나 조향 명령이 엉뚱한 포트로 나간다.
+# 이 규칙이 만드는 이름을 각 노드가 그대로 쓴다:
+#
+#   /dev/tty_Ardusimple  -> hyper_rtk/launch/rtk.launch.py  (ublox_gps_node device)
+#   /dev/tty_ebimu       -> hyper_ebimu/config/ebimu.yaml   (port)
+#   /dev/tty_arduino     -> hyper_interface/config/parameters.yaml (serial_port)
+#
+# 설치:
+#   sudo cp udev/99-hyper-serial.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   ls -l /dev/tty_Ardusimple /dev/tty_ebimu /dev/tty_arduino
+#
+# 세 심볼릭 링크가 다 보이면 끝이다. 하나라도 안 보이면 아래 "매칭 값 확인" 참고.
+#
+# ── 매칭 값 확인 ────────────────────────────────────────────────────────────
+# 저장소의 udev/show-serial-ids.sh가 지금 꽂혀 있는 장치의 idVendor/idProduct/serial/
+# USB 포트 경로를 한 번에 뽑아 준다:
+#
+#   ./udev/show-serial-ids.sh
+#
+# 또는 장치 하나만 꽂고:
+#
+#   udevadm info -a -n /dev/ttyUSB0 | grep -m3 -E 'idVendor|idProduct|serial'
+#
+# ── 칩이 겹칠 때 (중요) ─────────────────────────────────────────────────────
+# idVendor/idProduct는 "칩 종류"지 "장치"가 아니다. IMU 어댑터와 Arduino 보드가 둘 다
+# CH340(1a86:7523)이면 아래 CH340 규칙 하나에 둘 다 걸려 심볼릭 링크가 마지막에
+# 인식된 쪽으로 덮인다. 그럴 때는 둘 중 하나(또는 둘 다)를 구분되는 값으로 바꾼다:
+#
+#   1) 시리얼 번호가 있으면 (CP210x/FTDI는 대개 있고, CH340은 대개 없다)
+#        ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", ATTRS{serial}=="XXXXXXXX", SYMLINK+="tty_arduino"
+#   2) 시리얼이 없으면 물리 USB 포트로 고정한다 (그 포트에만 꽂는다는 약속이 된다)
+#        ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", KERNELS=="1-1.2", SYMLINK+="tty_arduino"
+#      KERNELS 값은 show-serial-ids.sh의 "USB port" 열에 나온다.
+
+# ---------------------------------------------------------------------------
+# 1) Ardusimple simpleRTK2B (u-blox ZED-F9P) -- USB로 직접 CDC-ACM으로 잡힌다.
+#    이 이름은 rtk.launch.py가 이미 쓰고 있던 이름이라 그대로 유지한다.
+# ---------------------------------------------------------------------------
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK+="tty_Ardusimple", MODE="0666"
+
+# ---------------------------------------------------------------------------
+# 2) EBIMU-9DOFV5 USB-UART 어댑터 -- 모듈 자체엔 USB가 없고 어댑터로 물린다
+#    (hyper_ebimu/README.md의 배선표). 쓰는 어댑터 칩의 줄만 남기고 나머지는 지운다.
+#    기본값은 CP210x를 켜 둔 상태다 -- Arduino(CH340)와 겹치지 않기 때문이다.
+# ---------------------------------------------------------------------------
+# CP210x (Silicon Labs)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="tty_ebimu", MODE="0666"
+# FTDI FT232R
+#SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="tty_ebimu", MODE="0666"
+# CH340 -- Arduino 보드와 같은 칩이므로 반드시 serial 또는 KERNELS를 같이 걸 것
+#SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", KERNELS=="1-1.3", SYMLINK+="tty_ebimu", MODE="0666"
+
+# ---------------------------------------------------------------------------
+# 3) Arduino 인터페이스 보드 (CH340) -- /velocity + /steering_angle을 넘기는 링크.
+#    lsusb에서 "QinHeng Electronics CH340"으로 보인다.
+# ---------------------------------------------------------------------------
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="tty_arduino", MODE="0666"
