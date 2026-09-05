@@ -147,9 +147,9 @@ def generate_launch_description():
             stage('odometry.launch.py',
                   datum_site=LaunchConfiguration('datum_site'))]),
         # Gazebo bridges plain sensor_msgs/Image already (see ros_gz_bridge.yaml), so
-        # lane_detection_node runs input_backend ros_raw here -- no rectification, no
-        # image_transport/compressed subscription. object_detection_node's own default is
-        # already ros_raw, so no override needed for it.
+        # lane_detection_node runs input_backend ros_raw here and no camera driver is launched.
+        # object_detection_node subscribes to that same bridged /camera/image_raw -- the sim has
+        # one camera, matching the car.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage('perception.launch.py', lane_input_backend='ros_raw',
                   drivable_area=LaunchConfiguration('drivable_area'))]),

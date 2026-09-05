@@ -59,11 +59,13 @@ ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/H
 ## 스크립트
 
 `scripts/`의 파이썬 스크립트들은 `ros2 run` 대상이 아니라 `python3`로 직접 실행합니다.
+아래 명령은 모두 **`~/HYPER` 루트에서 그대로 복사해 붙여넣으면 됩니다** (`cd src/planning/hyper_waypoint` 후에는 경로 앞의 `src/planning/hyper_waypoint/`를 빼세요).
 
 ### plot_waypoints.py — 기록 품질 확인
 
 ```bash
-python3 scripts/plot_waypoints.py waypoints/sim.csv --jump-threshold 1.0
+python3 src/planning/hyper_waypoint/scripts/plot_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/sim.csv --jump-threshold 1.0
 ```
 
 융합 경로 / 생 GPS / navsat_transform 출력을 겹쳐 그려서 위치 점프의 원인이 GPS 센서인지,
@@ -77,11 +79,22 @@ python3 scripts/plot_waypoints.py waypoints/sim.csv --jump-threshold 1.0
 
 ```bash
 # 시뮬레이션 코스 텍스처를 배경에 깔고 라벨링 (권장)
-python3 scripts/label_waypoints.py waypoints/sim.csv --gazebo-course
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/sim.csv --gazebo-course
 
-python3 scripts/label_waypoints.py waypoints/sim.csv
-python3 scripts/label_waypoints.py waypoints/track.csv --mission /path/to/mission.yaml
-python3 scripts/label_waypoints.py waypoints/track.csv --background ortho.png --extent -50 -60 60 50
+# 배경 없이
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/sim.csv
+
+# 실차 코스를 mission.yaml이 아닌 다른 미션 파일에 라벨링
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/real.csv \
+  --mission src/planning/hyper_planner/config/stopline.yaml
+
+# 위성 정사영상을 배경으로 (--extent는 map 프레임 미터 단위 경계)
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/real.csv \
+  --background ortho.png --extent -50 -60 60 50
 ```
 
 | 조작 | 동작 |
@@ -104,6 +117,7 @@ python3 scripts/label_waypoints.py waypoints/track.csv --background ortho.png --
   바이트 단위로 보존됩니다.
 - 줌/팬 도구가 켜져 있는 동안의 클릭은 무시되므로, 정지선 근처를 확대하다가 라벨이
   잘못 찍히지 않습니다.
+
 ### 배경 깔기
 
 - **시뮬레이션**: `--gazebo-course`가 `hyper_gazebo`의 코스 텍스처

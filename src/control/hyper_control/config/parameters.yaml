@@ -22,23 +22,21 @@
     max_velocity: 2.2 # 저속 테스트용으로 하향 (원래 T8 Sport 순정 최고 속도는 약 16km/h=10.0) [m/s]
     max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
 
-    # Camera and image params (ELP 2MP Global Shutter Fisheye AR0234, 153-degree hfov)
+    # Camera and image params (Logitech C920, 일반 70도 hfov 렌즈, 전방)
+    #
+    # 차량 카메라는 이 한 대뿐이고 차선 인식(BEV 워프)과 객체 인식(YOLO)이 같이 씁니다.
+    # 예전에는 차선용 ELP 어안(153도) + 객체용 C920 두 대였고, 아래 값들은 그중 C920
+    # 마운트의 실측값입니다 (예전 object_camera_* 항목이 여기로 올라왔습니다).
     camera_box_size: 0.05 # 카메라 하우징 크기 [m]
-    # camera_height: body_link 기준. 실측(2026-08-30): 지면 기준 1.27 m - 라이드 하이트
-    # 0.171 m = 1.099 m. 지면 기준 원본 값은 hyper_lane_detection/config/bev_real.yaml 참고.
-    camera_height: 1.099 # [m]
-    camera_pitch: 0.192 # 실측(2026-08-30). 약 11도 하향 [rad]
-    camera_setback: 0.64 # 실측(2026-08-30): 차량 앞단(범퍼)에서 카메라까지 뒤로 간 거리 [m]
-    camera_fov: 2.67 # 153 deg hfov.
+    # camera_height: body_link 기준. 실측(2026-08-30): 지면 기준 1.283 m - 라이드 하이트
+    # 0.171 m = 1.112 m. 지면 기준 원본 값은 hyper_lane_detection/config/bev_real.yaml 참고.
+    camera_height: 1.112 # [m]
+    camera_pitch: 0.087 # 실측(2026-08-30). 약 5도 하향 [rad]
+    camera_setback: 0.527 # 실측(2026-08-30): 차량 앞단(범퍼)에서 카메라까지 뒤로 간 거리 [m]
+    camera_fov: 1.2217305 # 70 deg hfov (일반 렌즈, 어안 왜곡 없음)
     camera_fps: 30 # [Hz]
-    image_width: 640 # 실제 센서 1920x1200에서 1/3로 축소, 16:10 비율 유지 [pixels]
-    image_height: 400 # 실제 센서 1920x1200에서 1/3로 축소, 16:10 비율 유지 [pixels]
-
-    # Object detection camera params (normal 70 deg hfov, front-facing, for traffic light/sign detection)
-    # object_camera_height: body_link 기준. 실측(2026-08-30): 지면 기준 1.283 m - 라이드 하이트
-    # 0.171 m = 1.112 m. object_detection_node는 지면 투영을 안 하므로(픽셀 박스 분류만 함)
-    # 이 값 자체가 실주행에 쓰이진 않고 문서화/시뮬레이션 목적입니다.
-    object_camera_height: 1.112 # [m]
-    object_camera_pitch: 0.087 # 실측(2026-08-30). 약 5도 하향 [rad]
-    object_camera_setback: 0.527 # 실측(2026-08-30): 차량 앞단(범퍼)에서 카메라까지 뒤로 간 거리 [m]
-    object_camera_fov: 1.2217305 # 70 deg hfov (일반 렌즈, 어안 왜곡 없음)
+    # 실차 캡처 해상도(hyper_camera의 LogitechCameraPublisherNode)와 똑같이 맞춥니다.
+    # 세로 크기가 BEV의 근거리 경계를 정하므로(수직 화각 -> 맨 아랫줄이 지면에 닿는 거리),
+    # 시뮬레이터가 다른 종횡비로 렌더링하면 실차와 다른 BEV가 나옵니다.
+    image_width: 640 # 센서 1280x720의 1/2, 16:9 유지 [pixels]
+    image_height: 360 # 센서 1280x720의 1/2, 16:9 유지 [pixels]

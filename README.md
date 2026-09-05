@@ -98,11 +98,12 @@ source ~/.bashrc
 
 ### USB 시리얼 포트 고정 (udev) — 먼저 하세요
 
-차에는 USB 시리얼 장치가 셋 물려 있습니다: RTK 수신기, IMU(EBIMU) USB-UART 어댑터, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 IMU와 Arduino가 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 세 장치에 고정 이름을 붙입니다:
+차에는 USB 시리얼 장치가 넷 물려 있습니다: RTK 수신기 **두 대**(moving base + rover), IMU(EBIMU) USB-UART 어댑터, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 IMU와 Arduino가 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 각 장치에 고정 이름을 붙입니다:
 
 | 심볼릭 링크 | 장치 | 쓰는 곳 |
 |---|---|---|
-| `/dev/tty_Ardusimple` | Ardusimple simpleRTK2B (u-blox ZED-F9P) | `hyper_rtk/launch/rtk.launch.py` |
+| `/dev/tty_f9p_base` | Ardusimple simpleRTK2B #1 (u-blox ZED-F9P, moving base) | `hyper_rtk/config/f9p_base.yaml` |
+| `/dev/tty_f9p_rover` | Ardusimple simpleRTK2B #2 (u-blox ZED-F9P, heading rover) | `hyper_rtk/config/f9p_rover.yaml` |
 | `/dev/tty_ebimu` | EBIMU-9DOFV5 USB-UART 어댑터 | `hyper_ebimu/config/ebimu.yaml` |
 | `/dev/tty_arduino` | Arduino 제어 보드 (CH340) | `hyper_interface/config/parameters.yaml` |
 
@@ -110,27 +111,29 @@ source ~/.bashrc
 sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
 sudo cp ~/HYPER/udev/99-hyper-serial.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
-ls -l /dev/tty_Ardusimple /dev/tty_ebimu /dev/tty_arduino
+ls -l /dev/tty_f9p_base /dev/tty_f9p_rover /dev/tty_ebimu /dev/tty_arduino
 ```
 
-세 링크가 다 보이면 끝입니다. 안 보이면 장치의 실제 칩 ID가 규칙과 다른 것이므로, 지금 꽂혀 있는 장치들의 값을 뽑아서 규칙 파일을 고칩니다:
+네 링크가 다 보이면 끝입니다. 안 보이면 장치의 실제 칩 ID가 규칙과 다른 것이므로, 지금 꽂혀 있는 장치들의 값을 뽑아서 규칙 파일을 고칩니다:
 
 ```bash
 ~/HYPER/udev/show-serial-ids.sh
 ```
 
-**주의**: IMU 어댑터와 Arduino 보드가 둘 다 CH340(`1a86:7523`)이면 칩 ID만으로는 구분되지 않아 심볼릭 링크가 한쪽으로 덮입니다. 이때는 `ATTRS{serial}`이나 물리 USB 포트(`KERNELS`)를 같이 걸어야 하며, 방법은 규칙 파일 상단 주석에 적어 뒀습니다.
+**주의**: F9P 두 대는 VID:PID가 `1546:01a9`로 **완전히 같아서** 칩 ID만으로는 절대 구분되지 않습니다. 반드시 `ATTRS{serial}`이나 물리 USB 포트(`KERNELS`)로 갈라야 하며, 규칙 파일에 두 방법이 다 적혀 있습니다. 잘못 배정하면 heading이 조용히 180도 뒤집힙니다.
+
+같은 함정이 하나 더 있습니다: IMU 어댑터와 Arduino 보드가 둘 다 CH340(`1a86:7523`)이면 칩 ID만으로는 구분되지 않아 심볼릭 링크가 한쪽으로 덮입니다. 이때는 `ATTRS{serial}`이나 물리 USB 포트(`KERNELS`)를 같이 걸어야 하며, 방법은 규칙 파일 상단 주석에 적어 뒀습니다.
 
 ### GPS (RTK)
 
-`hyper_rtk`(`src/sensing/hyper_rtk`) 패키지가 u-blox GPS 드라이버(`ublox_gps`)와 NTRIP 클라이언트(`ntrip_client`)를 함께 실행해 RTK 보정 위치를 퍼블리시합니다.
+`hyper_rtk`(`src/sensing/hyper_rtk`) 패키지가 u-blox GPS 드라이버(`ublox_gps`) **두 개**와 NTRIP 클라이언트(`ntrip_client`)를 함께 실행해, RTK 보정 **위치**(`/gps/fix`)와 안테나 기선 기반 절대 **방위**(`/imu/heading`)를 함께 퍼블리시합니다. 배선도와 u-center에서 미리 해 둬야 할 설정은 `src/sensing/hyper_rtk/README.md`에 있습니다.
 
 #### 1. GPS 장치 권한 / udev 규칙
 
-위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)에서 규칙을 이미 깔았다면 `/dev/tty_Ardusimple`이 만들어져 있고, `rtk.launch.py`가 그 이름으로 장치를 찾습니다. 확인:
+위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)에서 규칙을 이미 깔았다면 두 링크가 만들어져 있고, `f9p_base.yaml` / `f9p_rover.yaml`이 그 이름으로 장치를 찾습니다. 확인:
 
 ```bash
-ls -l /dev/tty_Ardusimple
+ls -l /dev/tty_f9p_base /dev/tty_f9p_rover
 ```
 
 다른 Ardusimple 보드/케이블을 쓰면 `idVendor`/`idProduct`가 다를 수 있으니, 링크가 없으면 장치를 연결한 상태에서 값을 확인해 `udev/99-hyper-serial.rules`를 고칩니다:
@@ -140,7 +143,6 @@ udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct" | head -2
 ```
 
 #### 2. NTRIP 계정 설정
-
 `src/sensing/hyper_rtk/config/ntrip_params.yaml`은 NTRIP 캐스터 로그인 정보가 들어있어 `.gitignore` 대상입니다(저장소에는 없음). 없다면 새로 만듭니다:
 
 ```yaml
@@ -169,10 +171,12 @@ ntrip_client:
 #### 3. 실행
 
 ```bash
-ros2 launch hyper_rtk rtk.launch.py
+ros2 launch hyper_rtk dual_rtk.launch.py
 ```
 
-정상 동작하면 `ublox_gps_node`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다.
+정상 동작하면 base 쪽 `ublox_gps_node`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, rover 쪽이 `/f9p_rover/navrelposned`(안테나 기선)를, `rtk_heading`이 `/imu/heading`(절대 방위)을, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다. `/imu/heading`이 안 나오면 RTK가 FIXED가 아닌 것이고, `rtk_heading`이 2초마다 기각 사유를 로그로 뱉습니다.
+
+단일 수신기(위치만, 방위 없음)로 돌려야 하면 `rtk.launch.py`가 그대로 남아 있습니다.
 
 ### IMU (EBIMU-9DOFV5)
 
@@ -186,14 +190,13 @@ ros2 topic hz /imu                  # 100 Hz 근처 (output_rate_ms=10)
 
 포트는 `config/ebimu.yaml`의 `port`이고 기본값은 udev 규칙이 만드는 `/dev/tty_ebimu`입니다.
 
-9축(지자기 융합) AHRS라 켜는 순간부터 절대 방위가 나오고, `ekf_global`이 이 yaw를 map 프레임 방위 기준으로 그대로 씁니다(`dual_ekf_navsat.yaml`의 `imu0_config` 인덱스 5 = true). **그래서 축 방향을 실차에서 반드시 확인해야 합니다** — 드라이버는 센서 body frame을 재매핑 없이 내보내므로 REP-103 ENU(0=East, 반시계 +)와 어긋나면 map heading이 통째로 돌아갑니다:
+9축(지자기 융합) AHRS라 켜는 순간부터 절대 방위가 나오지만, **이 yaw는 EKF가 쓰지 않습니다**(`dual_ekf_navsat.yaml`의 `imu0_config` 인덱스 5가 양쪽 필터 다 `false`). 실차에서 yaw가 ENU와 거울상이고 원점이 지자기 캘리브레이션 상태에 묶여 있는 것으로 확인돼(`datums.yaml` 주석), 절대 방위는 F9P 두 대(moving base)의 안테나 기선을 쓰는 `rtk_heading` 노드가 공급합니다(`/imu/heading` → `ekf_global`의 `imu1`, `hyper_rtk`). 여기서 EKF로 가는 건 roll/pitch, 각속도, 선가속도입니다.
+
+드라이버는 센서 body frame을 재매핑 없이 내보내므로 **자이로 z 부호는 실차에서 확인해야 합니다** — 두 EKF 모두 `vyaw`를 먹습니다:
 
 ```bash
-ros2 topic echo /imu --field orientation        # 아는 방위로 세우고 (북 = 90deg)
 ros2 topic echo /imu --field angular_velocity   # 반시계로 돌릴 때 z > 0
 ```
-
-어긋나면 `ebimu.yaml`의 `topic`을 `imu/raw`로 바꾸고 `odometry.launch.py`의 `imu_enu_relay` 주석을 풀어 `datums.yaml`의 사이트별 보정값으로 고칩니다(방법은 두 파일 주석에 있습니다).
 
 ### LiDAR
 
@@ -322,7 +325,7 @@ ros2 launch hyper_launch behavior.launch.py
 |------|--------|-----------|
 | E2BOX EBIMU-9DOFV5 | `hyper_ebimu` | `/imu` (EKF) |
 | RPLidar | `hyper_lidar` | `/scan` |
-| u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
+| u-blox ZED-F9P x2 (dual RTK) + NTRIP | `hyper_rtk` | `/gps/fix`, `/imu/heading` |
 
 카메라는 둘 다 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 전방 ELP와 `lane_detection`을 함께 로드하고, 객체 인식용 Logitech C920만 별도 프로세스로 띄웁니다:
 
@@ -342,7 +345,7 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_localization` | dual EKF + navsat_transform (robot_localization 래핑, GPS 융합 오도메트리) |
 | `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
-| `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
+| `hyper_rtk` | u-blox GPS 드라이버 두 대(moving base) + NTRIP 클라이언트 실행 (RTK 보정 위치 + 절대 방위) |
 | `hyper_lidar` | 실차 RPLidar 등 2D LiDAR 드라이버 실행 (시뮬레이션에서는 미사용) |
 | `hyper_camera` | 실차 ELP/Logitech USB 카메라 드라이버 노드(`ElpCameraPublisherNode` C++ 컴포넌트, `logitech_camera_publisher_node` rclpy 노드) + 설정 파일(보정 파일 + 참고용 파라미터 yaml) 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
 | `hyper_interface` | 실차 ROS 2 ↔ Arduino 시리얼 브릿지 (`arduino_interface_node`) — `/velocity`, `/steering_angle`을 구독해 Arduino(`hyper_motor_interface.ino`)로 전달, BTS7960/L298N 모터드라이버를 닫힌 루프로 구동 |
@@ -365,5 +368,5 @@ ros2 launch hyper_launch behavior.launch.py
 | `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
 | `/velocity_actual`, `/steering_angle_actual` | `std_msgs/Float64` | arduino_interface_node → | Arduino의 인코더/조향각 센서로 측정한 실제 값 (실차 전용, 닫힌 루프 피드백) |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `hyper_ebimu` → ROS (실차, EBIMU-9DOFV5) | IMU. yaw(지자기 융합)가 `ekf_global`의 절대 방위 기준. 실차 축이 REP-103 ENU와 어긋나면 `odometry.launch.py`의 `imu_enu_relay` 주석을 참고해 보정 |
-| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → (없음) | RTK 진행방향 기반 yaw. **현재 비활성** — `gps_heading` 노드는 `odometry.launch.py`에서 주석 처리했고 EKF도 구독하지 않는다. 절대 방위는 `ekf_global`이 `/imu`의 지자기 yaw로 잡는다 (되돌리려면 launch 주석 해제 + `dual_ekf_navsat.yaml`의 `imu1` 블록 복원 + `imu0_config` yaw를 false로) |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `hyper_ebimu` → ROS (실차, EBIMU-9DOFV5) | IMU. 두 EKF가 roll/pitch·각속도·선가속도를 먹는다. yaw(지자기 융합)는 **안 쓴다**(`imu0_config` 인덱스 5가 양쪽 다 false) |
+| `/imu/heading` | `sensor_msgs/Imu` | `rtk_heading` → `ekf_global` (`imu1`) | dual RTK 안테나 기선 기반 yaw. 스택의 **유일한 절대 방위 공급원**. 정지 상태에서도 나오지만 **RTK FIXED일 때만** 나온다 — 안 나오면 `rtk_heading`의 기각 사유 로그를 볼 것 |

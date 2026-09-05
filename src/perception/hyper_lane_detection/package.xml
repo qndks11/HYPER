@@ -15,9 +15,11 @@
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>cv_bridge</depend>
+  <!-- std_srvs/SetBool backs the `~/image_saving` dataset-recording toggle. -->
+  <depend>std_srvs</depend>
   <depend>libopencv-dev</depend>
 
-  <!-- input_backend:=intra_process is fed by hyper_camera's ElpCameraPublisherNode component,
+  <!-- input_backend:=intra_process is fed by hyper_camera's LogitechCameraPublisherNode component,
        loaded into the same ComposableNodeContainer; see hyper_object_detection's
        perception.launch.py. -->
   <exec_depend>hyper_camera</exec_depend>

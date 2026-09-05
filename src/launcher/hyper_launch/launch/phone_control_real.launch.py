@@ -69,14 +69,13 @@ def generate_launch_description():
         }.items(),
     )
 
-    # Cameras + lane/object detection, same as real.launch.py's perception stage.
+    # Camera + lane/object detection, same as real.launch.py's perception stage.
     perception = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('hyper_launch'),
             'launch', 'perception.launch.py')),
         launch_arguments={
             'lane_input_backend': 'intra_process',
-            'object_input_backend': 'usb_camera',
         }.items(),
     )
 

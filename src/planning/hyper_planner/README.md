@@ -28,44 +28,7 @@ source install/setup.bash
 
 터미널마다 `source ~/HYPER/install/setup.bash`를 먼저 실행하세요.
 
-## 실행
-
-경로: 웨이포인트 CSV -> `nav_msgs/Path` -> nav2 `follow_path` 액션 -> `/cmd_vel` -> `/velocity`, `/steering_angle`.
-
-가장 짧은 길은 전체 스택을 한 번에 띄우는 것입니다. `mission:=`으로 어떤 미션을 실을지 고릅니다
-(`hyper_planner/config/<이름>.yaml`로 풀립니다).
-
-```bash
-ros2 launch hyper_launch simulation.launch.py                 # config/mission.yaml (대회 미션)
-ros2 launch hyper_launch simulation.launch.py mission:=simple # config/simple.yaml (한 바퀴)
-ros2 service call /mission_manager/start std_srvs/srv/Trigger
-```
-
-`auto_start` 기본값이 `false`라 노드는 뜨자마자 달리지 않고 `~/start`를 기다립니다. 실차에서 이게
-안전합니다. 같은 `mission:=` 인자가 `hyper_launch real.launch.py`와 `behavior.launch.py`에도 있습니다.
-
-단계별로 띄우려면:
-
-```bash
-# 1) 시뮬레이터 + 오도메트리 (TF: map -> odom -> body_link, /scan 필요)
-ros2 launch hyper_launch sim.launch.py
-ros2 launch hyper_launch odometry.launch.py
-# 2) 액션 서버 (controller_server + lifecycle_manager + cmd_vel 변환)
-ros2 launch hyper_planner nav2_controller.launch.py      # 실차는 use_sim_time:=false
-# 3) 신호등 인식 (/perception/sign) -- wait_signal 스텝이 이걸 봅니다
-ros2 launch hyper_object_detection perception.launch.py
-# 4) 미션 매니저
-ros2 launch hyper_planner mission.launch.py mission:=simple
-ros2 service call /mission_manager/start std_srvs/srv/Trigger
-```
-
-`mission_yaml:=`에 절대 경로를 주면 `mission:=`을 덮어씁니다(패키지 밖의 미션 파일을 쓸 때).
-코스 CSV는 `waypoint_csv:=`이고 기본값은 `hyper_waypoint/waypoints/sim.csv`입니다.
-
-`controller_with_parking_node`도 `/velocity`, `/steering_angle`에 퍼블리시하므로
-`parking_system_cpp.launch.py`와 동시에 실행하지 마세요.
-
-### 서비스와 토픽
+## 서비스와 토픽
 
 | 서비스 | 하는 일 |
 | --- | --- |
@@ -101,8 +64,12 @@ ros2 service call /mission_manager/start std_srvs/srv/Trigger
 세그먼트가 비거나 뒤집히므로 로드가 실패합니다. 첫 `drive` 스텝만 CSV의 처음(#0)부터 시작하고,
 이후 세그먼트는 직전 스텝의 도착점에서 이어집니다.
 
-라벨 찍기는 `hyper_waypoint/scripts/label_waypoints.py`(코스 이미지 위에 웨이포인트를 겹쳐 띄우고
-클릭으로 배치 -> `labels:` 블록만 다시 씁니다)를 쓰세요.
+라벨 찍기는 
+```bash
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+    src/planning/hyper_waypoint/waypoints/real.csv \
+    --mission src/planning/hyper_planner/config/stopline.yaml
+```
 
 ### drive 스텝: 감속과 도착 판정
 

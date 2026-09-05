@@ -8,10 +8,10 @@
 
 카메라 영상이 어디서 들어오는지는 `input_backend` 파라미터로 고릅니다.
 
-- `intra_process` — 실차용. `hyper_camera`의 `ElpCameraPublisherNode` 컴포넌트(`/dev/video_elp`를 열어 MJPEG 캡처·디코드하고 `ELP-USBGS1200P01-KL170.yaml` 보정값으로 rectify)가 이 노드와 같은 `ComposableNodeContainer`에 함께 로드되어 `image_raw`를 발행합니다. rclcpp의 intra-process 매니저가 그 프레임을 직렬화 없이 포인터로 바로 넘겨주므로, 별도 DDS 토픽 왕복이 없습니다.
-- `ros_raw` — 시뮬레이션(Gazebo)용. `/camera/image_raw`를 평범한 `sensor_msgs/Image`로 구독합니다. 시뮬레이션 카메라 영상은 이미 보정된 입력으로 취급하므로 rectify하지 않습니다.
+- `intra_process` — 실차용. `hyper_camera`의 `LogitechCameraPublisherNode` 컴포넌트(`/dev/video_logitech`를 열어 MJPEG 캡처·디코드, rectify 없음)가 이 노드와 같은 `ComposableNodeContainer`에 함께 로드되어 `image_raw`를 발행합니다. rclcpp의 intra-process 매니저가 그 프레임을 직렬화 없이 포인터로 바로 넘겨주므로, 별도 DDS 토픽 왕복이 없습니다. 같은 발행이 DDS로도 나가서 `object_detection_node`가 **동일한 카메라의 동일한 프레임**을 구독합니다 — 차량 카메라는 이 한 대뿐입니다.
+- `ros_raw` — 시뮬레이션(Gazebo)용. `/camera/image_raw`를 평범한 `sensor_msgs/Image`로 구독합니다. 카메라 드라이버는 아무것도 뜨지 않습니다.
 
-두 백엔드 모두 노드 자체는 `/image_raw`(remap 대상)를 구독할 뿐이며, ELP 카메라를 여는 파라미터(`video_device`, `image_width`/`image_height`, `framerate`, `calibration_file`)는 이제 `hyper_camera`의 `ElpCameraPublisherNode`가 선언합니다.
+두 백엔드 모두 노드 자체는 `/image_raw`(remap 대상)를 구독할 뿐이며, 카메라를 여는 파라미터(`video_device`, `image_width`/`image_height`, `framerate`)는 `hyper_camera`의 `LogitechCameraPublisherNode`가 선언합니다. 어느 백엔드도 rectify하지 않습니다 — 실차 카메라가 보정 파일 없는 일반 렌즈라, 양쪽 다 이상적 핀홀로 모델링합니다.
 
 ## 입출력
 
@@ -149,19 +149,20 @@ BEV 워프는 이미지 위에서 고른 사다리꼴 ROI가 아니라, **카메
 
 접두사는 `bev.*` 하나입니다(후방 카메라는 배터리 절약을 위해 제거되었습니다 — `bev_rear.*`는
 더 이상 없습니다). 기본값은 **시뮬레이터** 카메라 기준입니다 (`hyper_control/config/parameters.yaml`의
-값과 일치). 실차 카메라는 렌즈 모델이 달라 `config/bev_real.yaml`이 `intra_process` 경로에서
-자동으로 덮어씁니다 — 그 파일의 `fx/fy/cx/cy`는 ELP 보정값(1280x720 측정)을 실제 캡처 해상도
-640x360에 맞춰 0.5배한 값입니다.
+값과 일치). 실차와 시뮬레이터가 **같은 카메라(Logitech C920)** 를 모델링하므로 `config/bev_real.yaml`이
+`intra_process` 경로에서 덮어쓰는 값은 딱 하나, `camera_height`입니다 — 시뮬레이터의 `body_link`는
+지면에서 0.3 m 떠 있고 실차 라이드 하이트는 0.171 m라 지면 기준 높이만 1.412 m vs 1.283 m로
+갈립니다. 나머지는 전부 동일합니다.
 
 | 파라미터 | `bev` 기본값 | 설명 |
 | --- | --- | --- |
-| `horizontal_fov` | `2.67` | 수평 화각 [rad]. 왜곡 없고 주점이 화면 중앙인 이상적 핀홀을 프레임 크기로부터 유도합니다 — Gazebo가 렌더링하는 모델 그대로. `fx`가 설정되면 무시됩니다. |
+| `horizontal_fov` | `1.2217305` | 수평 화각 [rad]. 왜곡 없고 주점이 화면 중앙인 이상적 핀홀을 프레임 크기로부터 유도합니다 — Gazebo가 렌더링하는 모델 그대로. `fx`가 설정되면 무시됩니다. |
 | `fx`, `fy`, `cx`, `cy` | `0.0` (미사용) | rectify된 실제 렌즈용 명시적 내부 파라미터. 실렌즈는 `fx != fy`이고 주점도 중앙이 아니라서 화각만으로는 표현되지 않습니다. `fx > 0`이면 `horizontal_fov`보다 우선합니다. |
-| `camera_height` | `1.5` | 광학 중심의 **지면** 위 높이 [m]. `parameters.yaml`의 `camera_height`(1.2)와 기준면이 다릅니다 — 그쪽은 `body_link` 기준 카메라 조인트 z이고, `body_link`는 바퀴 위에 0.3 m 떠 있습니다(`vehicle.xacro`가 바퀴 조인트를 `-wheel_radius/2`에 달고 바퀴 반지름이 0.2). 1.2를 그대로 옮겨 쓰면 오버레이 전체가 실제 거리의 0.80배로 그려집니다. |
-| `camera_pitch` | `0.2617994` | 아래로 숙인 각 [rad]. **세 값 중 오차에 가장 민감합니다.** |
-| `camera_longitudinal_offset` | `0.145` | 차량 프레임 원점에서 카메라까지, **카메라가 보는 방향으로** 잰 거리 [m]. |
-| `near` / `far` | `0.3` / `7.6` | BEV 맨 아래/맨 위 행이 보여줄 지면 거리 [m]. `near`를 카메라가 볼 수 있는 것보다 가깝게 잡으면 그 행들은 그냥 검게 남습니다. |
-| `half_width` | `9.0` | 좌우로 각각 얼마나 넓게 볼지 [m]. |
+| `camera_height` | `1.412` | 광학 중심의 **지면** 위 높이 [m]. `parameters.yaml`의 `camera_height`(1.112)와 기준면이 다릅니다 — 그쪽은 `body_link` 기준 카메라 조인트 z이고, `body_link`는 바퀴 위에 0.3 m 떠 있습니다(`vehicle.xacro`가 바퀴 조인트를 `-wheel_radius/2`에 달고 바퀴 반지름이 0.2). 1.112를 그대로 옮겨 쓰면 오버레이 전체가 실제 거리의 0.79배로 그려집니다. 실차는 `bev_real.yaml`이 1.283으로 덮어씁니다. |
+| `camera_pitch` | `0.087` | 아래로 숙인 각 [rad]. **세 값 중 오차에 가장 민감합니다.** |
+| `camera_longitudinal_offset` | `0.113` | 차량 프레임 원점에서 카메라까지, **카메라가 보는 방향으로** 잰 거리 [m]. |
+| `near` / `far` | `2.9` / `7.6` | BEV 맨 아래/맨 위 행이 보여줄 지면 거리 [m]. `near`를 카메라가 볼 수 있는 것보다 가깝게 잡으면 그 행들은 그냥 검게 남습니다 — 70도 렌즈를 5도만 숙여 단 이 카메라는 지면을 **2.83 m(sim)/2.58 m(실차)** 보다 가까이 볼 수 없어서 `2.9`가 그 한계 바로 바깥입니다. 근거리를 되찾으려면 카메라를 더 숙여 달아야 합니다. |
+| `half_width` | `5.5` | 좌우로 각각 얼마나 넓게 볼지 [m]. 70도 렌즈가 거리 `d`에서 보는 폭이 `±d·tan(35도)`라, 가장 먼 행(7.6 m)의 `±5.32 m`가 이 카메라가 볼 수 있는 최대 폭입니다. |
 | `meters_per_pixel` | `0.028125` | BEV 픽셀 하나가 덮는 지면 거리 [m/px]. 양 축 공통 — 이 값이 곧 발행되는 `offset_m`/`distance_m`의 환산 계수입니다. |
 
 시작할 때 실제 만들어진 형상이 로그로 한 줄 남습니다(지면 범위, BEV 크기, 원점 위치,

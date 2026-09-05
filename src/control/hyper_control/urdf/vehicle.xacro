@@ -25,10 +25,6 @@
   <xacro:arg name="camera_fps" default="30" />
   <xacro:arg name="image_width" default="640" />
   <xacro:arg name="image_height" default="480" />
-  <xacro:arg name="object_camera_height" default="1.2" />
-  <xacro:arg name="object_camera_pitch" default="0.0" />
-  <xacro:arg name="object_camera_setback" default="0.5" />
-  <xacro:arg name="object_camera_fov" default="1.2217305" />
 
   <!-- Mathematical Constants -->
   <xacro:property name="PI" value="3.14159265"/>
@@ -55,10 +51,6 @@
   <xacro:property name="camera_fps" value="$(arg camera_fps)"/>
   <xacro:property name="image_width" value="$(arg image_width)"/>
   <xacro:property name="image_height" value="$(arg image_height)"/>
-  <xacro:property name="object_camera_height" value="$(arg object_camera_height)"/>
-  <xacro:property name="object_camera_pitch" value="$(arg object_camera_pitch)"/>
-  <xacro:property name="object_camera_setback" value="$(arg object_camera_setback)"/>
-  <xacro:property name="object_camera_fov" value="$(arg object_camera_fov)"/>
 
   <xacro:property name="body_mass" value="${body_density * body_length * body_height * body_width}"/>
   <xacro:property name="body_inertia_x" value="${1.0/12.0 * body_mass * (body_height*body_height + body_width*body_width)}"/>
@@ -244,7 +236,11 @@
     </inertial>
   </link>
 
-  <!-- Camera Link -->
+  <!-- Camera Link. The vehicle's only camera: a Logitech C920 on the real car, feeding both
+       lane_detection (via a bird's-eye warp) and object_detection (YOLO). It replaced a pair of
+       cameras (a 153 deg ELP fisheye for lanes plus this C920 for objects), so its pose and FOV
+       below are the C920 mount's, and hyper_lane_detection's BEV had to give up the near field
+       for it. See kSimFrontNearM in lane_detection_node.cpp. -->
   <link name="camera_link">
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -260,33 +256,6 @@
       </geometry>
 
       <material name="camera_material">
-        <color rgba="0.0 0.0 0.0 1.0"/>
-      </material>
-    </visual>
-
-    <inertial>
-      <mass value="1e-5" />
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
-    </inertial>
-  </link>
-
-  <!-- Object Detection Camera Link (normal 70 deg hfov, front-facing) -->
-  <link name="object_camera_link">
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
-      </geometry>
-    </collision>
-
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
-      </geometry>
-
-      <material name="object_camera_material">
         <color rgba="0.0 0.0 0.0 1.0"/>
       </material>
     </visual>
@@ -449,14 +418,6 @@
     <child link="camera_link"/>
   </joint>
 
-  <!-- Object Detection Camera Joint -->
-  <joint name="object_camera_joint" type="fixed">
-    <axis xyz="0 1 0" />
-    <origin xyz="${body_length/2 - camera_box_size/2 - object_camera_setback} 0.0 ${object_camera_height}" rpy="0 ${object_camera_pitch} 0"/>
-    <parent link="body_link"/>
-    <child link="object_camera_link"/>
-  </joint>
-
   <gazebo reference="body_link">
     <mu1>0.0001</mu1>
     <mu2>0.0001</mu2>
@@ -563,7 +524,7 @@
 
   </gazebo>
 
-  <!-- Camera -->
+  <!-- Camera. Shared by lane_detection and object_detection; there is only one. -->
   <gazebo reference="camera_link">
     <sensor type="camera" name="vehicle_front_camera">
       <update_rate>${camera_fps}</update_rate>
@@ -578,36 +539,6 @@
 
       <camera name="head">
         <horizontal_fov>${camera_fov}</horizontal_fov>
-        <image>
-          <width>${image_width}</width>
-          <height>${image_height}</height>
-          <format>R8G8B8</format>
-        </image>
-        <clip>
-          <near>0.02</near>
-          <far>550</far>
-        </clip>
-        <noise>
-          <type>gaussian</type>
-          <mean>0.0</mean>
-          <stddev>0.007</stddev>
-        </noise>
-      </camera>
-    </sensor>
-  </gazebo>
-
-  <!-- Object Detection Camera -->
-  <gazebo reference="object_camera_link">
-    <sensor type="camera" name="vehicle_object_camera">
-      <update_rate>${camera_fps}</update_rate>
-      <visualize>true</visualize>
-      <topic>camera_object</topic>
-      <!-- Bridged as camera_object -> /camera_object/image_raw and camera_object_info ->
-           /camera_object/info. Same Classic-plugin removal as the front camera above. -->
-      <gz_frame_id>object_camera_link</gz_frame_id>
-
-      <camera name="object">
-        <horizontal_fov>${object_camera_fov}</horizontal_fov>
         <image>
           <width>${image_width}</width>
           <height>${image_height}</height>

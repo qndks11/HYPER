@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""요청 시 /camera_object/image_raw 프레임 한 장을 파일로 저장하는 서비스.
+"""요청 시 /camera/image_raw 프레임 한 장을 파일로 저장하는 서비스.
 
 object_detection_node가 보는 것과 똑같은 카메라 토픽을 구독해 가장 최근 프레임을
 들고 있다가, std_srvs/srv/Trigger 서비스(`~/save`)가 불리면 그 프레임을
@@ -34,7 +34,7 @@ class ImageSaverService(Node):
         self._last_frame = None
 
         self.create_subscription(
-            Image, '/camera_object/image_raw', self._on_image, qos_profile_sensor_data)
+            Image, '/camera/image_raw', self._on_image, qos_profile_sensor_data)
         self.create_service(Trigger, '~/save', self._on_save)
 
         self.get_logger().info(
@@ -46,7 +46,7 @@ class ImageSaverService(Node):
     def _on_save(self, request, response):
         if self._last_frame is None:
             response.success = False
-            response.message = '아직 /camera_object/image_raw 프레임을 못 받았습니다'
+            response.message = '아직 /camera/image_raw 프레임을 못 받았습니다'
             return response
 
         try:

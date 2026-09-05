@@ -1,0 +1,14 @@
+
+label_snap_tolerance_m: 1.0
+
+labels:
+  # 이 블록은 label_waypoints.py가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+  stopline_1: {x: 4.951, y: 9.767}   # wp #19
+  course_end: {x: 11.890, y: 17.018}   # wp #0
+
+steps:
+  - {type: drive, until: stopline_1, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: stop, duration_s: 5.0}
+  - {type: drive, until: course_end, goal_checker: precise_goal_checker,
+     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}

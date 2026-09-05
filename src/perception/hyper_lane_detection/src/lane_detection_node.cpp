@@ -1,7 +1,12 @@
 #include "hyper_lane_detection/lane_detection_node.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <ctime>
+#include <filesystem>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 #include <cv_bridge/cv_bridge.h>
@@ -23,32 +28,58 @@ namespace
 // misconfigured region fails on every single frame, and at camera rate that would bury the log.
 constexpr int kProjectionErrorThrottleMs = 5000;
 
-// Default BEV geometry for the simulated front camera, matching what hyper_control's
-// parameters.yaml actually configures the Gazebo sensor with (153 deg HFOV, 15 deg of downward
-// pitch, 0.145 m ahead of body_link's origin once camera_setback and the housing are taken off
-// body_length/2). These are only defaults: the values are ROS parameters, and the numbers
-// themselves live in parameters.yaml and vehicle.xacro, which is where they should be changed.
-// They are duplicated here solely so the node still produces a metrically correct overlay when
-// launched with no configuration at all.
+// How often to repeat an image-write failure [ms]. A read-only or full save directory fails on
+// every attempt, and even at the modest save rate that would bury the rest of the log.
+constexpr int kImageSaveErrorThrottleMs = 5000;
+
+// Default recording rate [Hz] for `~/image_saving`. Slow on purpose: consecutive frames at camera
+// rate are near-duplicates, so a dataset gathered at 2 fps holds far more distinct views per
+// gigabyte than the same disk spent on 30 fps.
+constexpr double kDefaultImageSaveRateHz = 2.0;
+
+// Default BEV geometry for the simulated camera, matching what hyper_control's parameters.yaml
+// actually configures the Gazebo sensor with (70 deg HFOV, 5 deg of downward pitch, 0.113 m ahead
+// of body_link's origin once camera_setback and the housing are taken off body_length/2). These
+// are only defaults: the values are ROS parameters, and the numbers themselves live in
+// parameters.yaml and vehicle.xacro, which is where they should be changed. They are duplicated
+// here solely so the node still produces a metrically correct overlay when launched with no
+// configuration at all.
+//
+// The vehicle carries a single camera -- the Logitech C920 -- feeding both this node and
+// object_detection_node. It replaced a 153 deg ELP fisheye that was mounted lower and tilted
+// twice as far down, and that swap is what sets the near edge below: a 70 deg lens 5 deg off
+// horizontal simply cannot see the ground close in. See kSimFrontNearM.
 //
 // !! The height is the one number that is NOT a straight copy of parameters.yaml. Its
-// camera_height (1.2) is the camera joint's z in *body_link*, whereas CameraExtrinsics::height_m
+// camera_height (1.112) is the camera joint's z in *body_link*, whereas CameraExtrinsics::height_m
 // is height above the *ground plane* -- and body_link rides 0.3 m up, because vehicle.xacro hangs
 // the wheel joints at -wheel_radius/2 (-0.1) and the wheels have radius 0.2. Gazebo confirms it:
-// the spawned model's world z is exactly 0.3000. So the camera is 1.2 + 0.3 = 1.5 m over the
-// ground. Copying the 1.2 straight across drew the whole overlay at 1.2/1.5 = 0.80x true
-// distance, since dx scales linearly with height (see GroundProjection). Anything that changes
-// wheel_radius changes this constant too.
-//
-// The ground region reproduces roughly the coverage the old hand-picked ROI happened to have
-// (about 0.3..7.6 m ahead, +/-9 m across) at about its true pixel scale.
-constexpr double kSimFrontHorizontalFovRad = 2.67;
-constexpr double kSimFrontCameraHeightM = 1.5;
-constexpr double kSimFrontCameraPitchRad = 0.2617994;
-constexpr double kSimFrontCameraOffsetM = 0.145;
-constexpr double kSimFrontNearM = 0.3;
+// the spawned model's world z is exactly 0.3000. So the camera is 1.112 + 0.3 = 1.412 m over the
+// ground. Copying the 1.112 straight across would draw the whole overlay at 1.112/1.412 = 0.79x
+// true distance, since dx scales linearly with height (see GroundProjection). Anything that
+// changes wheel_radius changes this constant too.
+constexpr double kSimFrontHorizontalFovRad = 1.2217305;
+constexpr double kSimFrontCameraHeightM = 1.412;
+constexpr double kSimFrontCameraPitchRad = 0.087;
+constexpr double kSimFrontCameraOffsetM = 0.113;
+
+// Nearest ground the BEV shows [m]. This is a property of the lens and the mount, not a
+// preference: the bottom image row leaves the camera 26.5 deg below horizontal (atan(180 px /
+// 457 px focal) + the 5 deg mount pitch), so it strikes the ground 1.412/tan(26.5 deg) = 2.83 m
+// ahead in sim and 2.58 m on the car, whose camera sits 1.283 m up. Anything nearer than the
+// larger of those is unsampled black rows, so this is set just beyond it and shared by both.
+// Tilting the camera further down is what would buy back the near field.
+constexpr double kSimFrontNearM = 2.9;
 constexpr double kSimFrontFarM = 7.6;
-constexpr double kSimFrontHalfWidthM = 9.0;
+
+// Half the lateral extent [m]. A 70 deg lens spans +/-d*tan(35 deg) at distance d, so the far row
+// (7.6 m) is the widest ground the camera ever sees at +/-5.32 m; past that every column would be
+// black. The old 9.0 came from the ELP's 153 deg fisheye, which genuinely saw that wide.
+constexpr double kSimFrontHalfWidthM = 5.5;
+
+// Unchanged across the camera swap, deliberately: the detectors' pixel-denominated constants
+// (LaneDetector's kChainStepRadius, StoplineDetector's kMinStoplineAreaPx) are all scaled by
+// this, so holding it fixed keeps them meaning the same physical distance they always did.
 constexpr double kSimFrontMetersPerPixel = 0.028125;
 
 }  // namespace
@@ -68,9 +99,9 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   }
   input_backend_ = *backend;
 
-  // The front camera's BEV geometry. The defaults describe the simulated camera; a real vehicle
-  // overrides them (notably with explicit fx/fy/cx/cy, since a rectified real lens has neither a
-  // centered principal point nor equal focal lengths -- see hyper_camera's ELP calibration).
+  // The camera's BEV geometry. The defaults describe the simulated camera; the real vehicle
+  // overrides the one field that genuinely differs (the height above ground, since the sim's
+  // body_link rides higher than the real car's) -- see hyper_lane_detection/config/bev_real.yaml.
   BevSettings front_defaults;
   front_defaults.horizontal_fov_rad = kSimFrontHorizontalFovRad;
   front_defaults.extrinsics = CameraExtrinsics{
@@ -100,10 +131,10 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
     create_publisher<sensor_msgs::msg::PointCloud2>("/lane/bev/points", debug_image_qos);
 
   // A plain sensor_msgs/Image subscription either way -- under ros_raw this is
-  // Gazebo's bridged sim frame; under intra_process it's hyper_camera's ElpCameraPublisherNode
-  // component, loaded into the same ComposableNodeContainer as this node (see
-  // hyper_object_detection's perception.launch.py), so the frame arrives by pointer instead of
-  // over a serialized topic. Same callback either way.
+  // Gazebo's bridged sim frame; under intra_process it's hyper_camera's
+  // LogitechCameraPublisherNode component, loaded into the same ComposableNodeContainer as this
+  // node (see hyper_object_detection's perception.launch.py), so the frame arrives by pointer
+  // instead of over a serialized topic. Same callback either way.
   raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
     "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
 
@@ -145,6 +176,25 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
     drivable_image_publisher_ =
       create_publisher<sensor_msgs::msg::Image>("/lane/drivable/image_raw", debug_image_qos);
   }
+
+  // ---- Dataset recording (see handle_image_saving) ----
+  // Only the destination and the rate are parameters; whether recording is *running* is not, so
+  // that it can only ever be turned on by an explicit call, never by a stale config file.
+  image_save_dir_ = declare_parameter<std::string>("image_save_dir", "data/lane_detection");
+  const double image_save_rate_hz =
+    declare_parameter<double>("image_save_rate", kDefaultImageSaveRateHz);
+  if (image_save_rate_hz <= 0.0) {
+    RCLCPP_WARN(
+      get_logger(), "image_save_rate must be > 0 (got %.3f); falling back to %.1f Hz",
+      image_save_rate_hz, kDefaultImageSaveRateHz);
+    image_save_period_s_ = 1.0 / kDefaultImageSaveRateHz;
+  } else {
+    image_save_period_s_ = 1.0 / image_save_rate_hz;
+  }
+  image_saving_service_ = create_service<std_srvs::srv::SetBool>(
+    "~/image_saving",
+    std::bind(
+      &LaneDetection::handle_image_saving, this, std::placeholders::_1, std::placeholders::_2));
 
   RCLCPP_INFO(
     get_logger(), "LaneDetection started (input_backend=%s, bev_cloud_frame_id=%s)",
@@ -291,7 +341,7 @@ void LaneDetection::publish_drivable_area(
   const cv::Point2d origin = projection.origin_px();
 
   // Crop to the box actually worth publishing, before classifying. The BEV is 18 m wide at the
-  // configured half_width of 9 m, and its outer columns are stretched out of a handful of source
+  // configured half_width of 5.5 m, and its outer columns are stretched out of a handful of source
   // pixels near the frame edge -- keeping them would cost four times the work to hand the flood
   // fill its least trustworthy input. Rows are clipped from the far end (small row index = far
   // ground); columns symmetrically about the vehicle's own column.
@@ -376,7 +426,97 @@ void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstShare
     RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
     return;
   }
+  save_frame_if_due(cv_ptr->image);
   process_frame(cv_ptr->image, msg->header);
+}
+
+void LaneDetection::handle_image_saving(
+  const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+  std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+{
+  std::lock_guard<std::mutex> lock{image_save_mutex_};
+
+  const std::filesystem::path directory{image_save_dir_};
+  const std::string absolute = std::filesystem::absolute(directory).string();
+
+  if (!request->data) {
+    image_saving_enabled_ = false;
+    response->success = true;
+    response->message = "image saving off (" + absolute + ")";
+    RCLCPP_INFO(get_logger(), "image saving off");
+    return;
+  }
+
+  std::error_code error;
+  std::filesystem::create_directories(directory, error);
+  if (error && !std::filesystem::is_directory(directory)) {
+    // Reported as a failed service call rather than logged and forgotten: an operator who asked
+    // for a recording and got "success" would go drive the course and come back to nothing.
+    image_saving_enabled_ = false;
+    response->success = false;
+    response->message = "cannot create " + absolute + ": " + error.message();
+    RCLCPP_ERROR(get_logger(), "%s", response->message.c_str());
+    return;
+  }
+
+  // Restart the clock so the first frame after switching on is saved immediately, rather than up
+  // to a period later.
+  last_image_save_time_.reset();
+  image_saving_enabled_ = true;
+  response->success = true;
+  response->message = "image saving on at " + std::to_string(1.0 / image_save_period_s_) +
+    " fps -> " + absolute;
+  RCLCPP_INFO(get_logger(), "%s", response->message.c_str());
+}
+
+void LaneDetection::save_frame_if_due(const cv::Mat & image)
+{
+  if (!image_saving_enabled_ || image.empty()) {
+    return;
+  }
+
+  std::filesystem::path path;
+  {
+    std::lock_guard<std::mutex> lock{image_save_mutex_};
+    // Re-checked under the lock: the service may have switched recording off between the atomic
+    // read above and here, and the directory it named is only valid while it is on.
+    if (!image_saving_enabled_) {
+      return;
+    }
+
+    const rclcpp::Time now = get_clock()->now();
+    if (last_image_save_time_) {
+      // Guards against a backwards jump too (a sim reset, or the first message after switching to
+      // sim time): a negative elapsed would otherwise stall recording until the clock caught up.
+      const double elapsed = (now - *last_image_save_time_).seconds();
+      if (elapsed >= 0.0 && elapsed < image_save_period_s_) {
+        return;
+      }
+    }
+    last_image_save_time_ = now;
+
+    // Wall clock in the filename, not the node clock: the name is for a human matching frames
+    // against a run, and a sim clock starting at 0 would collide across every run.
+    const auto wall = std::chrono::system_clock::now();
+    const auto wall_time = std::chrono::system_clock::to_time_t(wall);
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+      wall.time_since_epoch()).count() % 1000;
+    std::tm broken_down{};
+    localtime_r(&wall_time, &broken_down);
+
+    std::ostringstream name;
+    name << "lane_" << std::put_time(&broken_down, "%Y%m%d_%H%M%S") << '_' << std::setfill('0')
+         << std::setw(3) << millis << ".png";
+    path = std::filesystem::path{image_save_dir_} / name.str();
+  }
+
+  // Written outside the lock: encoding a PNG is the expensive part of this function, and holding
+  // the mutex across it would make the service call block for a frame's worth of compression.
+  if (!cv::imwrite(path.string(), image)) {
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(), *get_clock(), kImageSaveErrorThrottleMs, "failed to write %s",
+      path.string().c_str());
+  }
 }
 
 void LaneDetection::process_frame(

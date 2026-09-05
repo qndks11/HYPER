@@ -30,15 +30,6 @@ labels:
   course_end: last
 
 steps:
-  # 골 하나, 코스 전부. 컨트롤러는 기본 FollowPath(MPPI)가 아니라 전진
-  # RPP(ForwardFollowPath)입니다 -- 이 미션은 "녹화한 경로를 그대로, 빠르게" 한 바퀴
-  # 도는 게 목적이라, 장애물을 보면 비켜 나가는 MPPI보다 경로를 절대 벗어나지 않고
-  # 순항 속도(desired_linear_vel 2.22 m/s)를 그대로 내는 RPP가 맞습니다.
-  # 앞이 막히면 RPP는 제어를 포기하고 액션이 abort 됩니다 -- 여기서는 obstacle_hold_s를
-  # 켜지 않으므로 그대로 미션 실패입니다. 코스에 장애물을 두고 돌릴 거면 MPPI
-  # (controller 줄을 지우면 기본값)로 돌리세요.
-  #
-  # decel_profile_a도 cancel_on_arrival_m도 켜지 않습니다 -- 뒤에 아무 스텝도 없으니
-  # 마지막 몇 미터를 RPP의 approach 감속(approach_velocity_scaling_dist 1.0 m)으로
-  # 들어가도 잃을 시간이 없고, 그만큼 골 판정을 그대로 받는 쪽이 단순합니다.
+  # To do MPPI, Use the second one. To do RPP, Use the first one.
   - {type: drive, until: course_end, controller: ForwardFollowPath}
+  # - {type: drive, until: course_end}

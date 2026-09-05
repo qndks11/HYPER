@@ -118,16 +118,15 @@ def generate_launch_description():
             stage('odometry.launch.py',
                   datum_site=LaunchConfiguration('datum_site'),
                   use_sim_time='false')]),
-        # Real vehicle: hyper_camera owns both physical cameras and publishes plain image
-        # topics -- the ELP publisher loads into the same component container as
+        # Real vehicle: hyper_camera owns the one physical camera (Logitech C920) and publishes
+        # a plain image topic. Its publisher component loads into the same container as
         # lane_detection_node for zero-copy intra-process delivery (lane_input_backend
-        # intra_process); the Logitech publisher just feeds object_detection_node's ordinary
-        # subscription (object_input_backend usb_camera). See perception.launch.py.
+        # intra_process); object_detection_node picks the same frames off that topic as an
+        # ordinary out-of-process subscriber. See perception.launch.py.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage(
                 'perception.launch.py',
-                lane_input_backend='intra_process',
-                object_input_backend='usb_camera')]),
+                lane_input_backend='intra_process')]),
         # interface.launch.py (hyper_interface's Arduino serial bridge) starts alongside
         # behavior since it only needs /velocity + /steering_angle to exist -- late subscriber
         # join works fine with ROS 2 discovery either way. It subscribes to those topics

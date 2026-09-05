@@ -11,9 +11,10 @@ namespace hyper_lane_detection
 
 /// Pinhole intrinsics of the frame the homography is built against, in that frame's own pixels.
 /// This must be the *rectified* camera matrix whenever the incoming frames are rectified (the
-/// leading 3x3 block of CameraInfo's P, which is what hyper_camera's ElpCameraCapture already
-/// remaps every real ELP frame into), not the raw K -- a homography derived from raw intrinsics
-/// applied to rectified pixels is wrong by exactly the rectification it ignores.
+/// leading 3x3 block of CameraInfo's P), not the raw K -- a homography derived from raw
+/// intrinsics applied to rectified pixels is wrong by exactly the rectification it ignores.
+/// Nothing rectifies anything in this stack today: the vehicle's one camera is a normal ~70 deg
+/// lens fed through as captured, so both backends come in via from_horizontal_fov() below.
 struct CameraIntrinsics
 {
   double fx{0.0};

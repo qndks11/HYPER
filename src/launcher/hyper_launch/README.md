@@ -72,13 +72,18 @@ Terminal 5: GPS Monitor (optional)
 ros2 run hyper_localization gps_accuracy_gui.py
 ```
 
+Terminal 6: Mission panel (optional)
+```bash
+ros2 run hyper_rqt hyper_panel 
+```
+
 ### Real Car Joystick & Waypoint record
-Terminal 6: Joystick
+Terminal 7: Joystick
 ```bash
 ros2 launch hyper_control joystick.launch.py joystick_publish_period:=0.0
 ```
 
-Terminal 7: Waypoint Recorder (Optional)
+Terminal 8: Waypoint Recorder (Optional)
 ```
 ros2 launch hyper_waypoint record.launch.py \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv \
@@ -86,21 +91,16 @@ ros2 launch hyper_waypoint record.launch.py \
 ```
 
 ### Real car Mission
-Terminal 6: Perception
+Terminal 7: Perception
 ```bash
 ros2 launch hyper_launch perception.launch.py \
-  lane_input_backend:=intra_process object_input_backend:=usb_camera
+  lane_input_backend:=intra_process
 ```
 
-Terminal 7: Mission
+Terminal 8: Mission
 ```bash
 ros2 launch hyper_launch behavior.launch.py \
   use_sim_time:=false \
   mission:=mission \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
-```
-
-Terminal 8: Mission panel (optional)
-```bash
-ros2 run hyper_rqt hyper_panel 
 ```
