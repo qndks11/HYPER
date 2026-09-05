@@ -84,40 +84,18 @@ def _launch_setup(context, config, datums_yaml):
     # ]
 
     # -----------------------------------------------------------------
-    # RTK GNSS 진행방향(headMot) -> 절대 yaw 공급원. 지금은 띄우지 않는다.
-    # 절대 방위는 IMU 지자기 yaw가 담당하고(dual_ekf_navsat.yaml의 ekf_global
-    # imu0_config 인덱스 5 = true), 이 노드가 내보내던 /imu/heading은 어느 필터도
-    # 구독하지 않는다.
-    # 되돌리는 법: 아래 주석을 풀고 return 문의 `gps_heading,`도 같이 살린 뒤,
-    # dual_ekf_navsat.yaml의 ekf_global에 imu1 블록을 다시 넣고 imu0_config의
-    # 인덱스 5(yaw)를 false로 내린다(절대 방위 관측이 둘이면 서로 싸운다).
-    # 스크립트 hyper_localization/scripts/gps_heading.py는 그대로 남겨 두었다.
+    # 절대 방위(yaw) 공급원: 듀얼 GNSS moving-base 헤딩.
+    # 이 launch 파일은 더 이상 헤딩 노드를 띄우지 않는다 -- imu/heading은 이제
+    # hyper_rtk/launch/rtk.launch.py의 rover 쪽 ublox_gps_node가 직접 낸다
+    # (dual_ekf_navsat.yaml의 ekf_global imu1 참고). 실차에서는 odometry.launch.py와
+    # 별도로 hyper_rtk를 같이 띄워야 imu/heading이 나온다.
     #
-    #   확립 -> 주행 중 첫 GPS 진행방향
-    #   이후 -> GPS 진행방향(course over ground)으로 자이로 드리프트 교정
-    # 실차에서는 /ublox_gps_node/navpvt의 heading/headAcc를, 시뮬레이션처럼 NavPVT가
-    # 없으면 /gps/fix 연속 측정값 차분을 썼다.
+    # 과거에 쓰던 진행방향(course-over-ground) 기반 gps_heading 노드는
+    # scripts/gps_heading.py에 남아 있지만 지금은 어디서도 실행하지 않는다 --
+    # 그 파일의 docstring에 배경이 정리되어 있다.
     # -----------------------------------------------------------------
-    # gps_heading = Node(
-    #     package='hyper_localization',
-    #     executable='gps_heading.py',
-    #     name='gps_heading',
-    #     output='screen',
-    #     parameters=[clock_override, {
-    #         # sim GPS 노이즈는 ~1 cm(vehicle.xacro)라 실차 기본값 0.3 m는 지나치게
-    #         # 비관적이다. 그대로 두면 기본 기선 0.5 m에서 각도 불확실도가
-    #         # atan(0.3/0.5)=31deg로 튀어 max_head_acc(25deg)에 전부 기각되고 GPS
-    #         # 코스 보정이 한 번도 발동하지 못한다. 0.05 m면 atan(0.05/0.5)=6deg.
-    #         # (기선 자체는 gps_heading이 min_fix_displacement를 넘을 때까지 누적하므로
-    #         #  거리 임계값은 sim에서도 기본값 0.5 m를 그대로 쓴다.)
-    #         # 실차는 /ublox_gps_node/navpvt가 우선 소스이므로 기본값을 유지한다.
-    #         **({'fix_position_stddev': 0.05} if use_sim_time else {}),
-    #     }],
-    # )
 
     return [
-        # gps_heading,
-
         # -----------------------------------------------------------------
         # 노드 1) 로컬 EKF (엔코더 + IMU -> odom)
         # -----------------------------------------------------------------

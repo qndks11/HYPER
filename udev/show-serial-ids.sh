@@ -57,5 +57,5 @@ cat <<'EOF'
 위 값을 udev/99-hyper-serial.rules에 채운 뒤:
   sudo cp udev/99-hyper-serial.rules /etc/udev/rules.d/
   sudo udevadm control --reload-rules && sudo udevadm trigger
-  ls -l /dev/tty_Ardusimple /dev/tty_ebimu /dev/tty_arduino
+  ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/tty_arduino
 EOF

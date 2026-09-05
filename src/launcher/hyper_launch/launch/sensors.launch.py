@@ -13,9 +13,10 @@ from launch_ros.actions import Node
 #                                          (input_backend:=direct_usb, see perception.launch.py)
 #   Logitech C920                       -> owned directly by object_detection_node itself
 #                                          (no ROS topic, see perception.launch.py)
-#   E2BOX EBIMU-9DOFV5 (hyper_ebimu)    -> /imu                    (EKF)
+#   E2BOX EBIMU-9DOFV5 (hyper_ebimu)    -> /imu                    (EKF roll/pitch + gyro)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
-#   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
+#   u-blox base + NTRIP (hyper_rtk)     -> /gps/fix                (navsat_transform)
+#   u-blox rover, moving-base (hyper_rtk) -> /imu/heading           (EKF absolute yaw)
 #
 # No camera is launched here at all -- usb_cam has been removed from this workspace entirely
 # (see deps.repos); hyper_camera now provides both USB cameras' driver nodes (see

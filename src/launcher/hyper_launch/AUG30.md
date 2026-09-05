@@ -34,21 +34,29 @@ GPS 정확도 모니터(hAcc/vAcc/fix/RTK 비트를 큰 글씨로) GUI가 같이
 | 수평 정확도 | GUI의 `Horizontal (hAcc)` | **FIXED면 0.02 m 근처**, FLOAT는 0.3~1 m, 단독측위는 1~3 m |
 | NTRIP 보정이 오는가 | `ros2 topic hz /rtcm` | 꾸준히 올라와야 함. 0이면 caster 연결 실패 |
 | 바퀴 오도메트리 | `ros2 topic hz /odom` | 나와야 함. 없으면 아두이노 브리지가 죽은 것 |
+| 헤딩(듀얼 GNSS)이 나오는가 | `ros2 topic hz /imu/heading` | rover가 UART2로 base 보정을 받아야 나옴. 0이면 UART2 배선/u-center 설정부터 |
 | EKF가 실제로 도는가 | `ros2 topic hz /odometry/filtered_map` | **30 Hz**. 0이면 녹화해 봐야 소용없음 |
 
 명령줄로 직접 보고 싶으면:
 
 ```bash
-ros2 topic echo /ublox_gps_node/navpvt --field flags
+ros2 topic echo /ublox_gps_node_base/navpvt --field flags
 #   flags & 192 -> 128 = RTK FIXED,  64 = RTK FLOAT,  0 = 보정 없음
 #   flags & 1   -> GNSS_FIX_OK
+
+ros2 topic echo /ublox_gps_node_rover/navrelposned --field flags
+#   carrSoln(bit 3-4) == 2 -> fixed, 1 -> float, 0 -> none
+#   relPosHeadingValid(bit 8), gnssFixOK(bit 2), diffSoln(bit 1) 도 서 있어야 함
 ```
 
 ### 막히면
 
 - `/rtcm`이 0 Hz → [ntrip_params.yaml](../../sensing/hyper_rtk/config/ntrip_params.yaml)의
   host/mountpoint/계정. 이 파일은 gitignore 대상이라 장비마다 다릅니다.
-- `/gps/fix`가 아예 없음 → `ls -l /dev/tty_Ardusimple` (udev 심볼릭 링크)
+- `/gps/fix`가 아예 없음 → `ls -l /dev/tty_ublox_base` (udev 심볼릭 링크)
+- `/imu/heading`이 아예 없음 → `ls -l /dev/tty_ublox_rover`, 그다음 UART2 배선(base
+  TXD2 → rover RXD2, GND 공통)과 u-center 설정(base UART2에 RTCM3+4072.0, rover UART2
+  input) — [hyper_rtk/README.md](../../sensing/hyper_rtk/README.md) 참고
 - FLOAT에서 FIXED로 안 올라감 → 하늘이 트인 곳에서 몇 분 더. 여기서 FIXED를 못 보면
   **2번으로 넘어가지 마세요.** 정확도 1 m짜리 fix로 녹화한 코스는 3번에서 쓸 수 없습니다.
 - **IMU(EBIMU-9DOFV5)가 안 붙음** → GUI의 "IMU link"가 NO DATA면 USB-UART 포트부터

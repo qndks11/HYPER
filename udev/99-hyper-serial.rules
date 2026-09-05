@@ -1,20 +1,21 @@
 # HYPER 실차 USB 시리얼 장치 고정 심볼릭 링크
 #
-# 왜 필요한가: 차에는 USB 시리얼 장치가 최소 셋(RTK 수신기, IMU 어댑터, Arduino
-# 인터페이스 보드) 꽂혀 있는데 /dev/ttyUSB* 번호는 꽂힌 순서/부팅 타이밍으로 정해진다.
-# 번호로 잡아 두면 어느 날 IMU가 안 붙거나 조향 명령이 엉뚱한 포트로 나간다.
-# 이 규칙이 만드는 이름을 각 노드가 그대로 쓴다:
+# 왜 필요한가: 차에는 USB 시리얼 장치가 최소 넷(RTK 수신기 2대 -- moving-base 헤딩용
+# base+rover, IMU 어댑터, Arduino 인터페이스 보드) 꽂혀 있는데 /dev/ttyUSB* 번호는
+# 꽂힌 순서/부팅 타이밍으로 정해진다. 번호로 잡아 두면 어느 날 IMU가 안 붙거나
+# 조향 명령이 엉뚱한 포트로 나간다. 이 규칙이 만드는 이름을 각 노드가 그대로 쓴다:
 #
-#   /dev/tty_Ardusimple  -> hyper_rtk/launch/rtk.launch.py  (ublox_gps_node device)
-#   /dev/tty_ebimu       -> hyper_ebimu/config/ebimu.yaml   (port)
-#   /dev/tty_arduino     -> hyper_interface/config/parameters.yaml (serial_port)
+#   /dev/tty_ublox_base   -> hyper_rtk/launch/rtk.launch.py (ublox_gps_node_base device)
+#   /dev/tty_ublox_rover  -> hyper_rtk/launch/rtk.launch.py (ublox_gps_node_rover device)
+#   /dev/tty_ebimu        -> hyper_ebimu/config/ebimu.yaml   (port)
+#   /dev/tty_arduino      -> hyper_interface/config/parameters.yaml (serial_port)
 #
 # 설치:
 #   sudo cp udev/99-hyper-serial.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
-#   ls -l /dev/tty_Ardusimple /dev/tty_ebimu /dev/tty_arduino
+#   ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/tty_arduino
 #
-# 세 심볼릭 링크가 다 보이면 끝이다. 하나라도 안 보이면 아래 "매칭 값 확인" 참고.
+# 네 심볼릭 링크가 다 보이면 끝이다. 하나라도 안 보이면 아래 "매칭 값 확인" 참고.
 #
 # ── 매칭 값 확인 ────────────────────────────────────────────────────────────
 # 저장소의 udev/show-serial-ids.sh가 지금 꽂혀 있는 장치의 idVendor/idProduct/serial/
@@ -38,10 +39,21 @@
 #      KERNELS 값은 show-serial-ids.sh의 "USB port" 열에 나온다.
 
 # ---------------------------------------------------------------------------
-# 1) Ardusimple simpleRTK2B (u-blox ZED-F9P) -- USB로 직접 CDC-ACM으로 잡힌다.
-#    이 이름은 rtk.launch.py가 이미 쓰고 있던 이름이라 그대로 유지한다.
+# 1) Ardusimple simpleRTK2B (u-blox ZED-F9P) x2 -- moving-base 헤딩용 base+rover.
+#    USB로 직접 CDC-ACM으로 잡힌다. 두 보드가 idVendor/idProduct까지 완전히 같아서
+#    (1546:01a9) 이 값만으로는 구분이 안 된다. 이 보드는 ATTRS{serial}도 안 낸다
+#    (udevadm info -a로 보면 첫 ATTRS{serial}이 PCI 호스트 컨트롤러(0000:00:14.0)
+#    것이지 이 장치 것이 아니다) -- 그래서 시리얼 대신 물리 USB 포트(KERNELS)로
+#    고정한다. 즉 "이 컴퓨터의 이 USB 포트에 꽂힌 보드가 base/rover다"라는
+#    약속이 되므로, 실차에서 그 포트에 계속 꽂아 두거나 포트가 바뀌면 아래 값도
+#    다시 뽑아야 한다:
+#      udevadm info -a -n /dev/ttyACM0 | grep -m1 'KERNELS=="[0-9]'
+#    (또는 ./udev/show-serial-ids.sh의 "USB port" 열) -- 뒤쪽 안테나 보드를 base,
+#    앞쪽을 rover로 정한다. base=1-3, rover=1-2는 이 차의 USB 포트를 뽑아서 확인한
+#    값이다 -- 다른 컴퓨터/포트 배치로 바뀌면 위 방법으로 다시 뽑아 채울 것.
 # ---------------------------------------------------------------------------
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK+="tty_Ardusimple", MODE="0666"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", KERNELS=="1-3", SYMLINK+="tty_ublox_base", MODE="0666"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", KERNELS=="1-2", SYMLINK+="tty_ublox_rover", MODE="0666"
 
 # ---------------------------------------------------------------------------
 # 2) EBIMU-9DOFV5 USB-UART 어댑터 -- 모듈 자체엔 USB가 없고 어댑터로 물린다
