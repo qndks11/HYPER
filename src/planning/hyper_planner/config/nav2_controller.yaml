@@ -154,7 +154,7 @@ controller_server:
       # /transformed_global_plan(컨트롤러가 실제로 추종 중인 참조 경로)까지 안 나가서
       # follow_path.rviz가 통째로 비어 보입니다. 마커 생성은 20 Hz마다 도므로 대회 주행에서
       # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
-      visualize: true
+      visualize: false
 
       # vx_min = 0 = 후진 금지. MPPI가 후진 궤적을 아예 샘플링하지 않습니다.
       # (후진이 필요한 주차 구간은 별도의 ReverseFollowPath(RPP)가 담당합니다.)
