@@ -40,7 +40,8 @@ import serial
 from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from std_msgs.msg import Float64
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import Bool, Float64
 
 _SOF = bytes([0xAA, 0x55])
 
@@ -77,6 +78,7 @@ class ArduinoInterfaceNode(Node):
 
         self._velocity = 0.0
         self._steering_angle = 0.0
+        self._estop_active = False
         self._last_velocity_time = self.get_clock().now()
         self._last_steering_time = self.get_clock().now()
 
@@ -109,6 +111,12 @@ class ArduinoInterfaceNode(Node):
 
         self.create_subscription(Float64, '/velocity', self._velocity_callback, 10)
         self.create_subscription(Float64, '/steering_angle', self._steering_callback, 10)
+        # Latched by hyper_control's estop_controller_node (joystick button).
+        # transient_local matches its publisher so this node picks up an
+        # already-latched e-stop even if it starts afterwards.
+        self.create_subscription(
+            Bool, '/estop', self._estop_callback,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self._steering_actual_pub = self.create_publisher(Float64, '/steering_angle_actual', 10)
         self._velocity_actual_pub = self.create_publisher(Float64, '/velocity_actual', 10)
         self._odom_pub = self.create_publisher(Odometry, '/odom', 10)
@@ -125,6 +133,23 @@ class ArduinoInterfaceNode(Node):
             -self._max_steering_angle, min(self._max_steering_angle, msg.data))
         self._last_steering_time = self.get_clock().now()
 
+    def _estop_callback(self, msg: Bool):
+        if msg.data == self._estop_active:
+            return
+        self._estop_active = msg.data
+        if msg.data:
+            self.get_logger().warn('EMERGENCY STOP active -- ignoring /velocity, /steering_angle')
+            # Don't wait for the next timer tick to actually halt.
+            self._send_packet(0.0, 0.0)
+        else:
+            self.get_logger().info('Emergency stop released -- following /velocity again')
+
+    def _send_packet(self, velocity: float, steering_angle: float):
+        try:
+            self._serial.write(_make_packet(velocity, steering_angle))
+        except serial.SerialException as exc:
+            self.get_logger().error(f'Serial write failed: {exc}', throttle_duration_sec=1.0)
+
     def _timer_callback(self):
         now = self.get_clock().now()
         timeout_ns = self._command_timeout * 1e9
@@ -137,10 +162,14 @@ class ArduinoInterfaceNode(Node):
         steering_angle = self._steering_angle if (now - self._last_steering_time).nanoseconds \
             < timeout_ns else 0.0
 
-        try:
-            self._serial.write(_make_packet(velocity, steering_angle))
-        except serial.SerialException as exc:
-            self.get_logger().error(f'Serial write failed: {exc}', throttle_duration_sec=1.0)
+        # E-stop overrides every command source: whoever is publishing
+        # /velocity (joystick or nav2 via cmd_vel_to_ackermann_node) keeps
+        # publishing, it just stops reaching the motors until resume.
+        if self._estop_active:
+            velocity = 0.0
+            steering_angle = 0.0
+
+        self._send_packet(velocity, steering_angle)
 
         # Drain and line-buffer whatever text the Arduino sent (boot banner,
         # STEER,<target>,<current> telemetry) -- buffered rather than treating

@@ -80,6 +80,20 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_panel')),
     )
 
+    # 조이스틱 버튼 비상정지. joystick.launch.py와 달리 /velocity +
+    # /steering_angle을 전혀 publish하지 않고 /estop(Bool, latched)만 내보내므로,
+    # 미션 스택과 같은 트리에 있어도 cmd_vel_to_ackermann_node와 충돌하지 않습니다.
+    #
+    # estop.launch.py는 기본적으로 joy_node를 띄우지 않으므로(그 파일 주석 참고)
+    # 여기서는 켜 줍니다 -- 미션 모드에는 joystick.launch.py가 없어서 /joy를
+    # 내보내는 노드가 달리 없고, 그러면 비상정지 버튼이 조용히 죽습니다.
+    estop = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_control'),
+            'launch', 'estop.launch.py')),
+        launch_arguments={'launch_joy_node': 'true'}.items(),
+    )
+
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
@@ -140,6 +154,9 @@ def generate_launch_description():
                   # nav2_controller.yaml의 use_sim_time을 덮어쓰므로 인자만 넘기면 됩니다.
                   use_sim_time='false'),
             stage('interface.launch.py'),
+            # 미션 취소 서비스(mission_manager/cancel)를 부르므로 behavior와 같은
+            # 시점에 띄웁니다. 서비스가 아직 없더라도 정지 자체는 동작합니다.
+            estop,
             mission_panel,
         ]),
     ])

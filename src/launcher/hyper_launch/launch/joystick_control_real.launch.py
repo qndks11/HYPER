@@ -60,6 +60,14 @@ def generate_launch_description():
         }.items(),
     )
 
+    # 조이스틱 버튼 비상정지. estop.launch.py는 /joy를 구독만 하므로, 위
+    # joystick.launch.py가 띄운 joy_node 하나를 그대로 같이 씁니다.
+    estop = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_control'),
+            'launch', 'estop.launch.py')),
+    )
+
     # 웨이포인트 레코더 + 조작판 GUI. auto_start:=false라 Record를 누를 때까지
     # 기다립니다(record.launch.py 주석 참고).
     waypoint_record = IncludeLaunchDescription(
@@ -111,6 +119,7 @@ def generate_launch_description():
         stage('sensors.launch.py'),
         stage('interface.launch.py'),
         joystick,
+        estop,
         # use_sim_time=false가 핵심입니다. 실차에는 /clock을 내보내는 노드가 없으므로
         # dual_ekf_navsat.yaml에 박혀 있는 use_sim_time: true를 그대로 두면 ekf_local /
         # ekf_global / navsat_transform이 멈춘 시계 위에서 돌며 아무것도 publish하지

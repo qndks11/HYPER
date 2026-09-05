@@ -61,7 +61,6 @@ Terminal 3: Localization
 ros2 launch hyper_launch odometry.launch.py datum_site:=school use_sim_time:=false
 ```
 
-
 Terminal 4: Arduino
 ```bash
 ros2 launch hyper_launch interface.launch.py 
@@ -78,26 +77,38 @@ ros2 run hyper_rqt hyper_panel
 ```
 
 ### Real Car Joystick & Waypoint record
-Terminal 7: Joystick
+Terminal 7: Emergency stop
+
+```bash
+ros2 launch hyper_control estop.launch.py estop_button_index:=1 resume_button_index:=0
+```
+
+Terminal 8: Joystick
 ```bash
 ros2 launch hyper_control joystick.launch.py joystick_publish_period:=0.0
 ```
 
-Terminal 8: Waypoint Recorder (Optional)
-```
+Terminal 9: Waypoint Recorder (Optional)
+```bash
 ros2 launch hyper_waypoint record.launch.py \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv \
   min_spacing_m:=0.5 use_record_gui:=true
 ```
 
 ### Real car Mission
-Terminal 7: Perception
+Terminal 7: Emergency Stop (optional)
+```bash
+ros2 launch hyper_control estop.launch.py \
+  estop_button_index:=1 resume_button_index:=0 launch_joy_node:=true
+```
+
+Terminal 8: Perception
 ```bash
 ros2 launch hyper_launch perception.launch.py \
   lane_input_backend:=intra_process
 ```
 
-Terminal 8: Mission
+Terminal 9: Mission
 ```bash
 ros2 launch hyper_launch behavior.launch.py \
   use_sim_time:=false \

@@ -35,7 +35,7 @@ constexpr int kImageSaveErrorThrottleMs = 5000;
 // Default recording rate [Hz] for `~/image_saving`. Slow on purpose: consecutive frames at camera
 // rate are near-duplicates, so a dataset gathered at 2 fps holds far more distinct views per
 // gigabyte than the same disk spent on 30 fps.
-constexpr double kDefaultImageSaveRateHz = 2.0;
+constexpr double kDefaultImageSaveRateHz = 4.0;
 
 // Default BEV geometry for the simulated camera, matching what hyper_control's parameters.yaml
 // actually configures the Gazebo sensor with (70 deg HFOV, 5 deg of downward pitch, 0.113 m ahead
