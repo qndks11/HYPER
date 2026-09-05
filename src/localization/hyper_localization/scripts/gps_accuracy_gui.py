@@ -3,10 +3,15 @@
 # GPS 정확도 + 위치/방위 모니터 GUI
 #
 # 세 토픽을 한 창에 모은다:
-#   /ublox_gps_node/navpvt   (ublox_msgs/NavPVT)  -> hAcc/vAcc, fix, RTK, 위성수
+#   /ublox_gps_node_base/navpvt  (ublox_msgs/NavPVT)  -> hAcc/vAcc, fix, RTK, 위성수
 #   /odometry/gps            (nav_msgs/Odometry)  -> GPS만으로 푼 map 좌표 x/y
 #   /odometry/filtered_map   (nav_msgs/Odometry)  -> EKF 융합 map 좌표 x/y + yaw
 #   /imu                     (sensor_msgs/Imu)    -> E2BOX EBIMU-9DOFV5 링크 상태
+#
+# navpvt_topic 기본값이 base 쪽인 이유: hAcc/vAcc/RTK 비트는 절대 위치(base)의
+# 정확도지, moving-base 헤딩(rover)의 정확도가 아니다 -- rover의 헤딩 신뢰도는
+# /imu/heading의 orientation_covariance[8]에 따로 있다(hyper_rtk/launch/rtk.launch.py가
+# rover의 navheading을 거기로 remap).
 #
 # x/y를 두 벌 다 띄우는 이유: navsat_transform이 내는 /odometry/gps는 GPS만의
 # 답이고 ekf_global이 내는 /odometry/filtered_map은 IMU/엔코더까지 섞은 답이라,
@@ -21,8 +26,8 @@
 # hAcc/vAcc는 NavPVT에서만 온다. NavSatFix(/gps/fix)의 position_covariance로
 # hAcc는 역산되지만(covariance = hAcc^2) vAcc/fix_type/num_sv/RTK 비트는 없다.
 #
-# yaw: EBIMU-9DOFV5는 지자기 융합 9축이라 켜는 순간부터 절대 방위가 있고, ekf_global이
-# 그 yaw를 그대로 먹는다(dual_ekf_navsat.yaml). 그래서 초기 yaw 캘리브레이션 절차는
+# yaw: 절대 방위는 이제 듀얼 GNSS moving-base 헤딩(rover의 /imu/heading)이 ekf_global에
+# 절대 yaw로 들어간다(dual_ekf_navsat.yaml). 그래서 초기 yaw 캘리브레이션 절차는
 # 없앴다. 나침반은 EKF yaw(/odometry/filtered_map, GPS가 끊겨도 odom으로 propagate됨)를
 # 그린다.
 #
@@ -511,7 +516,7 @@ class GpsAccuracyNode(Node):
             return self.declare_parameter(
                 name, default).get_parameter_value().string_value
 
-        self.navpvt_topic = param('navpvt_topic', '/ublox_gps_node/navpvt')
+        self.navpvt_topic = param('navpvt_topic', '/ublox_gps_node_base/navpvt')
         self.gps_topic = param('gps_odom_topic', '/odometry/gps')
         self.ekf_topic = param('ekf_odom_topic', '/odometry/filtered_map')
         # hyper_ebimu(EBIMU-9DOFV5)가 내는 토픽. 실차/시뮬레이션 모두 EKF가 먹는

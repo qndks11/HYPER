@@ -15,7 +15,8 @@ from launch_ros.actions import Node
 #                                          container for zero-copy delivery
 #   E2BOX EBIMU-9DOFV5 (hyper_ebimu)    -> /imu                    (EKF)
 #   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
-#   u-blox + NTRIP (hyper_rtk)         -> /gps/fix                (navsat_transform)
+#   u-blox base + NTRIP (hyper_rtk)     -> /gps/fix                (navsat_transform)
+#   u-blox rover, moving-base (hyper_rtk) -> /imu/heading           (EKF absolute yaw)
 #
 # No camera is launched here at all -- usb_cam has been removed from this workspace entirely
 # (see deps.repos); hyper_camera provides the driver node for the vehicle's one camera (see

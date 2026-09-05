@@ -52,12 +52,12 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_rviz')),
     )
 
-    # GPS 정확도 모니터. /ublox_gps_node/navpvt의 hAcc/vAcc를 큰 글씨로 띄우고,
+    # GPS 정확도 모니터. /ublox_gps_node_base/navpvt의 hAcc/vAcc를 큰 글씨로 띄우고,
     # IMU(E2BOX EBIMU-9DOFV5) 링크 상태(/imu 수신 여부와 Hz)도 같이 보여줍니다.
     # 조건 없이 항상 뜹니다 -- 어떤 토픽도 publish하지 않는 순수 구독자라 nav2든
     # 조이스틱이든 아무것과도 충돌하지 않고, 실차에서 "지금 GPS를 믿어도 되는가"는
-    # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node)보다 먼저
-    # 떠도 무방합니다: NavPVT가 안 오는 동안은 NO DATA (stale)로 표시됩니다.
+    # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node_base/_rover)보다
+    # 먼저 떠도 무방합니다: NavPVT가 안 오는 동안은 NO DATA (stale)로 표시됩니다.
     gps_accuracy_gui = Node(
         package='hyper_localization',
         executable='gps_accuracy_gui.py',

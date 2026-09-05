@@ -122,24 +122,15 @@ ekf_global:
     odom1_relative: false
 
     imu0: imu
-    # yaw(인덱스 5) = true -- 이 필터의 절대 방위 기준은 IMU(지자기) yaw다.
-    # map 프레임은 점프해도 되는 좌표계이므로(연속성은 ekf_local이 만드는 odom이
-    # 책임진다) 절대 방위를 여기에서만 먹인다. 지자기 교란으로 yaw가 튀면 map->odom
-    # 변환이 같이 튀지만 odom 프레임 자체는 흔들리지 않는다.
-    # 실차 IMU는 E2BOX EBIMU-9DOFV5(hyper_ebimu)이고, 9축(지자기 융합) AHRS라 켜는
-    # 순간부터 절대 방위가 나온다. 드라이버가 body_link 프레임으로 /imu에 바로
-    # publish하므로 중간 relay가 없다(sensors.launch.py -> ebimu.launch.py).
-    # 덕분에 초기 yaw를 세우는 별도 절차(0.5 m 굴리기 캘리브레이션)도 필요 없다.
-    # 다만 EBIMU 축이 REP-103 ENU와 맞는지는 실차 미확인이다(hyper_ebimu/README.md).
-    # 아는 방위로 세우고 `ros2 topic echo /imu --field orientation`의 yaw가 그 방위
-    # (북=90deg)로 나오는지 반드시 확인할 것 -- 틀리면 map 프레임 heading이 그 각도만큼
-    # 통째로 돌아간 채 출발한다. 보정이 필요하면 odometry.launch.py의 imu_enu_relay
-    # 주석을 참고한다.
-    # yaw 공분산은 ebimu.yaml의 orientation_covariance[8](현재 0.02, 자리표시자)이
-    # 그대로 이 필터의 신뢰도가 되므로 실차 데이터로 다시 잡아야 한다.
-    # roll/pitch는 중력으로 관측되므로 그대로 신뢰한다.
+    # yaw(인덱스 5) = false -- 이 필터의 절대 방위 기준은 이제 IMU(지자기)가 아니라
+    # 아래 imu1(듀얼 GNSS moving-base 헤딩)이다. EBIMU-9DOFV5의 지자기 yaw는 차량
+    # 모터/금속 근처 자기 교란에 흔들릴 수 있어서, 정지 상태에서도 유효하고 자기
+    # 간섭에 영향받지 않는 GNSS 헤딩으로 교체했다(2026-09, hyper_rtk 2보드 구성).
+    # roll/pitch는 중력으로 관측되므로 그대로 신뢰해 true로 둔다.
+    # 되돌리는 법: 아래를 true로 올리고 imu1 블록을 지우면 된다(둘을 동시에 켜면
+    # 절대 방위 관측이 두 개가 되어 서로 싸운다).
     imu0_config: [false, false, false,
-                  true,  true,  true,
+                  true,  true,  false,
                   false, false, false,
                   true,  true,  true,
                   true,  true,  true]
@@ -149,26 +140,24 @@ ekf_global:
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
 
-    # RTK GNSS 진행방향(u-blox NavPVT headMot)을 절대 yaw로 먹이던 imu1(/imu/heading,
-    # gps_heading 노드)은 지금 빼 두었다 -- 위 imu0의 지자기 yaw가 그 역할을 한다.
-    # 같이 없앤 것: gps_accuracy_gui의 "Calibrate initial yaw" 버튼(0.5 m 굴려 GPS
-    # 변위로 초기 yaw를 재서 /imu/heading으로 주입하던 기능). 9축 IMU가 부팅부터
-    # 절대 yaw를 주므로 불필요해졌다.
-    # 되돌리는 법: odometry.launch.py의 gps_heading 노드 주석을 풀고 여기에 아래를
-    # 다시 넣는다 (스크립트 hyper_localization/scripts/gps_heading.py는 그대로 있다).
-    #   imu1: imu/heading
-    #   imu1_config: [false, false, false,
-    #                 false, false, true,
-    #                 false, false, false,
-    #                 false, false, false,
-    #                 false, false, false]
-    #   imu1_nodelay: true
-    #   imu1_differential: false
-    #   imu1_relative: false
-    #   imu1_queue_size: 10
-    #   imu1_remove_gravitational_acceleration: false
-    # 둘을 동시에 켜면 절대 방위 관측이 두 개가 되어 서로 싸우므로, 되돌릴 때는
-    # imu0_config의 인덱스 5(yaw)를 다시 false로 내려야 한다.
+    # 절대 방위 = 듀얼 GNSS moving-base 헤딩 (hyper_rtk: base+rover ZED-F9P 2보드).
+    # rover의 ublox_gps_node가 NAV-RELPOSNED9의 relPosHeading을 REP-103 ENU로 변환해
+    # sensor_msgs/Imu(yaw만 유효)로 imu/heading에 낸다 -- 변환 노드 없음
+    # (hyper_rtk/launch/rtk.launch.py, ublox_gps의 hp_pos_rec_product.cpp).
+    # 정지 상태에서도 유효하고 지자기 교란의 영향을 받지 않는다. carrier phase가
+    # fixed로 수렴하기 전(REL_POS_HEAD_VALID=false)에는 covariance가 커서 사실상
+    # 무시된다.
+    imu1: imu/heading
+    imu1_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, false,
+                  false, false, false]
+    imu1_nodelay: true
+    imu1_differential: false
+    imu1_relative: false
+    imu1_queue_size: 10
+    imu1_remove_gravitational_acceleration: false
 
     use_control: false
 
