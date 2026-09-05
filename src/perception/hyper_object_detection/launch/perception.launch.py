@@ -133,9 +133,12 @@ def generate_launch_description():
     )
 
     # On-demand frame grabber: subscribes to the same /camera/image_raw the detector
-    # sees and writes the latest frame to ~/Pictures/object_detection (auto-named, no
-    # collisions) whenever its `~/save` std_srvs/Trigger service is called. Handy for building
-    # up a labelling set from live runs:
+    # sees and writes the latest frame to images/ as shot_<timestamp>.png (auto-named, no
+    # collisions) whenever its `~/save` std_srvs/Trigger service is called -- the same folder
+    # lane_detection's `~/image_saving` recording fills with rec_<timestamp>.png, since there is
+    # one camera and these are its frames either way. Relative, so it lands under whatever
+    # directory the launch was started from. Handy for building up a labelling set from live
+    # runs:
     #   ros2 service call /image_saver_service/save std_srvs/srv/Trigger
     image_saver_service_node = Node(
         package='hyper_object_detection',

@@ -180,7 +180,10 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   // ---- Dataset recording (see handle_image_saving) ----
   // Only the destination and the rate are parameters; whether recording is *running* is not, so
   // that it can only ever be turned on by an explicit call, never by a stale config file.
-  image_save_dir_ = declare_parameter<std::string>("image_save_dir", "data/lane_detection");
+  // "images", not "data/lane_detection": the vehicle has a single camera, and these frames are
+  // that camera's raw output -- nothing about them is lane-specific, and a lane-named folder
+  // reads as if object detection needed its own copy.
+  image_save_dir_ = declare_parameter<std::string>("image_save_dir", "images");
   const double image_save_rate_hz =
     declare_parameter<double>("image_save_rate", kDefaultImageSaveRateHz);
   if (image_save_rate_hz <= 0.0) {
@@ -505,7 +508,9 @@ void LaneDetection::save_frame_if_due(const cv::Mat & image)
     localtime_r(&wall_time, &broken_down);
 
     std::ostringstream name;
-    name << "lane_" << std::put_time(&broken_down, "%Y%m%d_%H%M%S") << '_' << std::setfill('0')
+    // "rec_" marks a frame from a recording run, as opposed to the "shot_" single frames
+    // image_saver_service drops into the same folder.
+    name << "rec_" << std::put_time(&broken_down, "%Y%m%d_%H%M%S") << '_' << std::setfill('0')
          << std::setw(3) << millis << ".png";
     path = std::filesystem::path{image_save_dir_} / name.str();
   }

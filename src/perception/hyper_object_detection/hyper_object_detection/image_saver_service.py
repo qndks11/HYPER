@@ -3,9 +3,11 @@
 
 object_detection_node가 보는 것과 똑같은 카메라 토픽을 구독해 가장 최근 프레임을
 들고 있다가, std_srvs/srv/Trigger 서비스(`~/save`)가 불리면 그 프레임을
-save_dir(기본 ~/Pictures/object_detection)에 PNG로 떨어뜨립니다.
+save_dir(기본 images)에 PNG로 떨어뜨립니다. 상대 경로라 런치를 실행한 작업
+디렉터리 기준으로 풀리고, lane_detection의 연속 저장(rec_*.png)과 같은 폴더입니다 --
+카메라가 한 대뿐이라 프레임도 한 종류입니다.
 
-파일 이름은 자동으로 붙습니다: `objdet_YYYYmmdd_HHMMSS.png`. 같은 초에 두 번
+파일 이름은 자동으로 붙습니다: `shot_YYYYmmdd_HHMMSS.png`. 같은 초에 두 번
 부르거나 이미 그 이름이 있으면 `_001`, `_002` … 를 붙여 겹치지 않게 합니다.
 """
 import os
@@ -25,10 +27,8 @@ class ImageSaverService(Node):
     def __init__(self):
         super().__init__('image_saver_service')
 
-        default_dir = os.path.join(
-            os.path.expanduser('~'), 'Pictures', 'object_detection')
-        self.declare_parameter('save_dir', default_dir)
-        self.declare_parameter('prefix', 'objdet')
+        self.declare_parameter('save_dir', 'images')
+        self.declare_parameter('prefix', 'shot')
 
         self._bridge = CvBridge()
         self._last_frame = None
@@ -38,7 +38,8 @@ class ImageSaverService(Node):
         self.create_service(Trigger, '~/save', self._on_save)
 
         self.get_logger().info(
-            f'saving to {self.get_parameter("save_dir").value} on ~/save')
+            f'saving to {os.path.abspath(self.get_parameter("save_dir").value)} '
+            'on ~/save')
 
     def _on_image(self, msg):
         self._last_frame = msg
@@ -56,7 +57,8 @@ class ImageSaverService(Node):
             response.message = f'cv_bridge 변환 실패: {exc}'
             return response
 
-        save_dir = self.get_parameter('save_dir').value
+        # 절대 경로로 펴서 응답(=패널 로그)에 실제 위치가 찍히게 합니다.
+        save_dir = os.path.abspath(self.get_parameter('save_dir').value)
         prefix = self.get_parameter('prefix').value
         os.makedirs(save_dir, exist_ok=True)
 
