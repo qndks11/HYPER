@@ -56,6 +56,10 @@ Terminal 2: Sensors
 ros2 launch hyper_launch sensors.launch.py
 ```
 
+EBIMU(`/imu`), RPLidar(`/scan`)와 함께 `hyper_rtk`(u-blox ZED-F9P 2대)를 띄웁니다. base는
+NTRIP 보정으로 절대 위치를 `/gps/fix`에, rover는 moving-base RTK 헤딩을 `/imu/heading`에
+냅니다.
+
 Terminal 3: Localization
 ```bash
 ros2 launch hyper_launch odometry.launch.py datum_site:=school use_sim_time:=false
@@ -68,7 +72,8 @@ ros2 launch hyper_launch interface.launch.py
 
 Terminal 5: GPS Monitor (optional)
 ```bash
-ros2 run hyper_localization gps_accuracy_gui.py
+ros2 run hyper_localization gps_accuracy_gui.py      # 절대 위치(base): hAcc/vAcc, fix/RTK, x/y
+ros2 run hyper_localization rtk_heading_monitor.py   # 절대 방위(rover): RTK FIXED / heading valid
 ```
 
 Terminal 6: Mission panel (optional)
