@@ -2,7 +2,7 @@ Waypoint check w/ visualization
 
 ```bash
 python3 src/planning/hyper_waypoint/scripts/plot_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/sim.csv --jump-threshold 1.0
+  src/planning/hyper_waypoint/waypoints/real.csv --jump-threshold 1.0
 ```
 
 Waypoint labeling

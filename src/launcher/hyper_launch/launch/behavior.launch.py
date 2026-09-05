@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
@@ -30,6 +31,17 @@ def generate_launch_description():
             'use_sim_time', default_value='true',
             description='시뮬레이션은 true, 실차는 false'),
 
+        # 조이스틱 비상정지. 미션 스택에는 /joy를 내보내는 노드가 없으므로
+        # launch_joy_node의 기본값을 estop.launch.py(false)와 달리 true로 둡니다.
+        # 수동 주행(joystick.launch.py)과 같이 띄울 때는 joy_node가 둘이 되지
+        # 않도록 estop_launch_joy_node:=false로 끄세요.
+        DeclareLaunchArgument(
+            'estop', default_value='true',
+            description='조이스틱 비상정지 노드를 같이 띄울지'),
+        DeclareLaunchArgument('estop_button_index', default_value='1'),
+        DeclareLaunchArgument('resume_button_index', default_value='0'),
+        DeclareLaunchArgument('estop_launch_joy_node', default_value='true'),
+
         # controller_server(follow_path 액션 서버) + lifecycle_manager + cmd_vel 변환.
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
@@ -48,6 +60,19 @@ def generate_launch_description():
                 'mission_yaml': LaunchConfiguration('mission_yaml'),
                 'waypoint_csv': LaunchConfiguration('waypoint_csv'),
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
+            }.items(),
+        ),
+
+        # /estop(Bool, latched)만 내보냅니다. 실제 정지는 arduino_interface_node가
+        # 그 래치를 보고 속도/조향을 0으로 만드는 것으로 이뤄집니다.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('hyper_control'), 'launch', 'estop.launch.py'])),
+            condition=IfCondition(LaunchConfiguration('estop')),
+            launch_arguments={
+                'estop_button_index': LaunchConfiguration('estop_button_index'),
+                'resume_button_index': LaunchConfiguration('resume_button_index'),
+                'launch_joy_node': LaunchConfiguration('estop_launch_joy_node'),
             }.items(),
         ),
     ])

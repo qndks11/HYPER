@@ -30,6 +30,16 @@ labels:
   course_end: last
 
 steps:
+  # cancel_on_arrival_m을 켜 두는 이유: 이게 0이면 코스 끝에서 서는 일이 전부
+  # nav2의 goal checker(general, xy 0.5 m) 하나에 달립니다. RPP는 approach 감속으로
+  # 기어 들어오다 한 번 끝점을 넘으면 carrot이 뒤에 놓이는데, allow_reversing과
+  # use_rotate_to_heading이 둘 다 false라 되돌릴 방법이 없어 그대로 골 주변을
+  # 배회하다 progress_checker(0.5 m / 15초)에 abort 됩니다. 그동안
+  # mission_manager는 "0.00 m to 'course_end'"만 찍으며 구경합니다 --
+  # 정지점을 지났을 때 골을 취소하는 백스톱도 cancel_on_arrival_m > 0에서만 삽니다
+  # (mission_manager_node.cpp의 check_cancel_on_arrival).
+  #
   # To do MPPI, Use the second one. To do RPP, Use the first one.
-  - {type: drive, until: course_end, controller: ForwardFollowPath}
-  # - {type: drive, until: course_end}
+  - {type: drive, until: course_end, controller: ForwardFollowPath,
+     cancel_on_arrival_m: 0.4}
+  # - {type: drive, until: course_end, cancel_on_arrival_m: 0.4}

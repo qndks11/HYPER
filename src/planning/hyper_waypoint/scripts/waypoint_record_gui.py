@@ -9,6 +9,8 @@
 # 구독:
 #   <recorder>/status  (std_msgs/String)  key=value 한 줄 -- 5Hz + 점이 찍힐 때마다
 #   <recorder>/path    (nav_msgs/Path)    지금까지 찍힌 점 전부
+# 읽기:
+#   저장 파일 칸이 가리키는 CSV -- 이전 녹화본을 미니맵에 흐리게 깔아 둡니다.
 # 호출:
 #   <recorder>/start, <recorder>/stop  (std_srvs/Trigger)
 #
@@ -16,6 +18,8 @@
 #   ros2 run hyper_waypoint waypoint_record_gui.py --ros-args -p recorder:=/other_recorder
 # =====================================================================
 
+import csv
+import os
 import signal
 import sys
 import threading
@@ -47,6 +51,7 @@ COLOR_BAD = '#f85149'
 COLOR_STALE = '#6e7681'
 COLOR_PATH = '#58a6ff'
 COLOR_CAR = '#bc8cff'
+COLOR_PREV = '#8b949e'   # 이전 녹화본. 이번 녹화(COLOR_PATH)와 눈으로 구분되게 회색.
 
 # /gps/fix의 NavSatStatus. 녹화 품질은 결국 이 값입니다.
 GPS_STATUS = {
@@ -80,6 +85,33 @@ def as_float(status, key, default=None):
         return default
 
 
+def load_csv_points(path):
+    """녹화 CSV에서 (x, y)만 뽑아 옵니다. 못 읽으면 ([], 사유).
+
+    레코더가 쓰는 헤더(idx,stamp_sec,x,y,...)를 이름으로 찾습니다 -- 열이 뒤에
+    붙어도 안 깨지도록. 좌표가 비어 있는 줄(EKF 없이 기록된 줄)은 건너뜁니다.
+    """
+    if not path:
+        return [], ''
+    if not os.path.isfile(path):
+        return [], '이전 녹화본 없음'
+    try:
+        with open(path, newline='', encoding='utf-8') as handle:
+            reader = csv.DictReader(handle)
+            if not reader.fieldnames or 'x' not in reader.fieldnames \
+                    or 'y' not in reader.fieldnames:
+                return [], 'CSV에 x,y 열이 없습니다'
+            points = []
+            for row in reader:
+                try:
+                    points.append((float(row['x']), float(row['y'])))
+                except (TypeError, ValueError):
+                    continue
+    except OSError as exc:                             # noqa: BLE001 - 표시가 목적
+        return [], f'이전 녹화본을 못 읽었습니다: {exc}'
+    return points, ''
+
+
 class PathView(QWidget):
     """지금까지 찍힌 점 + 현재 위치를 위에서 내려다본 미니맵.
 
@@ -90,11 +122,16 @@ class PathView(QWidget):
     def __init__(self):
         super().__init__()
         self.setMinimumHeight(260)
-        self._points = []       # [(x, y)] map 프레임
+        self._points = []       # [(x, y)] 이번 녹화, map 프레임
+        self._previous = []     # [(x, y)] 파일에서 읽어 온 이전 녹화본
         self._car = None        # (x, y)
 
     def set_points(self, points):
         self._points = points
+        self.update()
+
+    def set_previous(self, points):
+        self._previous = points
         self.update()
 
     def set_car(self, xy):
@@ -106,7 +143,7 @@ class PathView(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), QColor(COLOR_BG))
 
-        pts = list(self._points)
+        pts = list(self._previous) + list(self._points)
         if self._car is not None:
             pts.append(self._car)
         if not pts:
@@ -129,6 +166,16 @@ class PathView(QWidget):
                 self.width() / 2.0 + (x - cx) * scale,
                 self.height() / 2.0 - (y - cy) * scale)
 
+        # 이전 녹화본을 먼저 깔아 둡니다 -- 이번 녹화 선이 그 위에 그려지도록.
+        if self._previous:
+            painter.setPen(QPen(QColor(COLOR_PREV), 1))
+            last = None
+            for x, y in self._previous:
+                point = to_screen(x, y)
+                if last is not None:
+                    painter.drawLine(last, point)
+                last = point
+
         painter.setPen(QPen(QColor(COLOR_PATH), 2))
         previous = None
         for x, y in self._points:
@@ -147,6 +194,10 @@ class PathView(QWidget):
 
         painter.setPen(QColor(COLOR_STALE))
         painter.drawText(8, self.height() - 8, f'{span:.0f} m')
+        if self._previous:
+            painter.setPen(QColor(COLOR_PREV))
+            painter.drawText(
+                8, 16, f'이전 녹화 {len(self._previous)} 점')
 
 
 class RecorderGui(QWidget):
@@ -162,6 +213,11 @@ class RecorderGui(QWidget):
         super().__init__()
         self._node = node
         self._recording = False
+        # 미니맵에 깔아 둔 이전 녹화본의 경로. None이면 아직 안 읽었다는 뜻이라
+        # 다음 기회에 다시 읽습니다(같은 경로를 매 status마다 다시 읽지 않도록).
+        self._previous_file = None
+        # 레코더가 지금 들고 있는 output_csv. 저장 파일 칸이 비었을 때의 대상입니다.
+        self._recorder_file = ''
 
         self.setWindowTitle('Waypoint Recorder')
         self.setStyleSheet(f'background-color: {COLOR_BG}; color: {COLOR_TEXT};')
@@ -197,6 +253,9 @@ class RecorderGui(QWidget):
             f'background-color: {COLOR_PANEL}; color: {COLOR_TEXT}; '
             f'border: 1px solid {COLOR_STALE}; border-radius: 4px; padding: 4px;')
         self._name_edit.returnPressed.connect(lambda: self._call('start'))
+        # 파일 이름을 바꾸면 그 파일의 이전 녹화본을 미니맵에 깔아 줍니다 --
+        # Record가 무엇을 덮어쓰는지 누르기 전에 보이도록.
+        self._name_edit.editingFinished.connect(self._sync_previous)
         name_row.addWidget(self._name_edit, stretch=1)
         root.addLayout(name_row)
 
@@ -253,6 +312,31 @@ class RecorderGui(QWidget):
         self._stale_timer = QTimer(self)
         self._stale_timer.timeout.connect(self._mark_stale)
         self._stale_timer.setSingleShot(True)
+
+        # 창이 뜨자마자 이전 녹화본을 보여 줍니다. status를 기다리지 않는 이유는
+        # 레코더가 아직 안 떠 있어도 파일은 읽을 수 있기 때문입니다.
+        self._sync_previous()
+
+    # --------------------------------------------------- 이전 녹화본
+    def _sync_previous(self):
+        """저장 파일 칸(비었으면 레코더의 output_csv)의 CSV를 미니맵에 깝니다.
+
+        녹화 중에는 그 파일이 지금 쓰이는 중이라 깔지 않습니다 -- 이번 녹화 선이
+        곧 그 파일의 내용입니다.
+        """
+        if self._recording:
+            return
+        path = self._name_edit.text().strip() or self._recorder_file
+        if path == self._previous_file:
+            return
+        self._previous_file = path
+        points, problem = load_csv_points(path)
+        self._view.set_previous(points)
+        if problem:
+            self._show_message(problem, COLOR_STALE)
+        elif points:
+            self._show_message(
+                f'이전 녹화본 {len(points)} 점 -- Record를 누르면 덮어씁니다', COLOR_OK)
 
     # ------------------------------------------------------------ 서비스
     def _call(self, which):
@@ -312,6 +396,7 @@ class RecorderGui(QWidget):
         self._stale_timer.start(int(STALE_S * 1000))
         status = parse_status(text)
 
+        was_recording = self._recording
         self._recording = status.get('recording') == '1'
         if self._recording:
             self._state.setText('● REC')
@@ -323,6 +408,17 @@ class RecorderGui(QWidget):
         self._stop_button.setEnabled(self._recording)
 
         self._file.setText(status.get('file', '-'))
+        self._recorder_file = status.get('file', '')
+        if self._recording:
+            if not was_recording:
+                # 녹화가 시작된 순간 파일은 truncate됐습니다. 깔아 둔 이전 녹화본은
+                # 더 이상 그 파일의 내용이 아니므로 지웁니다.
+                self._view.set_previous([])
+            # 녹화 중이거나 막 끝난 파일은 이번 녹화 선이 곧 그 내용이므로, 읽은
+            # 것으로 표시해 두어 정지 후에 같은 경로를 겹쳐 깔지 않게 합니다.
+            self._previous_file = self._recorder_file
+        else:
+            self._sync_previous()
 
         points = status.get('points', '0')
         spacing = as_float(status, 'spacing')

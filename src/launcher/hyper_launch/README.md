@@ -70,12 +70,9 @@ Terminal 4: Arduino
 ros2 launch hyper_launch interface.launch.py 
 ```
 
-Terminal 5: RTK Monitor (optional)
+Terminal 5: GPS Monitor (optional)
 ```bash
-# 절대 위치(base: hAcc/vAcc, fix/RTK, x/y)와 절대 방위(rover: RTK FIXED /
-# heading valid, 나침반)를 한 창에서 본다. 나침반 바늘은 IMU가 아니라 듀얼
-# 안테나 baseline에서 온다 -- 채운 삼각형이 RTK 원본, 가는 선이 EKF yaw.
-ros2 run hyper_localization gps_accuracy_gui.py
+ros2 run hyper_localization gps_accuracy_gui.py      # 절대 위치(base): hAcc/vAcc, fix/RTK, x/y
 ```
 
 Terminal 6: Mission panel (optional)
@@ -83,42 +80,31 @@ Terminal 6: Mission panel (optional)
 ros2 run hyper_rqt hyper_panel 
 ```
 
-### Real Car Joystick & Waypoint record
-Terminal 7: Emergency stop
-
-```bash
-ros2 launch hyper_control estop.launch.py estop_button_index:=1 resume_button_index:=0
-```
-
-Terminal 8: Joystick
-```bash
-ros2 launch hyper_control joystick.launch.py joystick_publish_period:=0.0
-```
-
-Terminal 9: Waypoint Recorder (Optional)
+Terminal 7: Waypoint View & Recorder (Optional)
 ```bash
 ros2 launch hyper_waypoint record.launch.py \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv \
   min_spacing_m:=0.5 use_record_gui:=true
 ```
 
-### Real car Mission
-Terminal 7: Emergency Stop (optional)
+### Real Car Joystick & Waypoint record
+Terminal 7: Joystick
 ```bash
-ros2 launch hyper_control estop.launch.py \
-  estop_button_index:=1 resume_button_index:=0 launch_joy_node:=true
+ros2 launch hyper_control joystick.launch.py joystick_publish_period:=0.0
 ```
 
-Terminal 8: Perception
+### Real car Mission
+
+Terminal 7: Perception (optional)
 ```bash
 ros2 launch hyper_launch perception.launch.py \
   lane_input_backend:=intra_process
 ```
 
-Terminal 9: Mission
+Terminal 8: Mission
 ```bash
 ros2 launch hyper_launch behavior.launch.py \
   use_sim_time:=false \
-  mission:=mission \
+  mission:=simple \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
 ```
