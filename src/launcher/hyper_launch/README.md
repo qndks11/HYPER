@@ -70,10 +70,12 @@ Terminal 4: Arduino
 ros2 launch hyper_launch interface.launch.py 
 ```
 
-Terminal 5: GPS Monitor (optional)
+Terminal 5: RTK Monitor (optional)
 ```bash
-ros2 run hyper_localization gps_accuracy_gui.py      # 절대 위치(base): hAcc/vAcc, fix/RTK, x/y
-ros2 run hyper_localization rtk_heading_monitor.py   # 절대 방위(rover): RTK FIXED / heading valid
+# 절대 위치(base: hAcc/vAcc, fix/RTK, x/y)와 절대 방위(rover: RTK FIXED /
+# heading valid, 나침반)를 한 창에서 본다. 나침반 바늘은 IMU가 아니라 듀얼
+# 안테나 baseline에서 온다 -- 채운 삼각형이 RTK 원본, 가는 선이 EKF yaw.
+ros2 run hyper_localization gps_accuracy_gui.py
 ```
 
 Terminal 6: Mission panel (optional)

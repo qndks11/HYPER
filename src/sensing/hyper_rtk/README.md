@@ -80,7 +80,7 @@ ros2 launch hyper_rtk rtk.launch.py
 실행 전 `config/ntrip_params.yaml`에 NTRIP 캐스터 주소, 마운트포인트, 계정 정보를 설정하고, `/dev/tty_ublox_base`/`/dev/tty_ublox_rover`가 잡혀 있는지 확인하세요. 자세한 설치 방법은 저장소 루트 README의 GPS(RTK) 절을 참고하세요.
 
 ```bash
-ros2 topic hz /gps/fix                              # base 절대 위치, 5 Hz
+ros2 topic hz /gps/fix
 ros2 topic echo /imu/heading                        # rover 헤딩 Imu (yaw만 유효, ekf_global 입력)
 ros2 topic echo /ublox_gps_node_rover/navrelposned  # relPosHeading 원본 (진단용)
 ```

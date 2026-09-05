@@ -321,14 +321,67 @@
   <!-- 실측(2026-08-30): 안테나가 body_link 중심에서 뒤로 0.23 m, 좌우 중앙, 지면 위 1.118 m
        (라이드 하이트 0.171 m을 빼면 body_link 기준 0.947 m). body_height 수식 대신 리터럴로
        박아 넣었습니다 — body_height 자체가 아직 실측 전(placeholder 0.40)이라 수식으로는
-       실측치를 정확히 못 담습니다. gps_link는 시각화(RViz)용일 뿐 navsat_transform 등
-       어떤 로컬라이제이션 코드도 이 TF를 안 씁니다(안테나 레버암 보정이 없음) — 그래도
-       실측치를 넣어 두는 이유는 나중에 레버암 보정을 추가하게 되거나 시각화 정확도가
-       필요해질 때를 위해서입니다. -->
+       실측치를 정확히 못 담습니다.
+       (예전 주석: "gps_link는 시각화용일 뿐 아무도 안 쓴다" — 지금은 아닙니다.)
+       navsat_transform_node가 이 TF를 실제로 씁니다: /gps/fix(뒤쪽 base 안테나)의
+       frame_id가 gps_link이고, navsat이 body_link -> gps_link로 안테나 레버암을 빼서
+       GPS 위치를 차량 중심 기준으로 옮깁니다. 즉 여기 xyz를 바꾸면 글로벌 EKF가
+       내는 위치가 그만큼 통째로 움직입니다 — 실측 없이 건드리지 마세요. -->
   <joint name="gps_joint" type="fixed">
     <origin xyz="-0.23 0 0.947" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="gps_link"/>
+  </joint>
+
+  <!-- rover(앞쪽) 안테나. base와 함께 moving-base RTK 헤딩을 만드는 두 번째 ZED-F9P다.
+       색만 다르게(초록) 해서 RViz에서 base와 구분되게 둔다. -->
+  <link name="gps_rover_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.08 0.08 0.03"/>
+      </geometry>
+      <material name="gps_rover_material">
+        <color rgba="0.0 0.8 0.2 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.08 0.08 0.03"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="0.05"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+  </link>
+
+<!-- GPS Rover Fixed Joint -->
+  <!-- x = -0.23 + 0.60 = 0.37. baseline 0.60 m는 실측(2026-09-05, 사용자 확인)이고,
+       -0.23은 위 base 안테나의 실측 x다. y=0, z=0.947은 base와 같다고 본 값이다 —
+       README의 배선 규약대로 두 안테나를 차량 세로축에 맞춰 같은 높이의 강체에
+       물렸다는 전제. 안테나를 서로 다른 높이에 달았다면 z를 따로 실측해서 고칠 것.
+
+       이 TF를 실제로 쓰는 곳: rover 드라이버가 /imu/heading(sensor_msgs/Imu)의
+       frame_id를 gps_rover_link로 찍고(rtk.launch.py), ekf_global의 imu1이 그걸
+       먹는다 — robot_localization이 IMU를 base_link_frame(body_link) 기준으로
+       돌려놓으려면 이 링크가 TF 트리에 있어야 한다. 없으면 base 안테나에서 났던
+       "Could not obtain body_link -> ... transform"과 같은 종류의 lookup 실패가 난다.
+       단 IMU에 실제로 적용되는 건 회전 성분뿐이고 여기 rpy는 0(= body_link와 같은
+       자세)이라, xyz를 틀리게 넣어도 헤딩 융합 결과는 바뀌지 않는다. xyz가 의미를
+       갖는 건 RViz 시각화와, 나중에 이 링크로 레버암 보정을 하게 될 때다.
+
+       sim에는 이 안테나가 없다 — gz navsat 센서는 gps_link 하나뿐이고(아래 "GPS
+       Sensor"), 시뮬레이션은 듀얼 안테나 헤딩을 흉내내지 않는다. 그래서 여기에는
+       대응하는 <gazebo> 센서 블록을 일부러 두지 않는다. -->
+  <joint name="gps_rover_joint" type="fixed">
+    <origin xyz="0.37 0 0.947" rpy="0 0 0"/>
+    <parent link="body_link"/>
+    <child link="gps_rover_link"/>
   </joint>
 
 <!-- LiDAR Fixed Joint -->

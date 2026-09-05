@@ -180,7 +180,7 @@ ntrip_client:
 #### 4. 실행
 
 ```bash
-ros2 launch hyper_rtk dual_rtk.launch.py
+ros2 launch hyper_rtk rtk.launch.py
 ```
 
 정상 동작하면 `ublox_gps_node_base`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다. `ublox_gps_node_rover`는 `imu/heading`(`sensor_msgs/Imu`, yaw만 유효)을 냅니다 — `ekf_global`이 이걸 절대 방위로 씁니다(아래 IMU 절 참고).

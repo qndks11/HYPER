@@ -10,10 +10,8 @@ install(
 
 install(
   PROGRAMS
-    scripts/imu_enu_relay.py
     scripts/gps_heading.py
     scripts/gps_accuracy_gui.py
-    scripts/rtk_heading_monitor.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

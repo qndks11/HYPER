@@ -76,7 +76,14 @@ def generate_launch_description():
         parameters=[{
             **common_params,
             'device': '/dev/tty_ublox_base',
-            'frame_id': 'gps_base_link',
+            # vehicle.xacro의 안테나 링크 이름과 정확히 같아야 한다. navsat_transform_node는
+            # 들어온 NavSatFix의 frame_id를 그대로 써서 base_link_frame(body_link) -> 그 프레임
+            # TF를 찾아 안테나 레버암을 빼는데, 예전 이름 'gps_base_link'는 URDF에 없는
+            # 프레임이라 매 주기 "Could not obtain body_link -> gps_base_link transform"만
+            # 찍히고 레버암 보정이 통째로 생략됐다(= 안테나가 body_link 원점에 있는 셈).
+            # gps_link는 body_link 기준 x=-0.23(뒤쪽)이고, /gps/fix를 내는 게 바로 이 뒤쪽
+            # base 안테나라 짝이 맞는다. 시뮬레이션의 gz_frame_id도 이미 gps_link다.
+            'frame_id': 'gps_link',
             'tmode3': 0,  # Disabled -- moving base는 고정좌표 기준국이 아니다
         }],
     )
