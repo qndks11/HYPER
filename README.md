@@ -96,7 +96,7 @@ source ~/.bashrc
 
 시뮬레이션만 쓴다면 이 절은 건너뛰어도 됩니다. 실차에서 GPS(RTK), IMU, LiDAR, USB 카메라를 쓰려면 아래를 순서대로 진행합니다.
 
-### USB 시리얼 포트 고정 (udev) — 먼저 하세요
+### USB 시리얼 포트 고정 (udev)
 
 차에는 USB 시리얼 장치가 넷 물려 있습니다: RTK 수신기 2대(moving-base 헤딩용 base+rover), IMU(EBIMU) USB-UART 어댑터, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 네 장치에 고정 이름을 붙입니다:
 
@@ -107,7 +107,7 @@ source ~/.bashrc
 | `/dev/tty_ebimu` | EBIMU-9DOFV5 USB-UART 어댑터 | `hyper_ebimu/config/ebimu.yaml` |
 | `/dev/tty_arduino` | Arduino 제어 보드 (CH340) | `hyper_interface/config/parameters.yaml` |
 
-두 RTK 보드는 idVendor/idProduct까지 완전히 같고(`1546:01a9`) `ATTRS{serial}`도 안 내므로, 물리 USB 포트(`KERNELS`)로 구분합니다 — 규칙 파일 상단 주석 참고, 보드마다 꽂은 포트 값을 뽑아 채워 넣어야 합니다.
+두 RTK 보드는 idVendor/idProduct까지 완전히 같지만(`1546:01a9`), 이 차의 두 보드에는 USB 시리얼 문자열이 이미 Flash에 기록돼 있어(`HYPER-GNSS-BASE` / `HYPER-GNSS-ROVER`) 규칙이 `ATTRS{serial}`로 바로 갈라냅니다. 물리 USB 포트(`KERNELS`)를 뽑아 채워 넣을 필요가 없고, 어느 포트에 꽂아도 링크 이름이 그대로 붙습니다.
 
 ```bash
 sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
@@ -121,10 +121,6 @@ ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/tty_arduino
 ```bash
 ~/HYPER/udev/show-serial-ids.sh
 ```
-
-**주의**: F9P 두 대는 VID:PID가 `1546:01a9`로 **완전히 같아서** 칩 ID만으로는 절대 구분되지 않습니다. 반드시 `ATTRS{serial}`이나 물리 USB 포트(`KERNELS`)로 갈라야 하며, 규칙 파일에 두 방법이 다 적혀 있습니다. 잘못 배정하면 heading이 조용히 180도 뒤집힙니다.
-
-같은 함정이 하나 더 있습니다: IMU 어댑터와 Arduino 보드가 둘 다 CH340(`1a86:7523`)이면 칩 ID만으로는 구분되지 않아 심볼릭 링크가 한쪽으로 덮입니다. 이때는 `ATTRS{serial}`이나 물리 USB 포트(`KERNELS`)를 같이 걸어야 하며, 방법은 규칙 파일 상단 주석에 적어 뒀습니다.
 
 ### GPS (RTK) — 듀얼 GNSS moving-base 헤딩
 
@@ -144,10 +140,11 @@ ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/tty_arduino
 ls -l /dev/tty_ublox_base /dev/tty_ublox_rover
 ```
 
-두 보드는 idVendor/idProduct가 같고 시리얼 번호도 없어 물리 USB 포트(`KERNELS`)로 구분해야 합니다 — 링크가 없으면 보드를 하나씩 연결한 상태에서 확인해 `udev/99-hyper-serial.rules`를 고칩니다:
+두 보드는 idVendor/idProduct가 같으므로 규칙은 보드 Flash에 써 넣은 USB 시리얼 문자열(`HYPER-GNSS-BASE` / `HYPER-GNSS-ROVER`)로 갈라냅니다. 링크가 없으면 시리얼이 안 들어간 것이니 확인하고 다시 써 넣습니다:
 
 ```bash
-udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct|serial" | head -3
+~/HYPER/udev/ublox-serial.py --list                                # 칩 ID / 현재 시리얼
+~/HYPER/udev/ublox-serial.py /dev/ttyACM0 HYPER-GNSS-ROVER --reset  # 다시 쓰기
 ```
 
 #### 3. NTRIP 계정 설정 (base 전용)
@@ -218,51 +215,30 @@ ros2 topic echo /imu --field angular_velocity   # 반시계로 돌릴 때 z > 0
 ros2 launch hyper_lidar rplidar.launch.py
 ```
 
-### USB 카메라
+### USB 카메라 (Logitech C920)
 
-전방 ELP USB 카메라(ELP-USBGS1200P01-KL170, global shutter)는 `hyper_camera`의 `ElpCameraPublisherNode` 컴포넌트(실행 파일 `elp_camera_publisher_node`)가 `/dev/video_elp`를 열어 MJPEG을 캡처·디코드하고 자체적으로 rectify까지 처리한 뒤 `image_raw`로 발행합니다. `hyper_lane_detection`이 `input_backend:=intra_process`일 때 이 컴포넌트를 `lane_detection` 컴포넌트와 같은 `ComposableNodeContainer` 프로세스에 함께 로드해서, 프레임이 직렬화 없이 포인터로 바로 넘어갑니다(zero-copy intra-process) — 실차 전체/단계별 launch(`real.launch.py` → `sensors.launch.py` + `perception.launch.py`)는 기본적으로 이 경로를 씁니다.
+차량 카메라는 C920 **한 대**이고, 차선 인식(BEV)과 객체 인식(YOLO)이 같이 씁니다. `hyper_camera`의 `LogitechCameraPublisherNode`(C++ 컴포넌트, 실행 파일 `logitech_camera_publisher_node`)가 `/dev/video_logitech`를 열어 MJPEG을 640x360@30으로 캡처·디코드하고, rectify 없이 원본 프레임을 그대로 `image_raw`로 발행합니다 — 보정 파일이 없고(일반 약 70도 렌즈), `hyper_lane_detection`의 BEV 호모그래피가 이 카메라를 이상적인 핀홀로 모델링합니다(`config/bev_real.yaml`).
 
-`hyper_camera`(`src/sensing/hyper_camera`) 패키지는 이 노드와 그 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`)의 배포처입니다. `usb_cam`은 이 저장소에서 완전히 제거되었습니다.
-
-#### 1. 장치 udev 규칙
-
-`video_device`가 `/dev/videoN` 고정 번호를 참조하는데, 다른 UVC 장치(내장/외장 웹캠 등)가 함께 연결되어 있으면 부팅·재연결 시 번호가 바뀔 수 있고, 최악의 경우 엉뚱한 카메라를 열어 ELP 캘리브레이션이 잘못된 영상에 적용됩니다. GPS와 동일하게 idVendor/idProduct 기준 udev 심볼릭 링크로 고정합니다. `/etc/udev/rules.d/99-elp-camera.rules` 생성:
-
-```
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="32e4", ATTRS{idProduct}=="0234", ATTR{index}=="0", SYMLINK+="video_elp"
-```
-
-```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
-```
-
-다른 카메라 모듈을 쓴다면 idVendor/idProduct가 다를 수 있으니, 장치를 연결한 상태에서 아래로 직접 확인 후 값을 맞춰주세요:
-
-```bash
-udevadm info -a -n /dev/video2 | grep -E "idVendor|idProduct" | head -2
-```
-
-UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(`ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, RTK의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
-
-규칙 적용 후 `hyper_camera`의 `config/params_elp.yaml`과 `ElpCameraPublisherNode`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
-
-### Logitech C920 (객체 인식용)
-
-객체 인식(YOLO)용 카메라로, `hyper_camera`의 `logitech_camera_publisher_node`가 `/dev/video_logitech`를 직접 열어(MJPEG 캡처) rectify 없이 원본 프레임을 그대로 `image_raw`로 발행합니다 — 별도 캘리브레이션 파일이 없습니다. ELP와 마찬가지로 `usb_cam`을 거치지 않지만, rclpy에는 rclcpp의 intra-process 통신에 해당하는 zero-copy 경로가 없으므로 이 쪽은 일반 ROS 토픽으로 `object_detection_node`에 연결됩니다 (`object_input_backend:=usb_camera`). 실차 전체 launch(`real.launch.py`)는 기본적으로 이 경로를 씁니다; `perception.launch.py` 자체의 기본값은 `ros_raw`(ros_gz_bridge 구독, 시뮬레이션/롤백용)입니다.
+`hyper_lane_detection`이 `input_backend:=intra_process`일 때 이 컴포넌트가 `lane_detection`과 같은 `ComposableNodeContainer`에 함께 로드되어 프레임이 직렬화 없이 포인터로 넘어갑니다(zero-copy intra-process). 같은 발행이 DDS로도 나가므로 별도 프로세스인 `object_detection_node`(rclpy — zero-copy 경로 없음)가 동일한 프레임을 일반 토픽으로 받습니다. 실차 launch(`real.launch.py` → `perception.launch.py`)는 기본적으로 이 경로를 쓰고, `perception.launch.py` 자체의 기본값은 `ros_raw`(ros_gz_bridge 구독, 시뮬레이션/롤백용)입니다. `usb_cam`은 이 저장소에서 완전히 제거되었습니다.
 
 #### 1. 장치 udev 규칙
 
-ELP/GPS와 동일하게 idVendor/idProduct 기준 udev 심볼릭 링크로 고정합니다. `/etc/udev/rules.d/99-logitech-camera.rules` 생성:
-
-```
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="08e5", ATTR{index}=="0", SYMLINK+="video_logitech"
-```
+`/dev/videoN` 번호는 다른 UVC 장치(내장/외장 웹캠 등)가 함께 물려 있으면 부팅·재연결 때마다 바뀌므로, 카메라도 시리얼 장치와 같은 규칙 파일에서 심볼릭 링크로 고정합니다 — 위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)에서 `udev/99-hyper-serial.rules`를 이미 깔았다면 `/dev/video_logitech`가 만들어져 있습니다:
 
 ```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/video_logitech
 ```
 
-다른 Logitech 모델을 쓴다면 idVendor/idProduct가 다를 수 있으니 `lsusb`와 `udevadm info -a -n /dev/videoN | grep -E "idVendor|idProduct"`로 직접 확인 후 값을 맞춰주세요. 규칙 적용 후 `object_detection_node`의 `video_device` 파라미터가 기본값으로 `/dev/video_logitech`를 사용하므로 USB 포트가 바뀌어도 흔들리지 않습니다. 해상도·프레임레이트는 `image_width`/`image_height`/`framerate` 파라미터로 조정합니다 (기본값은 `hyper_camera`의 `config/params_logitech.yaml`과 동일).
+UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(규칙의 `ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, 시리얼 장치의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
+
+다른 카메라 모델로 바꾸면 idVendor/idProduct가 달라지니 확인해서 규칙을 고칩니다:
+
+```bash
+lsusb
+udevadm info -a -n /dev/video0 | grep -E "idVendor|idProduct" | head -2
+```
+
+해상도·프레임레이트는 노드의 `image_width`/`image_height`/`framerate` 파라미터로 조정합니다(기본값은 `hyper_camera`의 `config/params_logitech.yaml`과 동일). **캡처 해상도를 바꾸면 `hyper_lane_detection/config/bev_real.yaml`도 같이 고쳐야 합니다** — 가로 폭에서 초점거리를, 세로 높이에서 BEV 근거리 경계를 유도하기 때문입니다.
 
 ## 차량 제어 보드 설치 (실차)
 
@@ -275,7 +251,7 @@ sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
 sudo apt install python3-serial  # 또는 pip install pyserial
 ```
 
-포트는 udev 규칙이 만드는 `/dev/tty_arduino`입니다([USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요) 참고). 이 보드는 CH340 칩이라 `/dev/ttyUSB*`로 잡히고, IMU 어댑터도 같은 자리를 노리므로 번호로 잡으면 안 됩니다:
+포트는 udev 규칙이 만드는 `/dev/tty_arduino`입니다([USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요) 참고). 이 보드는 CH340 칩이라 `/dev/ttyUSB*`로 잡히는데, IMU 어댑터(CP210x)도 같은 `/dev/ttyUSB*` 번호를 나눠 쓰므로 번호로 잡으면 안 됩니다:
 
 ```bash
 ls -l /dev/tty_arduino
@@ -313,7 +289,7 @@ ros2 launch hyper_launch simulation.launch.py
 ros2 launch hyper_launch real.launch.py
 ```
 
-`sim` 대신 `sensors`(EBIMU-9DOFV5 IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
+`sim` 대신 `sensors`(EBIMU-9DOFV5 IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라(Logitech C920)는 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
 
 스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
 
@@ -338,12 +314,12 @@ ros2 launch hyper_launch behavior.launch.py
 | u-blox base + NTRIP | `hyper_rtk` | `/gps/fix` |
 | u-blox rover (moving-base) | `hyper_rtk` | `/imu/heading` (EKF 절대 yaw) |
 
-카메라는 둘 다 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 전방 ELP와 `lane_detection`을 함께 로드하고, 객체 인식용 Logitech C920만 별도 프로세스로 띄웁니다:
+카메라는 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 카메라 드라이버와 `lane_detection`을 함께 로드하고, `object_detection_node`는 같은 발행을 별도 프로세스에서 구독합니다. 카메라는 한 대이고 두 인지 노드가 같은 `/camera/image_raw`를 먹습니다:
 
-| 카메라 | 노드 | 토픽 | 전달 방식 |
+| 소비자 | 노드 | 토픽 | 전달 방식 |
 |--------|------|------|-----------|
-| 전방 ELP | `hyper_camera`의 `ElpCameraPublisherNode` (자체 rectify) | `/camera/image_raw` | intra-process (zero-copy) |
-| 객체 인식 Logitech C920 | `hyper_camera`의 `logitech_camera_publisher_node` (rectify 없음) | `/camera_object/image_raw` | 일반 토픽 (rclpy에는 zero-copy 경로 없음) |
+| 차선 인식 | `hyper_camera`의 `LogitechCameraPublisherNode` + `lane_detection` (한 컨테이너) | `/camera/image_raw` | intra-process (zero-copy) |
+| 객체 인식 | `hyper_object_detection`의 `object_detection_node` (별도 프로세스) | `/camera/image_raw` | 일반 토픽 (rclpy에는 zero-copy 경로 없음) |
 
 ## 패키지 구성
 
@@ -358,7 +334,7 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
 | `hyper_rtk` | u-blox GPS 드라이버 두 대(moving base) + NTRIP 클라이언트 실행 (RTK 보정 위치 + 절대 방위) |
 | `hyper_lidar` | 실차 RPLidar 등 2D LiDAR 드라이버 실행 (시뮬레이션에서는 미사용) |
-| `hyper_camera` | 실차 ELP/Logitech USB 카메라 드라이버 노드(`ElpCameraPublisherNode` C++ 컴포넌트, `logitech_camera_publisher_node` rclpy 노드) + 설정 파일(보정 파일 + 참고용 파라미터 yaml) 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
+| `hyper_camera` | 실차 Logitech C920 USB 카메라 드라이버 노드(`LogitechCameraPublisherNode` C++ 컴포넌트) + 참고용 파라미터 yaml 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
 | `hyper_interface` | 실차 ROS 2 ↔ Arduino 시리얼 브릿지 (`arduino_interface_node`) — `/velocity`, `/steering_angle`을 구독해 Arduino(`hyper_motor_interface.ino`)로 전달, BTS7960/L298N 모터드라이버를 닫힌 루프로 구동 |
 ---
 
@@ -366,8 +342,7 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → hyper_lane_detection (실차) | 전방 카메라 영상 (차선 인식이 구독). 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `ElpCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서는 같은 `ComposableNodeContainer` 안에서 zero-copy로 전달되므로 이 토픽이 DDS까지 나가지 않음 |
-| `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → object_detection_node (실차) | 객체 인식용 카메라 영상 (`object_detection_node`가 항상 구독). 시뮬레이션은 ros_gz_bridge, 실차 기본 경로(`object_input_backend:=usb_camera`)는 `hyper_camera`의 `logitech_camera_publisher_node`가 일반 토픽으로 발행 |
+| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → lane_detection + object_detection_node (실차) | 전방 카메라 영상 — 차량의 유일한 카메라이고 차선·객체 인식이 같이 구독합니다. 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `LogitechCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서 `lane_detection`은 같은 `ComposableNodeContainer` 안에서 zero-copy로 받고, 같은 발행이 DDS로도 나가 별도 프로세스인 `object_detection_node`가 일반 구독으로 받습니다 |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
