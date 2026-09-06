@@ -75,5 +75,5 @@ Terminal 8: Mission
 ros2 launch hyper_launch behavior.launch.py \
   use_sim_time:=false \
   mission:=simple \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
+  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/full_track.csv
 ```

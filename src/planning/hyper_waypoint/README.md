@@ -139,3 +139,9 @@ python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
   주세요. 단 실차 좌표계가 성립하려면
   [hyper_localization/config/datums.yaml](../../localization/hyper_localization/config/datums.yaml)의
   `track` datum 실측이 먼저입니다(현재 `0.0` TODO 상태).
+
+Stopline_L: 3.218, 27.746
+Stopline_R: 4.298, 30.832
+Signal1: -0.531, 1.145
+Signal2: -12.197, -6.338
+Signal3: -5.044, -18.458
