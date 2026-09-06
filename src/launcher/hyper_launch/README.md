@@ -61,6 +61,15 @@ ros2 launch hyper_launch perception.launch.py \
   lane_input_backend:=intra_process
 ```
 
+이미지 수집용(YOLO 없이 카메라 + 차선 인식 + `image_saver_service`만):
+
+```bash
+ros2 launch hyper_launch perception.launch.py \
+  lane_input_backend:=intra_process object_detection:=false
+
+ros2 service call /image_saver_service/save std_srvs/srv/Trigger
+```
+
 Terminal 8: Mission
 ```bash
 ros2 launch hyper_launch behavior.launch.py \

@@ -3,7 +3,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import LaunchConfigurationEquals, LaunchConfigurationNotEquals
+from launch.conditions import (
+    IfCondition, LaunchConfigurationEquals, LaunchConfigurationNotEquals)
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
@@ -56,6 +57,16 @@ def generate_launch_description():
     drivable_area_arg = DeclareLaunchArgument(
         'drivable_area',
         default_value='false',
+    )
+
+    # Runs the YOLO node. Set false to bring the stage up as camera + lane detection +
+    # image_saver_service only -- what an image-collection run needs, without paying for
+    # inference on every frame. /perception/sign then never publishes, so mission_manager's
+    # wait_signal and branch steps will sit on their timeouts: this is for collection runs, not
+    # missions.
+    object_detection_arg = DeclareLaunchArgument(
+        'object_detection',
+        default_value='true',
     )
 
     # intra_process: hyper_camera's LogitechCameraPublisherNode and LaneDetection load into one
@@ -129,7 +140,8 @@ def generate_launch_description():
             'sign_class_map': LaunchConfiguration('sign_class_map'),
         }],
         remappings=[('/image_raw', '/camera/image_raw')],
-        output='screen'
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('object_detection')),
     )
 
     # On-demand frame grabber: subscribes to the same /camera/image_raw the detector
@@ -150,6 +162,7 @@ def generate_launch_description():
         lane_input_backend_arg,
         sign_class_map_arg,
         drivable_area_arg,
+        object_detection_arg,
         lane_detection_container,
         lane_detection_node,
         object_detection_node,

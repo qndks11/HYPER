@@ -22,6 +22,11 @@ def generate_launch_description():
         # be enabled separately for this to change what the vehicle does.
         DeclareLaunchArgument('drivable_area', default_value='false'),
 
+        # Forwarded to hyper_object_detection's object_detection argument. false leaves the
+        # camera, lane detection and image_saver_service running with no YOLO node -- the
+        # image-collection setup. See that file for what stops publishing.
+        DeclareLaunchArgument('object_detection', default_value='true'),
+
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('hyper_object_detection'),
@@ -29,6 +34,7 @@ def generate_launch_description():
             launch_arguments={
                 'lane_input_backend': LaunchConfiguration('lane_input_backend'),
                 'drivable_area': LaunchConfiguration('drivable_area'),
+                'object_detection': LaunchConfiguration('object_detection'),
             }.items(),
         ),
     ])

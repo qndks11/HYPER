@@ -14,6 +14,16 @@ YOLO 모델로 카메라 영상의 신호등과 표지를 인식하는 Python �
 ros2 launch hyper_object_detection perception.launch.py
 ```
 
+이미지 수집만 할 때는 YOLO 노드를 빼고 띄웁니다. 카메라, `hyper_lane_detection`,
+`image_saver_service`는 그대로 돌아가고 추론만 하지 않습니다:
+
+```bash
+ros2 launch hyper_object_detection perception.launch.py object_detection:=false
+```
+
+`/perception/sign`이 아예 발행되지 않으므로 `mission_manager`의 `wait_signal`, `branch` 스텝은
+timeout까지 기다립니다. 미션 주행이 아니라 수집 주행에서만 쓰세요.
+
 ## `/perception/sign` 값
 
 `hyper_planner`의 `mission_manager`가 구독합니다.

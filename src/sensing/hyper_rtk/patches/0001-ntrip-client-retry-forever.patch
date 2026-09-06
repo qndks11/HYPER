@@ -1,0 +1,163 @@
+diff --git a/launch/ntrip_client_launch.py b/launch/ntrip_client_launch.py
+index 5bcb97d..5754134 100644
+--- a/launch/ntrip_client_launch.py
++++ b/launch/ntrip_client_launch.py
+@@ -72,7 +72,7 @@ def generate_launch_description():
+                     'rtcm_message_package': LaunchConfiguration('rtcm_message_package'),
+ 
+                     # Will affect how many times the node will attempt to reconnect before exiting, and how long it will wait in between attempts when a reconnect occurs
+-                    'reconnect_attempt_max': 10,
++                    'reconnect_attempt_max': 0,  # 0 = retry forever
+                     'reconnect_attempt_wait_seconds': 5,
+ 
+                     # How many seconds is acceptable in between receiving RTCM. If RTCM is not received for this duration, the node will attempt to reconnect
+diff --git a/scripts/ntrip_ros_base.py b/scripts/ntrip_ros_base.py
+index aba74b6..e58ed73 100755
+--- a/scripts/ntrip_ros_base.py
++++ b/scripts/ntrip_ros_base.py
+@@ -92,10 +92,14 @@ class NTRIPRosBase(Node):
+     self._reconnect_attempt_wait_seconds = self.get_parameter('reconnect_attempt_wait_seconds').value
+ 
+   def run(self):
+-    # Connect the client
+-    if not self._client.connect():
+-      self.get_logger().error('Unable to connect')
+-      return False
++    # Try to connect now, but do not exit if it fails: the network may simply not be
++    # up yet (WiFi/LTE still associating at boot). recv_rtcm() retries on the RTCM
++    # timer below until the caster is reachable.
++    if not self._client.reconnect():
++      self.get_logger().warn(
++        'Unable to connect to the NTRIP caster, will keep retrying every {} seconds'.format(
++          self._reconnect_attempt_wait_seconds))
++
+     # Setup our subscribers
+     self._nmea_sub = self.create_subscription(Sentence, 'nmea', self.subscribe_nmea, 10)
+     self._fix_sub = self.create_subscription(NavSatFix, 'fix', self.subscribe_fix, 10)
+diff --git a/src/ntrip_client/ntrip_base.py b/src/ntrip_client/ntrip_base.py
+index f353018..67ed006 100644
+--- a/src/ntrip_client/ntrip_base.py
++++ b/src/ntrip_client/ntrip_base.py
+@@ -7,7 +7,10 @@ from .rtcm_parser import RTCMParser
+ class NTRIPBase:
+ 
+   # Public constants
+-  DEFAULT_RECONNECT_ATTEMPT_MAX = 10
++  # 0 means "keep retrying forever". That is what we want on the car: a WiFi/LTE
++  # drop is normal mid-run, and the node giving up is worse than it reconnecting
++  # late, since nothing else restarts it.
++  DEFAULT_RECONNECT_ATTEMPT_MAX = 0
+   DEFAULT_RECONNECT_ATEMPT_WAIT_SECONDS = 5
+ 
+   def __init__(self, logerr=logging.error, logwarn=logging.warning, loginfo=logging.info, logdebug=logging.debug):
+@@ -35,6 +38,10 @@ class NTRIPBase:
+     self._shutdown = False
+     self._connected = False
+ 
++    # Private reconnect state
++    self._reconnect_attempt_count = 0
++    self._next_reconnect_time = 0
++
+     # Public reconnect info
+     self.reconnect_attempt_max = self.DEFAULT_RECONNECT_ATTEMPT_MAX
+     self.reconnect_attempt_wait_seconds = self.DEFAULT_RECONNECT_ATEMPT_WAIT_SECONDS
+@@ -46,22 +53,49 @@ class NTRIPBase:
+     raise NotImplementedError("Must override disconnect")
+ 
+   def reconnect(self):
++    """Make at most one attempt to (re)establish the connection. Returns whether we are connected.
++
++    This never blocks and never gives up on its own, because it runs inside the
++    node's ROS callbacks. The original version looped here with time.sleep(),
++    which froze the node for the whole outage, and then raised once
++    reconnect_attempt_max attempts had failed, which killed the node -- so any
++    WiFi drop longer than reconnect_attempt_max * reconnect_attempt_wait_seconds
++    ended the RTCM stream permanently.
++
++    Callers just keep calling this (recv_rtcm does, at the rate of the node's
++    RTCM timer); attempts are throttled to one every
++    reconnect_attempt_wait_seconds. Set reconnect_attempt_max > 0 to restore the
++    old "give up and raise" behavior.
++    """
++    if self._shutdown:
++      return False
++
++    # First call after a drop: tear the dead connection down and retry immediately
+     if self._connected:
+-      while not self._shutdown:
+-        self._reconnect_attempt_count += 1
+-        self.disconnect()
+-        connect_success = self.connect()
+-        if not connect_success and self._reconnect_attempt_count < self.reconnect_attempt_max:
+-          self._logerr('Reconnect failed. Retrying in {} seconds'.format(self.reconnect_attempt_wait_seconds))
+-          time.sleep(self.reconnect_attempt_wait_seconds)
+-        elif self._reconnect_attempt_count >= self.reconnect_attempt_max:
+-          self._reconnect_attempt_count = 0
+-          raise Exception("Reconnect was attempted {} times, but never succeeded".format(self._reconnect_attempt_count))
+-        elif connect_success:
+-          self._reconnect_attempt_count = 0
+-          break
+-    else:
+-      self._logdebug('Reconnect called while not connected, ignoring')
++      self._reconnect_attempt_count = 0
++      self._next_reconnect_time = 0
++
++    now = time.time()
++    if now < self._next_reconnect_time:
++      return False
++    self._next_reconnect_time = now + self.reconnect_attempt_wait_seconds
++
++    self._reconnect_attempt_count += 1
++    self.disconnect()
++    if self.connect():
++      if self._reconnect_attempt_count > 1:
++        self._loginfo('Reconnected after {} attempts'.format(self._reconnect_attempt_count))
++      self._reconnect_attempt_count = 0
++      return True
++
++    if self.reconnect_attempt_max > 0 and self._reconnect_attempt_count >= self.reconnect_attempt_max:
++      attempts = self._reconnect_attempt_count
++      self._reconnect_attempt_count = 0
++      raise Exception("Reconnect was attempted {} times, but never succeeded".format(attempts))
++
++    self._logwarn('Connect attempt {} failed (network down?). Retrying in {} seconds'.format(
++      self._reconnect_attempt_count, self.reconnect_attempt_wait_seconds))
++    return False
+ 
+   def send_nmea(self):
+     raise NotImplementedError("Must override send_nmea")
+diff --git a/src/ntrip_client/ntrip_client.py b/src/ntrip_client/ntrip_client.py
+index c439e9b..13d9691 100644
+--- a/src/ntrip_client/ntrip_client.py
++++ b/src/ntrip_client/ntrip_client.py
+@@ -53,7 +53,6 @@ class NTRIPClient(NTRIPBase):
+     self.ca_cert = None
+ 
+     # Private reconnect info
+-    self._reconnect_attempt_count = 0
+     self._nmea_send_failed_count = 0
+     self._nmea_send_failed_max = 5
+     self._read_zero_bytes_count = 0
+@@ -187,15 +186,19 @@ class NTRIPClient(NTRIPBase):
+ 
+ 
+   def recv_rtcm(self):
++    # This is called on the node's RTCM timer, so it doubles as the retry loop while
++    # we are disconnected (the caster went away, or the car's WiFi/LTE dropped).
++    # reconnect() throttles itself, so calling it at timer rate is cheap.
+     if not self._connected:
+-      self._logwarn('RTCM requested before client was connected, returning empty list')
+-      return []
++      if not self.reconnect():
++        return []
+ 
+     # If it has been too long since we received an RTCM packet, reconnect
+     if time.time() - self.rtcm_timeout_seconds >= self._recv_rtcm_last_packet_timestamp and self._first_rtcm_received:
+       self._logerr('RTCM data not received for {} seconds, reconnecting'.format(self.rtcm_timeout_seconds))
+-      self.reconnect()
+       self._first_rtcm_received = False
++      if not self.reconnect():
++        return []
+ 
+     # Check if there is any data available on the socket
+     read_sockets, _, _ = select.select([self._server_socket], [], [], 0)

@@ -92,3 +92,35 @@ ros2 topic echo /ublox_gps_node_rover/navrelposned  # relPosHeading 원본 (진�
 증상 확인: `ros2 topic echo /ublox_gps_node_rover/rxmrtcm`의 `msg_type`에 `1013`/`1033`/MSM5(`1075`/`1085`/`1095`/`1115`/`1125`)처럼 UART2용으로 설정한 적 없는 메시지가 `crcFailed=0`(깨끗한 수신)으로 섞여 나오면 이 문제다 — NTRIP CORS망이 흔히 내보내는 조합과 일치한다.
 
 `rtk.launch.py`의 `ublox_rover` remappings에 `('/rtcm', 'unused/rtcm')`을 넣어 rover의 NTRIP 구독 자체를 끊는 것으로 고친다(rover는 NTRIP이 필요 없다 — UART2로만 보정받는다).
+
+## NTRIP: WiFi가 끊겨도 죽지 않고 재접속한다 (`patches/0001-ntrip-client-retry-forever.patch`)
+
+주행 중 WiFi/LTE가 잠깐 끊기면 업스트림 `ntrip_client`는 **노드가 아예 죽어버려서** 네트워크가
+돌아와도 RTCM이 다시 안 들어왔다. 원인 세 가지를 `src/sensing/ntrip_client`에 직접 고쳐 뒀다.
+
+- `NTRIPRosBase.run()`이 최초 접속 실패 시 `sys.exit(1)` 했다 → 부팅 시 WiFi가 아직 안 붙었으면
+  그대로 종료. 이제는 경고만 내고 계속 재시도한다.
+- `NTRIPBase.reconnect()`가 ROS 콜백 안에서 `time.sleep()`으로 루프를 돌았다 → 끊긴 동안 노드
+  전체가 멈춤. 이제 호출당 최대 1회만 시도하고 바로 리턴하며, 재시도는
+  `recv_rtcm()`(RTCM 타이머, 10Hz)이 굴린다. 시도 간격은 `reconnect_attempt_wait_seconds`(5초)로
+  스스로 throttle 한다.
+- `reconnect_attempt_max`(기본 10)회 실패하면 **예외를 던져** 노드를 죽였다 → 50초 이상 끊기면 끝.
+  이제 `reconnect_attempt_max: 0` = 무한 재시도이고, `config/ntrip_params.yaml`도 0으로 둔다.
+  (0보다 큰 값을 주면 예전처럼 그 횟수 뒤 포기/예외.)
+
+**주의**: `src/sensing/ntrip_client`는 `deps.repos`로 받아오는 업스트림 저장소이고 루트
+`.gitignore`에 들어 있어서 이 수정은 이 저장소에 커밋되지 않는다. 워크스페이스를 새로 받거나
+`vcs import`로 다시 받으면 패치가 사라지므로 다시 적용할 것:
+
+```bash
+cd src/sensing/ntrip_client
+git apply ../hyper_rtk/patches/0001-ntrip-client-retry-forever.patch
+cd ../../.. && colcon build --packages-select ntrip_client
+```
+
+확인 방법(캐스터를 못 찾는 상황을 흉내):
+
+```bash
+ros2 run ntrip_client ntrip_ros.py --ros-args -p host:=10.255.255.1 -p authenticate:=false
+# -> "Connect attempt N failed (network down?). Retrying in 5 seconds"가 5초마다 찍히고 노드는 살아 있음
+```
