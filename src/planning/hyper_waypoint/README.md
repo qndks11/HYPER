@@ -87,6 +87,15 @@ python3 src/planning/hyper_waypoint/scripts/plot_waypoints.py \
 python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
   src/planning/hyper_waypoint/waypoints/sim.csv --gazebo-course
 
+# 실차 코스 항공사진을 배경에 깔고 라벨링 (정렬값은 real_course.align.yaml)
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/full_track.csv --real-course \
+  --mission src/planning/hyper_planner/config/full_mission.yaml
+
+# 배경 정렬 모드로 바로 시작 (배경을 코스에 맞출 때)
+python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+  src/planning/hyper_waypoint/waypoints/full_track.csv --real-course --align
+
 # 배경 없이
 python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
   src/planning/hyper_waypoint/waypoints/sim.csv
@@ -112,6 +121,20 @@ python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
 | `u` | 되돌리기 |
 | `s` | mission.yaml 저장 |
 | `q` | 종료 |
+| `a` | 배경 정렬 모드 토글 (`--real-course` / `--background --align`일 때만) |
+
+정렬 모드 조작 (라벨 클릭은 잠시 비활성화됩니다):
+
+| 조작 | 동작 |
+| --- | --- |
+| 방향키 | 배경 이동 2 m (`Shift`+방향키는 0.2 m) |
+| 좌클릭 | 배경 중심을 클릭 지점으로 (거친 위치 맞춤) |
+| `+` / `-` | 축척 ±1% (`Shift`는 ±0.1%) |
+| `,` / `.` | 회전 ±0.5° (`Shift`는 ±0.05°) |
+| `v` / `b` | 배경 불투명도 |
+| `f` | 코스와 배경이 모두 보이도록 화면 맞춤 |
+| `w` | 정렬값을 `<이미지>.align.yaml`에 저장 |
+| `a` | 정렬 모드 종료 |
 
 - **찍어야 할 라벨 목록은 하드코딩돼 있지 않습니다.** mission.yaml의 `drive` 스텝이
   `until:`로 참조하는 이름이 곧 라벨 목록이므로, 스텝을 추가하면 이 툴이 자동으로 그
@@ -135,12 +158,24 @@ python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
     늘립니다 -- 기록된 웨이포인트가 차선 위에 정확히 얹히는 것을 확인했습니다.
   - 큰 텍스처는 `--background-max-px`(기본 2500)로 다운샘플해서 로드하므로 팬/줌이
     느려지지 않습니다.
-- **실차**: 위성 정사영상을 `--background`와 `--extent`(map 프레임 미터 단위 경계)로
-  주세요. 단 실차 좌표계가 성립하려면
+- **실차 (항공사진)**: `--real-course`가
+  `driving_course/meshes/real_course.png`(실제 코스 항공사진)를 배경으로 깝니다.
+  이 이미지는 지오레퍼런스가 전혀 없으므로 배치는 같은 폴더의
+  `real_course.align.yaml`에 들어 있습니다 -- 이미지 중심의 map 좌표, 이미지 가로 폭(m),
+  반시계 회전각(도). 현재 값은 항공사진의 아스팔트 영역에 `full_track.csv`를 맞춰
+  **자동 추정한 초기값**이므로, 코스와 정확히 겹치게 하려면 툴에서 `a`로 정렬 모드에
+  들어가 방향키/`+``-`/`,``.`로 미세 조정한 뒤 `w`로 저장하세요.
+  - 축척은 픽셀당 미터가 아니라 **이미지 가로 폭(m)**으로 저장합니다. 배경은
+    `--background-max-px`로 다운샘플되므로 픽셀 기준 축척이면 그 값만 바꿔도 배경이
+    조용히 어긋납니다.
+  - 임의의 이미지도 `--background <img> --align`으로 같은 방식으로 맞출 수 있습니다.
+    `--extent`를 함께 주면 그 값이 (사이드카가 아직 없을 때) 시작 배치가 됩니다.
+- **실차 (정사영상)**: 이미 지오레퍼런스된 정사영상은 `--background`와
+  `--extent`(map 프레임 미터 단위 경계)로 바로 주면 됩니다. 단 실차 좌표계가 성립하려면
   [hyper_localization/config/datums.yaml](../../localization/hyper_localization/config/datums.yaml)의
   `track` datum 실측이 먼저입니다(현재 `0.0` TODO 상태).
 
-Stopline_L: 3.218, 27.746
+Stopline_L: 3.218, 27.746212
 Stopline_R: 4.298, 30.832
 Signal1: -0.531, 1.145
 Signal2: -12.197, -6.338

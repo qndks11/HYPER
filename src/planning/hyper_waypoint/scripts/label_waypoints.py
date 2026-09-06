@@ -22,6 +22,7 @@ Usage:
     python3 label_waypoints.py waypoints/sim.csv
     python3 label_waypoints.py waypoints/track.csv --mission /path/to/mission.yaml
     python3 label_waypoints.py waypoints/sim.csv --gazebo-course
+    python3 label_waypoints.py waypoints/full_track.csv --real-course
     python3 label_waypoints.py waypoints/track.csv --background ortho.png \
         --extent -50 -60 60 50
 """
@@ -45,6 +46,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 GAZEBO_COURSE_MESHES = os.path.normpath(os.path.join(
     SCRIPT_DIR, "..", "..", "..", "simulator", "hyper_gazebo", "worlds", "models",
     "driving_course", "meshes"))
+
+# The real course's aerial screenshot. Unlike the Gazebo texture it carries no
+# georeference at all, so its map-frame placement is whatever the operator aligned it
+# to, stored beside the image in <image>.align.yaml (see load_alignment).
+REAL_COURSE_IMAGE = os.path.join(GAZEBO_COURSE_MESHES, "real_course.png")
 
 DEFAULT_MISSION = os.path.join(
     SCRIPT_DIR, "..", "..", "hyper_planner", "config", "mission.yaml")
@@ -172,6 +178,53 @@ def load_background(path, max_px):
     return np.asarray(image)
 
 
+def alignment_path(image_path):
+    """Sidecar holding an image's map-frame placement, e.g. real_course.align.yaml."""
+    return os.path.splitext(image_path)[0] + ".align.yaml"
+
+
+def load_alignment(image_path, xs, ys):
+    """Return the placement of `image_path` as (cx, cy, width_m, rot_deg).
+
+    An aerial screenshot of the real course has no georeference of any kind, so the
+    placement lives in a sidecar the operator writes from inside this tool ('w' in
+    alignment mode). Until that file exists, start from a guess that at least puts the
+    image on screen with the waypoints: centred on the course, a little wider than the
+    driven extent, unrotated.
+
+    The scale is stored as the image's full width in meters rather than a
+    meters-per-pixel figure, because load_background downsamples: a pixel-based scale
+    would silently shift the overlay whenever --background-max-px changed.
+    """
+    path = alignment_path(image_path)
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                doc = yaml.safe_load(f) or {}
+            return (float(doc["center_x"]), float(doc["center_y"]),
+                    float(doc["width_m"]), float(doc.get("rotation_deg", 0.0)))
+        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+            print(f"경고: '{path}'를 읽지 못해 초기 정렬값을 추정합니다 ({exc}).",
+                  file=sys.stderr)
+
+    return (float((xs.min() + xs.max()) / 2.0), float((ys.min() + ys.max()) / 2.0),
+            1.4 * max(float(xs.max() - xs.min()), 1.0), 0.0)
+
+
+def save_alignment(image_path, cx, cy, width_m, rot_deg):
+    """Write the placement sidecar. Raises OSError, which the caller reports."""
+    path = alignment_path(image_path)
+    with open(path, "w") as f:
+        f.write("# label_waypoints.py의 정렬 모드(a)가 저장한 배경 이미지 위치입니다.\n")
+        f.write(f"# image: {os.path.basename(image_path)}\n")
+        f.write("# 이미지 중심의 map 좌표(m), 이미지 가로 폭(m), 반시계 회전각(도).\n")
+        f.write(f"center_x: {cx:.4f}\n")
+        f.write(f"center_y: {cy:.4f}\n")
+        f.write(f"width_m: {width_m:.4f}\n")
+        f.write(f"rotation_deg: {rot_deg:.4f}\n")
+    return path
+
+
 def load_mission(path):
     """Return (raw_text, required_labels_in_step_order, existing_positions)."""
     try:
@@ -279,10 +332,35 @@ class Labeler:
         self.marks = None
         self.annotations = []
 
-    def draw_course(self, background=None, extent=None):
-        if background is not None:
+        # Background alignment state, only meaningful for an image placed by hand
+        # (--real-course / --background --align): the artist plus its map-frame
+        # placement, and whether the keyboard is currently driving it.
+        self.bg_artist = None
+        self.align_image = None
+        self.align_cx = self.align_cy = 0.0
+        self.align_w = 1.0
+        self.align_rot = 0.0
+        self.align_mode = False
+        self.align_dirty = False
+        self.bg_alpha = 1.0
+
+    def draw_course(self, background=None, extent=None, align=None):
+        if background is not None and align is not None:
+            self.align_image = align["path"]
+            self.align_cx, self.align_cy = align["cx"], align["cy"]
+            self.align_w, self.align_rot = align["width_m"], align["rot_deg"]
+            # Drawn in a unit-width image frame and placed by an affine transform, so
+            # scale/rotation stay live: the pixel array never has to be re-sampled.
+            aspect = background.shape[0] / background.shape[1]
+            self.bg_artist = self.ax.imshow(
+                background, origin="upper", zorder=0, alpha=self.bg_alpha,
+                extent=[-0.5, 0.5, -0.5 * aspect, 0.5 * aspect])
+            self.apply_alignment()
+            self.frame_view()
+        elif background is not None:
             # zorder 0 so the course always draws over the imagery.
-            self.ax.imshow(background, extent=extent, origin="upper", zorder=0)
+            self.bg_artist = self.ax.imshow(background, extent=extent,
+                                            origin="upper", zorder=0)
         # Grey reads well on a blank figure but disappears into asphalt; cyan holds up
         # against both the road and the grass in the course texture, and stays clear of
         # the blue/red the label markers use.
@@ -299,6 +377,95 @@ class Labeler:
         self.ax.grid(alpha=0.3)
         self.ax.legend(loc="upper right", fontsize=8)
 
+    # -- background alignment ---------------------------------------------------
+    def apply_alignment(self):
+        """Push the current placement onto the background artist."""
+        from matplotlib.transforms import Affine2D
+        transform = (Affine2D().scale(self.align_w).rotate_deg(self.align_rot)
+                     .translate(self.align_cx, self.align_cy) + self.ax.transData)
+        self.bg_artist.set_transform(transform)
+
+    def frame_view(self):
+        """Set the axes limits by hand around waypoints and image alike.
+
+        A transformed AxesImage contributes nothing to matplotlib's autoscaling, so
+        without this a badly-placed overlay would simply be off-screen with no hint
+        that it exists.
+        """
+        corners = np.array([[-0.5, -0.5, 0.5, 0.5], [-0.5, 0.5, 0.5, -0.5]])
+        aspect = self.bg_artist.get_extent()
+        corners[1] *= (aspect[3] - aspect[2]) / (aspect[1] - aspect[0])
+        angle = np.radians(self.align_rot)
+        rot = np.array([[np.cos(angle), -np.sin(angle)],
+                        [np.sin(angle), np.cos(angle)]])
+        pts = rot @ (corners * self.align_w)
+        bx = pts[0] + self.align_cx
+        by = pts[1] + self.align_cy
+        pad = 5.0
+        self.ax.set_xlim(min(bx.min(), self.xs.min()) - pad,
+                         max(bx.max(), self.xs.max()) + pad)
+        self.ax.set_ylim(min(by.min(), self.ys.min()) - pad,
+                         max(by.max(), self.ys.max()) + pad)
+
+    def nudge(self, dx=0.0, dy=0.0, scale=1.0, rot=0.0, alpha=0.0):
+        self.align_cx += dx
+        self.align_cy += dy
+        self.align_w *= scale
+        self.align_rot += rot
+        if alpha:
+            self.bg_alpha = float(np.clip(self.bg_alpha + alpha, 0.1, 1.0))
+            self.bg_artist.set_alpha(self.bg_alpha)
+        self.align_dirty = True
+        self.apply_alignment()
+        self.status = (f"정렬: 중심 ({self.align_cx:.2f}, {self.align_cy:.2f}) "
+                       f"폭 {self.align_w:.2f} m  회전 {self.align_rot:.2f}°  "
+                       f"불투명도 {self.bg_alpha:.1f}")
+
+    def save_align(self):
+        try:
+            path = save_alignment(self.align_image, self.align_cx, self.align_cy,
+                                  self.align_w, self.align_rot)
+        except OSError as exc:
+            self.status = f"정렬 저장 실패: {exc}"
+            return
+        self.align_dirty = False
+        self.status = f"{os.path.basename(path)} 저장됨"
+        print(f"{path} 저장됨")
+
+    def align_keys(self, key):
+        """Handle one key in alignment mode. Returns False if it was not ours."""
+        step = 0.2 if key.startswith("shift+") else 2.0
+        bare = key[len("shift+"):] if key.startswith("shift+") else key
+        fine = key.startswith("shift+")
+        if bare == "left":
+            self.nudge(dx=-step)
+        elif bare == "right":
+            self.nudge(dx=step)
+        elif bare == "up":
+            self.nudge(dy=step)
+        elif bare == "down":
+            self.nudge(dy=-step)
+        elif key in ("+", "=", "shift+="):
+            self.nudge(scale=1.001 if fine else 1.01)
+        elif key in ("-", "_", "shift+-"):
+            self.nudge(scale=1 / (1.001 if fine else 1.01))
+        elif bare == ",":
+            self.nudge(rot=0.05 if fine else 0.5)
+        elif bare == ".":
+            self.nudge(rot=-0.05 if fine else -0.5)
+        elif bare == "v":
+            self.nudge(alpha=-0.1)
+        elif bare == "b":
+            self.nudge(alpha=0.1)
+        elif bare == "f":
+            self.frame_view()
+            self.status = "화면을 코스에 맞췄습니다."
+        elif bare == "w":
+            self.save_align()
+        else:
+            return False
+        return True
+
     def connect(self):
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
         self.fig.canvas.mpl_connect("key_press_event", self.on_key)
@@ -313,6 +480,12 @@ class Labeler:
 
     def on_click(self, event):
         if event.inaxes is not self.ax or event.xdata is None or self.navigating():
+            return
+        if self.align_mode:
+            if event.button == 1:
+                self.nudge(dx=event.xdata - self.align_cx,
+                           dy=event.ydata - self.align_cy)
+                self.refresh()
             return
         if event.button == 1:
             self.place(event.xdata, event.ydata)
@@ -370,6 +543,18 @@ class Labeler:
 
     def on_key(self, event):
         key = event.key
+        if key == "a":
+            if self.align_image is None:
+                self.status = "정렬할 배경 이미지가 없습니다 (--real-course)."
+            else:
+                self.align_mode = not self.align_mode
+                self.status = ("정렬 모드: 방향키 이동, +/- 축척, ,/. 회전, w 저장"
+                               if self.align_mode else "정렬 모드 종료.")
+            self.refresh()
+            return
+        if self.align_mode and key and self.align_keys(key):
+            self.refresh()
+            return
         if key in ("n", "right"):
             self.active = (self.active + 1) % len(self.order)
             self.page = self.active // PAGE
@@ -401,6 +586,9 @@ class Labeler:
     def on_close(self, _event):
         if self.dirty:
             print("\n경고: 저장하지 않은 변경이 있습니다 (저장은 's' 키).", file=sys.stderr)
+        if self.align_dirty:
+            print("경고: 저장하지 않은 배경 정렬이 있습니다 (저장은 정렬 모드의 'w' 키).",
+                  file=sys.stderr)
 
     # -- persistence ------------------------------------------------------------
     def save(self):
@@ -454,12 +642,27 @@ class Labeler:
         orphans = [n for n in self.positions if n not in self.order]
         if orphans:
             lines += ["", "orphan (step 미참조):"] + [f"   {n}" for n in orphans]
-        lines += ["", "좌클릭  배치", "우클릭  삭제", "n/p     라벨 이동",
-                  "tab     다음 미배치", "u       되돌리기", "s       저장", "q       종료"]
+        if self.align_mode:
+            lines = ["[정렬 모드]  a 로 종료", "",
+                     f"중심  ({self.align_cx:.2f}, {self.align_cy:.2f})",
+                     f"폭    {self.align_w:.2f} m",
+                     f"회전  {self.align_rot:.2f}°",
+                     f"투명  {self.bg_alpha:.1f}", "",
+                     "방향키  이동 (2 m)", "shift+  미세 (0.2 m)",
+                     "+/-     축척 ±1%", ",/.     회전 ±0.5°",
+                     "좌클릭  이미지 중심 이동", "v/b     투명도",
+                     "f       화면 맞춤", "w       정렬 저장", "a       정렬 모드 종료"]
+        else:
+            lines += ["", "좌클릭  배치", "우클릭  삭제", "n/p     라벨 이동",
+                      "tab     다음 미배치", "u       되돌리기", "s       저장",
+                      "q       종료"]
+            if self.align_image is not None:
+                lines.append("a       배경 정렬 모드")
         self.panel_text.set_text("\n".join(lines))
 
         star = "*" if self.dirty else ""
-        self.ax.set_title(f"[{self.order[self.active]}]{star}   {self.status}",
+        head = "[정렬]" if self.align_mode else f"[{self.order[self.active]}]"
+        self.ax.set_title(f"{head}{star}   {self.status}",
                           fontsize=10, loc="left")
         self.fig.canvas.draw_idle()
 
@@ -474,6 +677,14 @@ def main():
                         help="draw hyper_gazebo's driving_course texture as the "
                              "backdrop, with bounds read from its ground.obj "
                              "(simulation CSVs only)")
+    parser.add_argument("--real-course", action="store_true",
+                        help="draw the real course's aerial image "
+                             f"({os.path.basename(REAL_COURSE_IMAGE)}) as the backdrop, "
+                             "positioned by its .align.yaml sidecar and adjustable in "
+                             "the tool's alignment mode ('a')")
+    parser.add_argument("--real-course-image", default=REAL_COURSE_IMAGE,
+                        help="image --real-course draws (default: hyper_gazebo's "
+                             "driving_course/meshes/real_course.png)")
     parser.add_argument("--background", help="georeferenced image to draw under the course")
     parser.add_argument("--extent", nargs=4, type=float,
                         metavar=("X0", "Y0", "X1", "Y1"),
@@ -481,21 +692,30 @@ def main():
     parser.add_argument("--background-max-px", type=int, default=2500,
                         help="downsample --background to at most this many pixels on "
                              "its long edge (default: 2500)")
+    parser.add_argument("--align", action="store_true",
+                        help="start in background alignment mode (implied use with "
+                             "--real-course; also aligns --background, whose --extent "
+                             "is then only the starting placement)")
     parser.add_argument("--snap-warn", type=float, default=2.0,
                         help="warn when a click lands this far from any waypoint "
                              "(default: 2.0 m)")
     args = parser.parse_args()
 
-    if args.background and not args.extent:
-        sys.exit("--background requires --extent X0 Y0 X1 Y1.")
-    if args.gazebo_course and args.background:
-        sys.exit("--gazebo-course and --background are mutually exclusive.")
+    backdrops = sum(bool(v) for v in (args.gazebo_course, args.background,
+                                      args.real_course))
+    if backdrops > 1:
+        sys.exit("--gazebo-course, --real-course and --background are mutually "
+                 "exclusive.")
+    if args.background and not args.extent and not args.align:
+        sys.exit("--background requires --extent X0 Y0 X1 Y1 (or --align).")
+    if args.align and args.gazebo_course:
+        sys.exit("--gazebo-course is georeferenced by ground.obj; nothing to align.")
 
     setup_font()
     xs, ys = load_waypoints(args.csv_path)
     text, order, positions = load_mission(args.mission)
 
-    background = extent = None
+    background = extent = align = None
     if args.gazebo_course:
         texture = os.path.join(GAZEBO_COURSE_MESHES, "course.png")
         quad = os.path.join(GAZEBO_COURSE_MESHES, "ground.obj")
@@ -506,6 +726,24 @@ def main():
         background = load_background(texture, args.background_max_px)
         print(f"배경: {texture}  범위 x[{extent[0]:.2f}, {extent[1]:.2f}] "
               f"y[{extent[2]:.2f}, {extent[3]:.2f}] m")
+    elif args.real_course or (args.background and args.align):
+        image_path = args.background or args.real_course_image
+        if not os.path.exists(image_path):
+            sys.exit(f"배경 이미지 '{image_path}'가 없습니다.")
+        background = load_background(image_path, args.background_max_px)
+        cx, cy, width_m, rot = load_alignment(image_path, xs, ys)
+        if args.extent and not os.path.exists(alignment_path(image_path)):
+            # No sidecar yet, but the caller gave bounds: start from those instead of
+            # the generic guess, so --extent stays useful as a rough first placement.
+            x0, y0, x1, y1 = args.extent
+            cx, cy, width_m, rot = (x0 + x1) / 2.0, (y0 + y1) / 2.0, abs(x1 - x0), 0.0
+        align = {"path": image_path, "cx": cx, "cy": cy, "width_m": width_m,
+                 "rot_deg": rot}
+        sidecar = alignment_path(image_path)
+        print(f"배경: {image_path}")
+        print(f"정렬: {sidecar if os.path.exists(sidecar) else '(없음, 추정값 사용)'} "
+              f"-- 중심 ({cx:.2f}, {cy:.2f}) 폭 {width_m:.2f} m 회전 {rot:.2f}°")
+        print("'a'로 정렬 모드에 들어가 배경을 코스에 맞춘 뒤 'w'로 저장하세요.")
     elif args.background:
         background = load_background(args.background, args.background_max_px)
         x0, y0, x1, y1 = args.extent
@@ -516,7 +754,10 @@ def main():
           f"{len(positions)} already placed")
 
     app = Labeler(xs, ys, args.mission, text, order, positions, args.snap_warn)
-    app.draw_course(background, extent)
+    app.draw_course(background, extent, align)
+    if align is not None and args.align:
+        app.align_mode = True
+        app.status = "정렬 모드: 방향키 이동, +/- 축척, ,/. 회전, w 저장"
     app.connect()
     app.refresh()
     plt.tight_layout()
