@@ -26,7 +26,7 @@ package you're touching before its sources**, instead of grepping the tree. One 
 | `hyper_launch` | `src/launcher/hyper_launch/README.md` | whole-stack + per-stage launch files |
 | `hyper_planner` | `src/planning/hyper_planner/README.md` | mission step queue, nav2 `follow_path`, cmd_vel→Ackermann |
 | `hyper_costmap_plugins` | `src/planning/hyper_costmap_plugins/README.md` | nav2 costmap layers (`DrivableAreaLayer`) |
-| `hyper_waypoint` | `src/planning/hyper_waypoint/README.md` | waypoint CSV recorder off `odometry/filtered_map` |
+| `hyper_waypoint` | `src/planning/hyper_waypoint/README.md` | waypoint CSV recorder off `odometry/filtered_map` (GUI lives in `hyper_waypoint_studio`) |
 | `hyper_localization` | `src/localization/hyper_localization/README.md` | dual EKF + `navsat_transform`, datum config |
 | `hyper_lane_detection` | `src/perception/hyper_lane_detection/README.md` | lane/stopline from camera, BEV, drivable area |
 | `hyper_object_detection` | `src/perception/hyper_object_detection/README.md` | YOLO traffic-light/sign → `/perception/sign` |
@@ -34,6 +34,7 @@ package you're touching before its sources**, instead of grepping the tree. One 
 | `hyper_gazebo` | `src/simulator/hyper_gazebo/README.md` | sim-only: world, spawn, gz↔ROS bridge |
 | `hyper_interface` | `src/interface/hyper_interface/README.md` | real-car ROS↔Arduino serial bridge |
 | `hyper_rqt` | `src/tools/hyper_rqt/README.md` | rqt panel of the services you actually call |
+| `hyper_waypoint_studio` | `src/tools/hyper_waypoint_studio/README.md` | one GUI to view/edit/record courses and run a mission from mid-sequence |
 | `hyper_rtk`, `hyper_ebimu`, `hyper_camera`, `hyper_lidar`, `ntrip_client`, `ublox`, `witmotion_ros2` | `src/sensing/*/README.md` | real-car sensor drivers — see `src/sensing/CLAUDE.md` |
 
 ## Branch structure

@@ -109,6 +109,7 @@ using FollowPath = nav2_msgs::action::FollowPath;
 using GoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
 
 // 스텝의 정의와 mission.yaml 로드는 mission_loader.hpp에 있습니다.
+using hyper_planner::BranchCase;
 using hyper_planner::Step;
 using hyper_planner::StepType;
 using hyper_planner::join_values;
@@ -195,6 +196,11 @@ public:
 
     // 나중에 붙는 RViz/툴이 받을 수 있도록 latch 합니다.
     path_pub_ = create_publisher<nav_msgs::msg::Path>("~/path", rclcpp::QoS(1).transient_local());
+    // 펼쳐진 스텝 목록. GUI가 갈래(route) 스텝의 인덱스를 알 수 있는 유일한 방법입니다
+    // -- mission_loader가 routes의 스텝을 main 뒤에 덧붙이므로 yaml만 봐서는 셀 수
+    // 없습니다. latched라 나중에 붙는 GUI도 그대로 받습니다.
+    steps_pub_ = create_publisher<std_msgs::msg::String>(
+      "~/steps", rclcpp::QoS(1).transient_local());
     status_pub_ = create_publisher<std_msgs::msg::String>(
       "~/status", rclcpp::QoS(1).transient_local());
     // controller_server가 QoS(10)으로 구독합니다.
@@ -235,6 +241,13 @@ public:
         const std_srvs::srv::Trigger::Request::SharedPtr,
         std_srvs::srv::Trigger::Response::SharedPtr response) {
         handle_restart(response);
+      });
+    goto_step_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/goto_step",
+      [this](
+        const std_srvs::srv::Trigger::Request::SharedPtr,
+        std_srvs::srv::Trigger::Response::SharedPtr response) {
+        handle_goto_step(response);
       });
 
     if (!load_mission()) {
@@ -282,7 +295,53 @@ private:
     }
     courses_ = std::move(loader.courses());
     steps_ = std::move(loader.steps());
+    publish_steps();
     return true;
+  }
+
+  // 펼쳐진 스텝 목록을 `index|type|label|course|route` 한 줄씩 내보냅니다.
+  //
+  // GUI가 이걸 받아야 하는 이유: mission_loader는 steps를 먼저 펼치고 routes의 스텝을
+  // 그 뒤에 덧붙이므로, yaml만 읽어서는 갈래 스텝의 인덱스를 셀 수 없습니다. 그런데
+  // '~/goto_step'은 인덱스로 가므로, 갈래 스텝을 시험 주행하려면 노드가 직접 알려
+  // 주는 수밖에 없습니다.
+  void publish_steps()
+  {
+    // 갈래 이름은 Step에 없으므로 branch의 case/default target에서 따라 내려가며
+    // 붙입니다. 갈래 스텝은 덧붙인 순서대로 이어져 있어 next_index를 따라가면 됩니다.
+    std::vector<std::string> route_of(steps_.size());
+    for (const Step & step : steps_) {
+      if (step.type != StepType::kBranch) {
+        continue;
+      }
+      std::vector<std::pair<std::size_t, std::string>> heads;
+      for (const BranchCase & branch_case : step.cases) {
+        heads.emplace_back(branch_case.target, branch_case.route);
+      }
+      heads.emplace_back(step.default_target, step.default_route);
+      for (const auto & [head, name] : heads) {
+        std::size_t index = head;
+        while (index < steps_.size() && route_of[index].empty() && index >= head) {
+          route_of[index] = name;
+          const std::size_t next = steps_[index].next_index;
+          if (next <= index || next >= steps_.size()) {
+            break;   // 합류했거나 미션 끝. 갈래는 여기까지입니다.
+          }
+          index = next;
+        }
+      }
+    }
+
+    std::ostringstream out;
+    for (std::size_t i = 0; i < steps_.size(); ++i) {
+      const Step & step = steps_[i];
+      out << i << '|' << type_name(step.type) << '|' << step.label << '|'
+          << (step.type == StepType::kDrive ? course_of(step).name : std::string())
+          << '|' << route_of[i] << '\n';
+    }
+    std_msgs::msg::String msg;
+    msg.data = out.str();
+    steps_pub_->publish(msg);
   }
 
   // ---------------------------------------------------------------- 코스 접근
@@ -1356,22 +1415,119 @@ private:
     response->message = "Skipping step " + skipped + ".";
   }
 
-  void handle_restart(std_srvs::srv::Trigger::Response::SharedPtr response)
+  // 미션을 "index 스텝 앞에서 대기(kIdle)"로 되돌립니다. begin_step()은 부르지 않습니다.
+  //
+  // 이 구분이 '~/goto_step'의 전부입니다. 안에서 쓰는 goto_step(index)은 곧바로
+  // begin_step()을 불러 차가 출발해 버리는데, 여기서 필요한 것은 "스텝만 골라 두고
+  // 서 있기"입니다 -- 시뮬에서는 그 사이에 차를 라벨 위치로 순간이동시키고, 실차에서는
+  // 사람이 차를 그 지점에 가져다 놓은 뒤에 '~/start'를 부릅니다.
+  //
+  // handle_restart와 handle_goto_step이 같은 상태를 빠짐없이 되돌리도록 한곳에 모았습니다.
+  // 취소한 골의 결과가 뒤늦게 오더라도 on_result가 phase_ == kIdle에서 곧바로 돌아
+  // 나가므로 안전합니다.
+  void reset_to(std::size_t index)
   {
     skip_requested_ = false;
     arrival_requested_ = false;
     prearmed_ = false;
     blocked_ = false;
+    // 갈아끼운 옛 골의 표시도 지웁니다. 그 결과가 아직 날아오는 중일 수 있지만,
+    // 위와 같은 이유로 kIdle에서 무시됩니다.
+    has_superseded_goal_ = false;
+    // 점프 전에 쌓인 연속 프레임이 새 wait_signal/branch를 즉시 만족시키지 않도록.
+    sign_streak_ = 0;
+    value_streak_ = 0;
+    streak_value_.clear();
     if (goal_handle_) {
       client_->async_cancel_goal(goal_handle_);
       goal_handle_.reset();
     }
-    step_index_ = 0;
+    step_index_ = index;
     retries_ = 0;
     phase_ = Phase::kIdle;
     publish_status("idle");
+  }
+
+  void handle_restart(std_srvs::srv::Trigger::Response::SharedPtr response)
+  {
+    reset_to(0);
     response->success = true;
     response->message = "Reset to step 0; call '~/start' to run.";
+  }
+
+  // 임의의 스텝 앞으로 점프합니다. 미션 후반의 스텝 하나를 고치고 확인하려고 코스를
+  // 처음부터 돌 이유가 없기 때문입니다.
+  //
+  // 목적지는 요청 필드가 아니라 파라미터로 받습니다 -- teleport_service의 label,
+  // model_service의 모델 이름과 같은 방식이라, hyper_rqt 패널이나 waypoint studio가
+  // set_parameters로 값을 밀어 넣고 인자 없는 Trigger를 부르면 됩니다.
+  void handle_goto_step(std_srvs::srv::Trigger::Response::SharedPtr response)
+  {
+    if (steps_.empty()) {
+      response->success = false;
+      response->message = "Mission was not loaded; see the node log.";
+      return;
+    }
+
+    // 파라미터는 params_ 스냅샷이 아니라 여기서 직접 읽습니다. 스냅샷은 tick()이
+    // param_listener_->is_old()를 볼 때만 갱신되므로, set_parameters 직후에 Trigger가
+    // 들어오면 그 사이 tick이 없어 이전 값으로 점프할 수 있습니다 -- 조용히 엉뚱한
+    // 스텝으로 가는 사고입니다.
+    const std::string label = get_parameter("step_label").as_string();
+    const int64_t requested = get_parameter("step_index").as_int();
+
+    std::size_t target = 0;
+    if (!label.empty()) {
+      bool found = false;
+      for (std::size_t i = 0; i < steps_.size(); ++i) {
+        if (steps_[i].type == StepType::kDrive && steps_[i].label == label) {
+          target = i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        std::ostringstream out;
+        out << "No drive step with until='" << label << "'. Available:";
+        for (const Step & step : steps_) {
+          if (step.type == StepType::kDrive && !step.label.empty()) {
+            out << ' ' << step.label;
+          }
+        }
+        response->success = false;
+        response->message = out.str();
+        return;
+      }
+    } else if (requested >= 0) {
+      if (static_cast<std::size_t>(requested) >= steps_.size()) {
+        response->success = false;
+        response->message = "step_index " + std::to_string(requested) +
+          " is out of range (0.." + std::to_string(steps_.size() - 1) + ").";
+        return;
+      }
+      target = static_cast<std::size_t>(requested);
+    } else {
+      response->success = false;
+      response->message =
+        "Set 'step_label' or 'step_index' first "
+        "(ros2 param set /mission_manager step_label <label>).";
+      return;
+    }
+
+    const bool was_running =
+      phase_ == Phase::kDriving || phase_ == Phase::kStarting ||
+      phase_ == Phase::kHolding || phase_ == Phase::kWaiting || phase_ == Phase::kBlocked;
+    reset_to(target);
+    if (was_running) {
+      RCLCPP_INFO(
+        get_logger(), "goto_step canceled the running goal and holds at step %zu.", target);
+    }
+
+    response->success = true;
+    response->message = "[" + std::to_string(target + 1) + "/" +
+      std::to_string(steps_.size()) + "] " + status_text_for(target) +
+      " -- call '~/start' to run.";
+    RCLCPP_INFO(get_logger(), "%s", response->message.c_str());
   }
 
   // ---------------------------------------------------------------- 표시
@@ -1386,8 +1542,17 @@ private:
     if (step_index_ >= steps_.size()) {
       return "finished";
     }
-    const Step & step = steps_[step_index_];
-    std::string text = progress() + " " + type_name(step.type);
+    return progress() + " " + status_text_for(step_index_);
+  }
+
+  // '~/goto_step'이 아직 옮기지 않은 스텝을 응답에 적을 수 있도록 인덱스를 받습니다.
+  std::string status_text_for(std::size_t index) const
+  {
+    if (index >= steps_.size()) {
+      return "finished";
+    }
+    const Step & step = steps_[index];
+    std::string text = std::string(type_name(step.type));
     if (step.type == StepType::kDrive) {
       text += " until=" + step.label;
       if (courses_.size() > 1) {
@@ -1459,12 +1624,14 @@ private:
   GoalHandle::SharedPtr goal_handle_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr steps_pub_;
   std::unique_ptr<hyper_planner::SpeedLimitPublisher> speed_limit_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sign_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr cancel_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr skip_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr restart_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr goto_step_srv_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;

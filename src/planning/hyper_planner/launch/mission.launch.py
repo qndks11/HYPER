@@ -3,7 +3,7 @@
 
 nav2 controller_server가 이미 떠 있어야 합니다(nav2_controller.launch.py).
 
-  ros2 launch hyper_planner mission.launch.py                  # config/mission.yaml (대회 미션)
+  ros2 launch hyper_planner mission.launch.py                  # config/mission_sim.yaml (대회 미션)
   ros2 launch hyper_planner mission.launch.py mission:=simple  # config/simple.yaml (한 바퀴)
 
 simple은 코스 전체를 골 하나로 보냅니다 -- follow_path_client_node가 하던 일이지만
@@ -20,7 +20,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     default_csv = PathJoinSubstitution([
         EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-        'waypoints', 'sim.csv'])
+        'waypoints', 'simulation', 'sim1.csv'])
     # config/<mission>.yaml. 이름만 받는 이유는 전체 경로를 손으로 적기 번거롭기 때문입니다
     # (share 디렉터리는 `ros2 pkg prefix`를 거쳐야 나옵니다). 절대 경로가 필요하면
     # mission_yaml을 직접 주면 됩니다 -- 그쪽이 이 기본값을 덮어씁니다.
@@ -30,7 +30,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'mission', default_value='mission',
+            'mission', default_value='mission_sim',
             description='config/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
         DeclareLaunchArgument('mission_yaml', default_value=default_mission),
         DeclareLaunchArgument('waypoint_csv', default_value=default_csv),

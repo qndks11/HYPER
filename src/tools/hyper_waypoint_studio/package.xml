@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hyper_waypoint_studio</name>
+  <version>0.0.0</version>
+  <description>
+    코스 웨이포인트를 한 화면에서 보고, 고치고, 녹화하고, 미션을 중간부터 돌리는 GUI.
+    label_waypoints.py와 waypoint_record_gui.py를 대체합니다.
+  </description>
+  <maintainer email="qndks11@gmail.com">Kim Hyeongjun</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- ROS는 선택입니다: 보기/편집만 할 때는 rclpy 없이도 창이 뜹니다(main.py 참고). -->
+  <depend>rclpy</depend>
+  <depend>python_qt_binding</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rcl_interfaces</depend>
+
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
+  <!-- python_qt_binding이 실제로 물어 오는 바인딩. hyper_waypoint에서 옮겨 왔습니다. -->
+  <exec_depend>python3-pyqt5</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

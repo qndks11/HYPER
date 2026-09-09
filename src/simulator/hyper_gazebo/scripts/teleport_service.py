@@ -36,10 +36,10 @@ from std_srvs.srv import Trigger
 
 DEFAULT_MISSION_YAML = os.path.join(
     os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_planner',
-    'config', 'mission.yaml')
+    'config', 'mission_sim.yaml')
 DEFAULT_WAYPOINT_CSV = os.path.join(
     os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-    'waypoints', 'sim.csv')
+    'waypoints', 'simulation', 'sim1.csv')
 
 
 class TeleportService(Node):

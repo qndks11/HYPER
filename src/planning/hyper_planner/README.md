@@ -11,7 +11,7 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
   `input_timeout`(0.3초) 워치독이 있어 목표가 없으면 차가 섭니다 -- 이것이 `stop` 스텝의 정지 방식입니다.
 - `follow_path_client_node`: 코스 전체를 목표 하나로 보내던 예전 노드입니다. **레거시** -- 아래
   [follow_path_client_node (레거시)](#follow_path_client_node-레거시) 참고.
-- `config/mission.yaml`: 대회 미션. 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
+- `config/mission_sim.yaml`: 대회 미션(시뮬). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
 - `config/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
 - `config/nav2_controller.yaml`: nav2 `controller_server`(= `follow_path` 액션 서버) 파라미터입니다.
 - `src/mission_manager_parameters.yaml`: `mission_manager_node`의 파라미터 정의
@@ -36,9 +36,41 @@ source install/setup.bash
 | `/mission_manager/cancel` | 진행 중인 목표를 취소하고 그 스텝에서 대기 |
 | `/mission_manager/skip` | 현재 스텝을 포기하고 다음으로 |
 | `/mission_manager/restart` | 스텝 0으로 되돌림 (`start`로 다시 시작) |
+| `/mission_manager/goto_step` | 임의의 스텝 앞으로 점프하고 대기 (`start`로 시작) |
+
+### `~/goto_step` -- 미션을 중간부터
+
+미션 후반의 스텝 하나(평행 주차, 완주)를 고치고 확인하려고 코스를 처음부터 돌 이유가
+없습니다. `~/start`가 "현재 스텝부터"이므로, 현재 스텝을 원하는 곳으로 옮기는 서비스만
+있으면 됩니다.
+
+목적지는 요청 필드가 아니라 **파라미터**로 받습니다 -- `teleport_service`의 `label`,
+`model_service`의 모델 이름과 같은 방식이라, GUI가 `set_parameters`로 값을 밀어 넣고
+인자 없는 `Trigger`를 부르면 됩니다.
+
+```bash
+ros2 param set /mission_manager step_label park_p_entry   # 또는 step_index 12
+ros2 service call /mission_manager/goto_step std_srvs/srv/Trigger
+#  -> "[14/20] drive until=park_p_entry course=main -- call '~/start' to run."
+ros2 service call /mission_manager/start std_srvs/srv/Trigger
+```
+
+`step_label`이 비어 있지 않으면 `step_index`보다 우선합니다 -- 스텝을 넣고 빼면 인덱스는
+밀리지만 라벨은 그대로이기 때문입니다.
+
+**`goto_step`은 출발시키지 않습니다.** 스텝만 고르고 `idle`로 섭니다. 그 사이에 시뮬에서는
+차를 라벨 위치로 순간이동시키고(`/teleport_service`), 실차에서는 사람이 차를 그 지점에
+가져다 놓은 뒤 `~/start`를 부릅니다. 주행 중에 부르면 진행 중인 골을 취소하고 그 스텝에서
+섭니다.
+
+**주의**: `drive` 스텝의 `begin_index`는 로드 시점에 정해집니다. n번 스텝으로 뛰면 경로는
+n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 그리로 갑니다.
 
 상태는 `/mission_manager/status`(latched `std_msgs/String`), 현재 세그먼트 경로는
-`/mission_manager/path`(latched `nav_msgs/Path`)로 나갑니다. decel 프로파일이 켜진 스텝에서는
+`/mission_manager/path`(latched `nav_msgs/Path`), 펼쳐진 스텝 목록은
+`/mission_manager/steps`(latched `std_msgs/String`, `index|type|label|course|route` 한 줄씩)로
+나갑니다. 스텝 목록이 따로 있는 이유는 `MissionLoader`가 `routes`의 스텝을 `steps` 뒤에
+덧붙이므로 yaml만 봐서는 갈래 스텝의 인덱스를 셀 수 없기 때문입니다. decel 프로파일이 켜진 스텝에서는
 `/speed_limit`(`nav2_msgs/SpeedLimit`)도 나갑니다.
 
 ## 미션 파일 (mission.yaml / simple.yaml)
@@ -64,11 +96,11 @@ source install/setup.bash
 세그먼트가 비거나 뒤집히므로 로드가 실패합니다. 첫 `drive` 스텝만 CSV의 처음(#0)부터 시작하고,
 이후 세그먼트는 직전 스텝의 도착점에서 이어집니다.
 
-라벨 찍기는 
+라벨 찍기는
 ```bash
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-    src/planning/hyper_waypoint/waypoints/real.csv \
-    --mission src/planning/hyper_planner/config/stopline.yaml
+ros2 run hyper_waypoint_studio waypoint_studio \
+    src/planning/hyper_waypoint/waypoints/track_raw/real.csv \
+    --mission src/planning/hyper_planner/config/stopline.yaml --mode edit
 ```
 
 ### drive 스텝: 감속과 도착 판정
@@ -163,7 +195,7 @@ routes:
 ```
 
 **라벨은 코스마다 독립입니다.** 최상위 `labels:`는 `main` 코스(= `waypoint_csv`)의 것이고
--- `label_waypoints.py`가 그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 갈래 코스는
+-- waypoint studio가 그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 갈래 코스는
 `courses.<이름>.labels`를 씁니다. `drive` 스텝은 자기 `course:`의 라벨만 찾습니다.
 
 **CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) mission.yaml이 있는 디렉터리,

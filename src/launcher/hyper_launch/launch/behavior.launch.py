@@ -16,12 +16,12 @@ def generate_launch_description():
         [LaunchConfiguration('mission'), '.yaml']])
     default_waypoint_csv = PathJoinSubstitution([
         EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-        'waypoints', 'sim.csv'])
+        'waypoints', 'simulation', 'sim1.csv'])
 
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params_file', default_value=default_nav2_params),
         DeclareLaunchArgument(
-            'mission', default_value='mission',
+            'mission', default_value='mission_sim',
             description='config/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
         DeclareLaunchArgument('mission_yaml', default_value=default_mission_yaml),
         DeclareLaunchArgument('waypoint_csv', default_value=default_waypoint_csv),

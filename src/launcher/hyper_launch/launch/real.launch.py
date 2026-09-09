@@ -97,7 +97,7 @@ def generate_launch_description():
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
-        DeclareLaunchArgument('mission', default_value='mission'),
+        DeclareLaunchArgument('mission', default_value='mission_sim'),
         # navsat_transform의 GPS 원점. hyper_localization/config/datums.yaml의 키입니다.
         # 스테이지 기본값은 시뮬레이션 원점(sim)이라 실차 진입점에서는 여기서 덮어써야
         # 합니다 -- 대회장이 아닌 곳에서 돌릴 때는 datum_site:=school 처럼 바꾸세요.
@@ -110,17 +110,17 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_panel', default_value='true',
             description='Launch the hyper_rqt HYPER Panel (mission start/cancel)'),
-        # 미션이 실제로 따라갈 코스 CSV. 기본값이 sim.csv라는 점이 중요합니다 --
+        # 미션이 실제로 따라갈 코스 CSV. 기본값이 시뮬 코스라는 점이 중요합니다 --
         # 실차에서는 반드시 녹화한 파일로 덮어쓰세요:
-        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
+        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track_raw/real.csv
         # 이 인자를 여기서 선언하고 behavior 스테이지로 넘겨주지 않으면, 넘긴 값이
         # 조용히 무시된 채 시뮬레이션 코스가 실차에 실립니다.
         DeclareLaunchArgument(
             'waypoint_csv',
             default_value=PathJoinSubstitution([
                 EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-                'waypoints', 'sim.csv']),
-            description='미션이 따를 웨이포인트 CSV (실차는 real.csv로 덮어쓰세요)'),
+                'waypoints', 'simulation', 'sim1.csv']),
+            description='미션이 따를 웨이포인트 CSV (실차는 track_raw/real.csv로 덮어쓰세요)'),
         robot_state_publisher,
         rviz,
         gps_accuracy_gui,

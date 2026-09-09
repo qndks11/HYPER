@@ -12,7 +12,6 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
@@ -87,10 +86,6 @@ public:
       "gps/fix", 10,
       std::bind(&WaypointRecorder::on_gps, this, std::placeholders::_1));
 
-    gps_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-      "odometry/gps", 10,
-      std::bind(&WaypointRecorder::on_gps_odom, this, std::placeholders::_1));
-
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "odometry/filtered_map", 10,
       std::bind(&WaypointRecorder::on_odom, this, std::placeholders::_1));
@@ -98,10 +93,6 @@ public:
     raw_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "odom", 10,
       std::bind(&WaypointRecorder::on_raw_odom, this, std::placeholders::_1));
-
-    imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-      "imu", 10,
-      std::bind(&WaypointRecorder::on_imu, this, std::placeholders::_1));
 
     diag_sub_ = create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
       "/diagnostics", 50,
@@ -140,9 +131,14 @@ private:
       return false;
     }
     csv_ << std::fixed << std::setprecision(8);
-    csv_ << "idx,stamp_sec,x,y,yaw,frame_id,gps_lat,gps_lon,gps_status,gps_odom_x,gps_odom_y,"
-            "cov_xx,cov_yy,odom_vx,odom_vy,odom_vyaw,imu_wz,imu_ax,imu_ay,imu_yaw,"
-            "odom_x,odom_y,odom_yaw\n";
+    // 웨이포인트 파일에는 코스를 이루는 값만 남깁니다. 예전에는 GPS/IMU/공분산까지
+    // 23컬럼을 같이 적었는데, 그 값들은 "이 점을 녹화할 때 센서가 뭐라고 했는가"이지
+    // "이 점이 어디인가"가 아닙니다. 스튜디오에서 점을 손으로 옮기는 순간 전부
+    // 거짓말이 되므로 아예 안 적습니다.
+    //
+    // 읽는 쪽은 전부 헤더 이름으로 찾으므로(path_loader.hpp의 load_waypoint_csv,
+    // 스튜디오의 formats.read_course) 예전 23컬럼 파일도 그대로 열립니다.
+    csv_ << "idx,x,y,yaw,frame_id\n";
     csv_.flush();
 
     diag_log_.open(diag_log_path_, std::ios::out | std::ios::trunc);
@@ -237,31 +233,12 @@ private:
     has_gps_ = true;
   }
 
-  void on_gps_odom(const nav_msgs::msg::Odometry::SharedPtr msg)
-  {
-    last_gps_odom_x_ = msg->pose.pose.position.x;
-    last_gps_odom_y_ = msg->pose.pose.position.y;
-    has_gps_odom_ = true;
-  }
-
+  // /odom은 이제 status의 speed 하나만 먹입니다. 실차 녹화에서 "지금 몇 m/s로 몰고
+  // 있나"는 화면에 필요하지만 파일에 남길 값은 아닙니다.
   void on_raw_odom(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
-    last_odom_x_ = msg->pose.pose.position.x;
-    last_odom_y_ = msg->pose.pose.position.y;
-    last_odom_yaw_ = yaw_from_quaternion(msg->pose.pose.orientation);
     last_odom_vx_ = msg->twist.twist.linear.x;
-    last_odom_vy_ = msg->twist.twist.linear.y;
-    last_odom_vyaw_ = msg->twist.twist.angular.z;
     has_raw_odom_ = true;
-  }
-
-  void on_imu(const sensor_msgs::msg::Imu::SharedPtr msg)
-  {
-    last_imu_wz_ = msg->angular_velocity.z;
-    last_imu_ax_ = msg->linear_acceleration.x;
-    last_imu_ay_ = msg->linear_acceleration.y;
-    last_imu_yaw_ = yaw_from_quaternion(msg->orientation);
-    has_imu_ = true;
   }
 
   void on_diagnostics(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg)
@@ -309,43 +286,9 @@ private:
       path_length_m_ += step;
     }
 
-    const double stamp =
-      static_cast<double>(msg->header.stamp.sec) +
-      static_cast<double>(msg->header.stamp.nanosec) * 1e-9;
     const double yaw = yaw_from_quaternion(msg->pose.pose.orientation);
-    csv_ << idx_ << ',' << stamp << ',' << x << ',' << y << ',' << yaw << ','
-         << msg->header.frame_id << ',';
-    if (has_gps_) {
-      csv_ << last_lat_ << ',' << last_lon_ << ',' << last_gps_status_;
-    } else {
-      csv_ << ",,";
-    }
-    csv_ << ',';
-    if (has_gps_odom_) {
-      csv_ << last_gps_odom_x_ << ',' << last_gps_odom_y_;
-    } else {
-      csv_ << ",";
-    }
-    // pose.covariance is row-major 6x6 over [x,y,z,roll,pitch,yaw]; index 0 = xx, 7 = yy.
-    csv_ << ',' << msg->pose.covariance[0] << ',' << msg->pose.covariance[7];
-    csv_ << ',';
-    if (has_raw_odom_) {
-      csv_ << last_odom_vx_ << ',' << last_odom_vy_ << ',' << last_odom_vyaw_;
-    } else {
-      csv_ << ",,";
-    }
-    csv_ << ',';
-    if (has_imu_) {
-      csv_ << last_imu_wz_ << ',' << last_imu_ax_ << ',' << last_imu_ay_ << ',' << last_imu_yaw_;
-    } else {
-      csv_ << ",,,";
-    }
-    csv_ << ',';
-    if (has_raw_odom_) {
-      csv_ << last_odom_x_ << ',' << last_odom_y_ << ',' << last_odom_yaw_;
-    } else {
-      csv_ << ",,";
-    }
+    csv_ << idx_ << ',' << x << ',' << y << ',' << yaw << ','
+         << msg->header.frame_id;
     csv_ << '\n';
     csv_.flush();
     ++idx_;
@@ -396,32 +339,15 @@ private:
   rclcpp::Time gps_stamp_{0, 0, RCL_ROS_TIME};
   bool has_gps_{false};
 
-  double last_gps_odom_x_{0.0};
-  double last_gps_odom_y_{0.0};
-  bool has_gps_odom_{false};
-
-  double last_odom_x_{0.0};
-  double last_odom_y_{0.0};
-  double last_odom_yaw_{0.0};
   double last_odom_vx_{0.0};
-  double last_odom_vy_{0.0};
-  double last_odom_vyaw_{0.0};
   bool has_raw_odom_{false};
-
-  double last_imu_wz_{0.0};
-  double last_imu_ax_{0.0};
-  double last_imu_ay_{0.0};
-  double last_imu_yaw_{0.0};
-  bool has_imu_{false};
 
   std::string diag_log_path_;
   std::ofstream diag_log_;
 
   rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gps_sub_;
-  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr gps_odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr raw_odom_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
   rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_sub_;
 
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;

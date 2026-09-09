@@ -9,8 +9,9 @@
 # 위치가 그대로면 살아남습니다(웨이포인트 idx가 아니라 좌표로 저장하므로).
 #
 # labels 채우는 법:
-#   python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-#       src/planning/hyper_waypoint/waypoints/sim.csv
+#   ros2 run hyper_waypoint_studio waypoint_studio \
+#       src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
+#       --mission src/planning/hyper_planner/config/mission_sim.yaml --mode edit
 #
 # 실행:
 #   ros2 launch hyper_planner nav2_controller.launch.py   # 액션 서버가 먼저 떠 있어야 합니다
@@ -39,9 +40,9 @@ label_snap_tolerance_m: 1.0
 # 갈림길 지점부터 다시 녹화하세요.
 branch_seam_tolerance_m: 3.0
 
-# --- label_waypoints.py가 관리하는 블록 (아래 주석 참고) ---
+# --- waypoint studio가 관리하는 블록 (아래 주석 참고) ---
 labels:
-  # 이 블록은 label_waypoints.py가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+  # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
   stopline_1: {x: 39.812, y: -3.227}   # wp #78
   light_1: {x: 12.202, y: -8.547}   # wp #305
   light_2: {x: -0.500, y: 1.395}   # wp #565

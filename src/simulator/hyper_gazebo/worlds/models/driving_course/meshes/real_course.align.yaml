@@ -1,7 +1,7 @@
-# label_waypoints.py의 정렬 모드(a)가 저장한 배경 이미지 위치입니다.
+# waypoint studio의 정렬 모드가 저장한 배경 이미지 위치입니다.
 # image: real_course.png
 # 이미지 중심의 map 좌표(m), 이미지 가로 폭(m), 반시계 회전각(도).
-center_x: -4.9645
-center_y: -5.0907
-width_m: 121.1135
-rotation_deg: 0.4805
+center_x: -5.1645
+center_y: -5.2907
+width_m: 121.2454
+rotation_deg: 0.0000

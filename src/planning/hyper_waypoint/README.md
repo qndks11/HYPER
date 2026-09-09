@@ -1,6 +1,7 @@
 # hyper_waypoint
 
 `odometry/filtered_map`을 구독해서 `idx, x, y, yaw, frame_id`를 CSV로 기록하는 웨이포인트 레코더 패키지입니다.
+코스를 보고 고치는 GUI는 [hyper_waypoint_studio](../../tools/hyper_waypoint_studio/README.md)입니다.
 
 ## 실행 (권장) — GUI로 조작
 
@@ -9,7 +10,7 @@
 
 ```bash
 ros2 launch hyper_waypoint record.launch.py \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
+  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track_raw/real.csv
 ```
 
 레코더가 `auto_start:=false`로 떠서 **GUI의 `● Record`를 누를 때까지 기다립니다.**
@@ -27,8 +28,8 @@ GUI가 보여주는 것:
 | 속도 | `/odom`의 바퀴 속도 |
 | GPS 상태 | `/gps/fix`의 status. **`RTK / GBAS`(초록)여야 쓸 만한 녹화**입니다 |
 | EKF 공분산 xx / yy | 융합 위치의 불확실도 |
-| 미니맵 | 지금까지 찍힌 점(파랑), 현재 위치(보라), 그리고 **저장 파일 칸이 가리키는 CSV에
-이미 들어 있는 이전 녹화본(회색)** 을 위에서 본 그림 |
+| 캔버스 | 지금까지 찍힌 점(파랑), 현재 위치(보라), **저장 파일 칸이 가리키는 CSV에 이미 들어
+있는 이전 녹화본(회색)**, 그리고 같이 올려 둔 다른 코스와 배경 이미지 |
 
 이전 녹화본은 창이 뜰 때, 그리고 저장 파일 이름을 바꿀 때마다 그 CSV를 직접 읽어
 깔아 둡니다 -- `Record`가 무엇을 덮어쓰는지 누르기 전에 보이게 하려는 것입니다.
@@ -53,130 +54,48 @@ ros2 service call /waypoint_recorder/stop  std_srvs/srv/Trigger
 ```bash
 colcon build --packages-select hyper_waypoint
 source install/setup.bash
-ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv -p min_spacing_m:=0.5
+ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track_raw/real.csv -p min_spacing_m:=0.5
 ```
 
 - `auto_start` 파라미터의 기본값이 `true`라 이렇게 띄우면 **즉시 기록을 시작**합니다(기존 사용법 그대로). `Ctrl-C`로 원하는 시점에 종료하세요.
 - `output_csv` 파라미터를 생략하면 노드를 실행한 위치에 `waypoint_record.csv`로 저장됩니다.
 - `min_spacing_m` 파라미터(기본값 `0.5`)는 직전 기록 지점으로부터 이 거리(m) 이상 이동했을 때만 새 줄을 기록합니다. 시간 간격이 아니라 이동 거리 기준으로 웨이포인트가 샘플링됩니다.
-- 파일은 `idx,stamp_sec,x,y,yaw,frame_id,...` 헤더로 시작하며, 매 기록마다 flush되므로 중간에 종료해도 그때까지 기록된 내용은 남아 있습니다.
+- 파일은 `idx,x,y,yaw,frame_id` 헤더로 시작하며, 매 기록마다 flush되므로 중간에 종료해도
+  그때까지 기록된 내용은 남아 있습니다.
+- 예전에는 GPS/IMU/공분산까지 23컬럼을 같이 적었지만 더는 안 적습니다. 그 값들은 "이 점을
+  녹화할 때 센서가 뭐라고 했는가"이지 "이 점이 어디인가"가 아니라, 스튜디오에서 점을 손으로
+  옮기는 순간 전부 거짓말이 됩니다. 녹화 품질은 파일이 아니라 실시간 `~/status`(GPS 상태,
+  EKF 공분산, 속도)로 봅니다 -- **`RTK / GBAS`(초록)여야 쓸 만한 녹화**입니다.
+- 읽는 쪽은 전부 헤더 이름으로 찾으므로(`path_loader.hpp`, 스튜디오) 예전 23컬럼 녹화본도
+  그대로 열리고 그대로 주행됩니다.
 
-## 스크립트
+## 코스 보기 / 편집 / 라벨링
 
-`scripts/`의 파이썬 스크립트들은 `ros2 run` 대상이 아니라 `python3`로 직접 실행합니다.
-아래 명령은 모두 **`~/HYPER` 루트에서 그대로 복사해 붙여넣으면 됩니다** (`cd src/planning/hyper_waypoint` 후에는 경로 앞의 `src/planning/hyper_waypoint/`를 빼세요).
-
-### plot_waypoints.py — 기록 품질 확인
-
-```bash
-python3 src/planning/hyper_waypoint/scripts/plot_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/sim.csv --jump-threshold 1.0
-```
-
-융합 경로 / 생 GPS / navsat_transform 출력을 겹쳐 그려서 위치 점프의 원인이 GPS 센서인지,
-좌표 변환인지, EKF 융합인지 구분합니다.
-
-### label_waypoints.py — 미션 이벤트 지점 라벨링
-
-기록된 코스 위에 정지선·신호등·주차 구획 위치를 클릭으로 찍어
-[hyper_planner/config/mission.yaml](../../planning/hyper_planner/config/mission.yaml)의
-`labels:` 블록에 기록합니다.
+전부 [hyper_waypoint_studio](../../tools/hyper_waypoint_studio/README.md)로 옮겼습니다.
+예전의 `label_waypoints.py`(라벨링)와 `waypoint_record_gui.py`(녹화 조작판)는 없습니다.
 
 ```bash
-# 시뮬레이션 코스 텍스처를 배경에 깔고 라벨링 (권장)
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/sim.csv --gazebo-course
+# 코스를 시뮬 텍스처 위에 올리고 미션 라벨을 찍기
+ros2 run hyper_waypoint_studio waypoint_studio \
+  src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
+  --mission src/planning/hyper_planner/config/mission_sim.yaml \
+  --overlay gazebo --mode edit
 
-# 실차 코스 항공사진을 배경에 깔고 라벨링 (정렬값은 real_course.align.yaml)
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/full_track.csv --real-course \
-  --mission src/planning/hyper_planner/config/full_mission.yaml
-
-# 배경 정렬 모드로 바로 시작 (배경을 코스에 맞출 때)
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/full_track.csv --real-course --align
-
-# 배경 없이
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/sim.csv
-
-# 실차 코스를 mission.yaml이 아닌 다른 미션 파일에 라벨링
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/real.csv \
-  --mission src/planning/hyper_planner/config/stopline.yaml
-
-# 위성 정사영상을 배경으로 (--extent는 map 프레임 미터 단위 경계)
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
-  src/planning/hyper_waypoint/waypoints/real.csv \
-  --background ortho.png --extent -50 -60 60 50
+# 실차 코스를 항공사진 위에 (정렬값은 real_course.align.yaml)
+ros2 run hyper_waypoint_studio waypoint_studio \
+  src/planning/hyper_waypoint/waypoints/track_raw/full_track.csv \
+  --overlay src/simulator/hyper_gazebo/worlds/models/driving_course/meshes/real_course.png
 ```
 
-| 조작 | 동작 |
-| --- | --- |
-| 좌클릭 | 현재 선택된 라벨을 최근접 웨이포인트에 배치 (배치 후 다음 미배치 라벨로 자동 이동) |
-| 우클릭 | 클릭 지점에서 가장 가까운 라벨 삭제 |
-| `1`~`9` | 현재 페이지 내 라벨 선택 (`[` / `]` 페이지 이동) |
-| `n` / `p` | 이전/다음 라벨 |
-| `Tab` | 다음 미배치 라벨 |
-| `u` | 되돌리기 |
-| `s` | mission.yaml 저장 |
-| `q` | 종료 |
-| `a` | 배경 정렬 모드 토글 (`--real-course` / `--background --align`일 때만) |
+여러 코스를 한 화면에 겹쳐 볼 수 있으므로, 분기 코스(`sim_left.csv` / `sim_right.csv`)의
+이음매를 눈으로 확인할 수 있습니다. 점을 끌어 고칠 때 후진 녹화 구간의 헤딩이 보존되는
+방식과 라벨 스냅 경고는 스튜디오 README를 보세요.
 
-정렬 모드 조작 (라벨 클릭은 잠시 비활성화됩니다):
+## 웨이포인트 폴더
 
-| 조작 | 동작 |
-| --- | --- |
-| 방향키 | 배경 이동 2 m (`Shift`+방향키는 0.2 m) |
-| 좌클릭 | 배경 중심을 클릭 지점으로 (거친 위치 맞춤) |
-| `+` / `-` | 축척 ±1% (`Shift`는 ±0.1%) |
-| `,` / `.` | 회전 ±0.5° (`Shift`는 ±0.05°) |
-| `v` / `b` | 배경 불투명도 |
-| `f` | 코스와 배경이 모두 보이도록 화면 맞춤 |
-| `w` | 정렬값을 `<이미지>.align.yaml`에 저장 |
-| `a` | 정렬 모드 종료 |
-
-- **찍어야 할 라벨 목록은 하드코딩돼 있지 않습니다.** mission.yaml의 `drive` 스텝이
-  `until:`로 참조하는 이름이 곧 라벨 목록이므로, 스텝을 추가하면 이 툴이 자동으로 그
-  위치를 요구합니다.
-- 라벨은 웨이포인트 idx가 아니라 **map 프레임 좌표로 저장**됩니다. 코스를 다시 녹화하면
-  idx는 전부 밀리지만 실제 정지선 위치는 그대로이므로, 좌표 라벨은 재녹화 후에도 살아남습니다.
-- 저장 시 mission.yaml의 `labels:` 블록만 교체되고 나머지(주석, `steps:`, 튜닝 파라미터)는
-  바이트 단위로 보존됩니다.
-- 줌/팬 도구가 켜져 있는 동안의 클릭은 무시되므로, 정지선 근처를 확대하다가 라벨이
-  잘못 찍히지 않습니다.
-
-### 배경 깔기
-
-- **시뮬레이션**: `--gazebo-course`가 `hyper_gazebo`의 코스 텍스처
-  (`driving_course/meshes/course.png`)를 배경으로 깝니다. 배치 범위는 하드코딩이 아니라
-  같은 폴더의 `ground.obj` 쿼드 정점에서 읽으므로, `build_course.py`로 메시를 다시 생성해도
-  오버레이가 시뮬레이터와 어긋나지 않습니다. 확대하면 정지선·횡단보도가 보여서 클릭 지점을
-  눈으로 확인할 수 있습니다.
-  - 텍스처의 픽셀 종횡비(3937 x 4492)와 쿼드 종횡비(102.5 x 122.5 m)는 약 5% 다릅니다.
-    Gazebo가 텍스처를 쿼드에 늘려 붙이므로 이 툴도 같은 범위를 그대로 써서 동일하게
-    늘립니다 -- 기록된 웨이포인트가 차선 위에 정확히 얹히는 것을 확인했습니다.
-  - 큰 텍스처는 `--background-max-px`(기본 2500)로 다운샘플해서 로드하므로 팬/줌이
-    느려지지 않습니다.
-- **실차 (항공사진)**: `--real-course`가
-  `driving_course/meshes/real_course.png`(실제 코스 항공사진)를 배경으로 깝니다.
-  이 이미지는 지오레퍼런스가 전혀 없으므로 배치는 같은 폴더의
-  `real_course.align.yaml`에 들어 있습니다 -- 이미지 중심의 map 좌표, 이미지 가로 폭(m),
-  반시계 회전각(도). 현재 값은 항공사진의 아스팔트 영역에 `full_track.csv`를 맞춰
-  **자동 추정한 초기값**이므로, 코스와 정확히 겹치게 하려면 툴에서 `a`로 정렬 모드에
-  들어가 방향키/`+``-`/`,``.`로 미세 조정한 뒤 `w`로 저장하세요.
-  - 축척은 픽셀당 미터가 아니라 **이미지 가로 폭(m)**으로 저장합니다. 배경은
-    `--background-max-px`로 다운샘플되므로 픽셀 기준 축척이면 그 값만 바꿔도 배경이
-    조용히 어긋납니다.
-  - 임의의 이미지도 `--background <img> --align`으로 같은 방식으로 맞출 수 있습니다.
-    `--extent`를 함께 주면 그 값이 (사이드카가 아직 없을 때) 시작 배치가 됩니다.
-- **실차 (정사영상)**: 이미 지오레퍼런스된 정사영상은 `--background`와
-  `--extent`(map 프레임 미터 단위 경계)로 바로 주면 됩니다. 단 실차 좌표계가 성립하려면
-  [hyper_localization/config/datums.yaml](../../localization/hyper_localization/config/datums.yaml)의
-  `track` datum 실측이 먼저입니다(현재 `0.0` TODO 상태).
-
-Stopline_L: 3.218, 27.746212
-Stopline_R: 4.298, 30.832
-Signal1: -0.531, 1.145
-Signal2: -12.197, -6.338
-Signal3: -5.044, -18.458
+```
+waypoints/
+  simulation/   시뮬 코스 (sim1.csv가 mission_sim.yaml의 짝입니다)
+  track_raw/    실차에서 그대로 녹화한 원본
+  track/        손으로 정리한 코스 (스튜디오의 "다른 이름으로 저장" 기본 위치)
+```

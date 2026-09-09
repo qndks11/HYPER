@@ -1,14 +1,15 @@
 Waypoint check w/ visualization
 
 ```bash
-python3 src/planning/hyper_waypoint/scripts/plot_waypoints.py \
+# plot_waypoints.py는 없어졌습니다 (레코더가 진단 컬럼을 더 이상 안 적습니다).
+# 코스를 보려면: ros2 run hyper_waypoint_studio waypoint_studio \
   src/planning/hyper_waypoint/waypoints/real.csv --jump-threshold 1.0
 ```
 
 Waypoint labeling
 
 ```bash
-python3 src/planning/hyper_waypoint/scripts/label_waypoints.py \
+ros2 run hyper_waypoint_studio waypoint_studio --mode edit \
   src/planning/hyper_waypoint/waypoints/real.csv \
   --mission src/planning/hyper_planner/config/stopline.yaml
 ```
