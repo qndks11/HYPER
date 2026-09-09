@@ -243,9 +243,12 @@ class LabelMarker(QGraphicsObject):
 
     SIZE_PX = 6.0
 
-    def __init__(self, name, x, y, on_moved, on_clicked):
+    def __init__(self, key, text, x, y, on_moved, on_clicked):
         super().__init__()
-        self.name = name
+        # key는 (코스, 이름)을 담은 문자열입니다(formats.label_key). 라벨 이름은
+        # 코스마다 독립이라 이름만으로는 유일하지 않습니다. text는 화면에 쓸 글자.
+        self.key = key
+        self.name = text
         self._on_moved = on_moved
         self._on_clicked = on_clicked
         self._active = False
@@ -288,13 +291,13 @@ class LabelMarker(QGraphicsObject):
         painter.drawText(QPointF(s + 4, s - 1), self.name)
 
     def mousePressEvent(self, event):
-        self._on_clicked(self.name)
+        self._on_clicked(self.key)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         position = self.pos()
-        self._on_moved(self.name, position.x(), position.y())
+        self._on_moved(self.key, position.x(), position.y())
 
 
 class VehicleItem(QGraphicsObject):

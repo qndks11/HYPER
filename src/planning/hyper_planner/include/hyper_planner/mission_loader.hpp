@@ -114,6 +114,13 @@ struct Step
   // 다시 보내, 장애물이 치워지면 스스로 이어서 갑니다. 이 시간(초) 동안 계속 막혀 있으면
   // 그때는 실패로 끝냅니다. 0 = 끔(그때는 goal_retry_limit이 소진되면 바로 실패).
   double obstacle_hold_s{0.0};
+  // 0보다 크면, 골까지 남은 거리가 이 값 이하로 들어왔을 때 서지 않고 다음 drive 스텝의
+  // 골로 갈아끼웁니다(prearm과 같은 preemption이지만 신호를 보지 않습니다). 컨트롤러를
+  // 바꾸는 유일한 방법이 새 골이므로, RPP <-> MPPI 전환을 정차 없이 하려면 이것이
+  // 필요합니다. link_handoff_steps가 handoff_enabled/handoff_merge_step를 채웁니다.
+  double handoff_m{0.0};
+  bool handoff_enabled{false};
+  std::size_t handoff_merge_step{0};
   // 라벨(end_index) 뒤로 덧붙일 직선 꼬리의 길이(0 = 없음). resolve_decel_tails가 정합니다.
   // 보낸 경로 위에서 라벨이 어디인지 찾을 때도 이 값을 씁니다 -- 좌표로 최근접점을 찾으면
   // 같은 길을 되짚는 구간에서 엉뚱한 점에 붙을 수 있지만, "경로 끝에서 남은 길이"로 찾으면
@@ -132,6 +139,11 @@ struct Step
   std::vector<BranchCase> cases;
   std::string default_route;
   std::size_t default_target{kEndOfMission};
+  // `select_by: position`이면 표지가 아니라 차의 현재 위치로 갈래를 고릅니다 -- 갈래마다
+  // 그 CSV의 첫 점(check_branch_seams가 재는 그 점)까지의 거리를 비교해 가까운 쪽입니다.
+  // 출발 위치가 곧 어느 코스인지를 정하는 스타트 분기용입니다. tf를 못 읽으면 아무 일도
+  // 일어나지 않고 timeout 뒤 default로 갑니다(신호 분기와 같은 실패 방식).
+  bool select_by_position{false};
 
   // 두 종류가 같이 쓰는 필드. Step은 종류별로 나뉘지 않은 평평한 구조체입니다.
   //   wait_signal/branch에서: mission.yaml이 적어 준 값. 0보다 크면 prearm을 켭니다.
@@ -179,6 +191,27 @@ inline std::vector<std::string> split_values(const std::string & text)
     }
   }
   return values;
+}
+
+// branch가 갈 수 있는 스텝 전부(각 case + default), 중복 없이. default가 어느 case와
+// 같은 갈래를 가리키는 것은 흔하고 정상입니다.
+//
+// 클래스 밖에 있는 이유: 로드 시점의 검사(check_branch_seams, link_branch_prearm)와
+// 주행 중의 위치 분기(mission_manager_node의 tick_branch)가 "이 분기가 갈 수 있는 곳"을
+// 똑같이 세어야 하기 때문입니다.
+inline std::vector<std::size_t> branch_targets(const Step & branch)
+{
+  std::vector<std::size_t> targets;
+  const auto add = [&targets](std::size_t target) {
+      if (std::find(targets.begin(), targets.end(), target) == targets.end()) {
+        targets.push_back(target);
+      }
+    };
+  for (const auto & branch_case : branch.cases) {
+    add(branch_case.target);
+  }
+  add(branch.default_target);
+  return targets;
 }
 
 // 로더가 파라미터 전체(mission_manager::Params) 대신 받는 값들. 로드에 실제로 쓰이는
@@ -278,6 +311,7 @@ private:
 
     resolve_decel_tails();
     link_prearm_steps();
+    link_handoff_steps();
     if (!check_branch_seams(seam_tolerance_m)) {
       return false;
     }
@@ -498,23 +532,6 @@ private:
 
   // ------------------------------------------------------------------ 스텝 파싱
 
-  // branch가 갈 수 있는 스텝 전부(각 case + default), 중복 없이. default가 어느 case와
-  // 같은 갈래를 가리키는 것은 흔하고 정상입니다.
-  static std::vector<std::size_t> branch_targets(const Step & branch)
-  {
-    std::vector<std::size_t> targets;
-    const auto add = [&targets](std::size_t target) {
-        if (std::find(targets.begin(), targets.end(), target) == targets.end()) {
-          targets.push_back(target);
-        }
-      };
-    for (const auto & branch_case : branch.cases) {
-      add(branch_case.target);
-    }
-    add(branch.default_target);
-    return targets;
-  }
-
   bool find_course(const std::string & name, std::size_t & id) const
   {
     for (std::size_t i = 0; i < courses_.size(); ++i) {
@@ -647,6 +664,7 @@ private:
       ? node["decel_profile_a"].as<double>() : config_.decel_profile_a;
     step.obstacle_hold_s = node["obstacle_hold_s"]
       ? node["obstacle_hold_s"].as<double>() : 0.0;
+    step.handoff_m = node["handoff_m"] ? node["handoff_m"].as<double>() : 0.0;
 
     // reverse 플래그가 녹화된 실제 주행 방향과 맞는지 확인합니다. 틀리면 RPP가
     // 엉뚱한 방향으로 당기므로 바로 알아채는 편이 낫습니다.
@@ -685,6 +703,22 @@ private:
     step.debounce_frames = node["debounce_frames"] ? node["debounce_frames"].as<int>() : 3;
     step.prearm_distance_m = node["prearm_distance_m"]
       ? node["prearm_distance_m"].as<double>() : 0.0;
+
+    // 무엇을 보고 고르는가. 기본은 표지("sign")이고, "position"이면 차의 현재 위치에서
+    // 가장 가까운 갈래로 갑니다. 오타를 기본값으로 조용히 흘려보내면 스타트 분기가
+    // 말없이 default로만 가므로 여기서 거부합니다.
+    if (node["select_by"]) {
+      const auto select_by = node["select_by"].as<std::string>();
+      if (select_by == "position") {
+        step.select_by_position = true;
+      } else if (select_by != "sign") {
+        RCLCPP_ERROR(
+          logger_,
+          "Step %zu (branch): select_by '%s' is not understood (expected 'sign' or 'position').",
+          index, select_by.c_str());
+        return false;
+      }
+    }
 
     if (!node["default"]) {
       RCLCPP_ERROR(
@@ -950,7 +984,11 @@ private:
     const std::vector<std::size_t> targets = branch_targets(branch);
 
     const char * reason = nullptr;
-    if (drive.reverse) {
+    if (branch.select_by_position) {
+      // 위치로 고르는 분기는 볼 표지가 없습니다. prearm의 preemption은 "확인되면 서지 않고
+      // 간다"인데, 위치 판정은 분기 지점에 도착해서야 의미가 있으므로 이어 줄 것이 없습니다.
+      reason = "the branch selects by position, so there is no sign to watch ahead of time";
+    } else if (drive.reverse) {
       reason = "the drive step before the branch is a reverse segment";
     } else {
       for (const std::size_t target : targets) {
@@ -989,6 +1027,71 @@ private:
       "by the label).",
       drive.label.c_str(), config_.sign_topic.c_str(), drive.prearm_distance_m,
       branch.default_route.c_str());
+  }
+
+  // drive 스텝의 handoff_m을 그 다음 drive 스텝에 이어 줍니다.
+  //
+  // 왜 필요한가: 컨트롤러(controller_id)는 FollowPath 골에 실려 나가므로, RPP에서 MPPI로
+  // 바꾸는 유일한 방법은 새 골입니다. 그런데 보통의 스텝 전환은 골 판정(goal checker)을
+  // 기다리므로 차가 라벨에서 한 번 섰다가 다시 출발합니다 -- s자 구간 앞뒤로 두 번.
+  //
+  // handoff는 prearm과 같은 preemption을 신호 조건 없이 씁니다. 골까지 handoff_m가
+  // 남으면 그 자리에서 "지금 위치 -> 다음 drive 스텝의 끝"을 새 골로 보내고, 이전 골은
+  // 취소하지 않고 갈아끼웁니다(nav2 controller_server가 제어 주기 안에서 바꿔치므로
+  // /cmd_vel이 끊기지 않습니다). 새 골에는 *다음* 스텝의 controller_id가 실리므로,
+  // 그 순간 컨트롤러가 바뀝니다.
+  //
+  // prearm과 달리 controller_id가 서로 다른지는 보지 않습니다 -- 다른 것이 목적입니다.
+  //
+  // 조건이 안 맞으면 경고만 남기고 그 자리의 handoff를 끕니다. 꺼진 결과는 "라벨에서 한 번
+  // 서고 다음 스텝으로"라 안전하기 때문입니다(prearm과 같은 취지).
+  void link_handoff_steps()
+  {
+    for (std::size_t i = 0; i < steps_.size(); ++i) {
+      Step & drive = steps_[i];
+      if (drive.type != StepType::kDrive || drive.handoff_m <= 0.0) {
+        continue;
+      }
+
+      const std::size_t merge = drive.next_index;
+      const char * reason = nullptr;
+      if (drive.prearm_enabled) {
+        // 둘 다 골을 갈아끼웁니다. 신호를 보는 쪽(prearm)이 이깁니다 -- 그쪽은 "서지 않고
+        // 통과"라는 판단이 붙어 있고, handoff는 아무 조건 없이 갈아끼우므로 prearm이 볼
+        // 신호를 지나쳐 버립니다.
+        reason = "this step already prearms a signal/branch, which owns the goal swap";
+      } else if (drive.decel_profile_a > 0.0 || drive.cancel_on_arrival_m > 0.0) {
+        // 둘 다 "라벨에서 선다"는 뜻입니다. cancel-on-arrival이 먼저 골을 취소해 버리면
+        // 갈아끼울 골이 없습니다. 애초에 설 스텝이라면 handoff가 할 일도 없습니다.
+        reason = "the step stops at its label (decel_profile_a / cancel_on_arrival_m are set)";
+      } else if (merge >= steps_.size()) {
+        reason = "there is no step after it to hand off to";
+      } else if (steps_[merge].type != StepType::kDrive) {
+        reason = "the next step is not a drive step";
+      } else if (drive.reverse || steps_[merge].reverse) {
+        // 두 세그먼트가 한 골 안에 들어가므로 방향 전환이 생깁니다. RPP는 이를 처리하지
+        // 못합니다(link_wait_signal_prearm과 같은 이유).
+        reason = "handing off would put a direction change inside a single goal";
+      }
+      if (reason != nullptr) {
+        RCLCPP_WARN(
+          logger_,
+          "Step %zu (until '%s') has handoff_m %.1f, but %s. Handoff is off here: the vehicle "
+          "will stop at the label and the next step sends its own goal.",
+          i, drive.label.c_str(), drive.handoff_m, reason);
+        drive.handoff_m = 0.0;
+        continue;
+      }
+
+      drive.handoff_enabled = true;
+      drive.handoff_merge_step = merge;
+      RCLCPP_INFO(
+        logger_,
+        "Handoff: %.1f m before '%s', roll straight on to '%s' without stopping "
+        "(controller '%s' -> '%s').",
+        drive.handoff_m, drive.label.c_str(), steps_[merge].label.c_str(),
+        drive.controller_id.c_str(), steps_[merge].controller_id.c_str());
+    }
   }
 
   // 갈래 CSV의 첫 점이 실제 분기 지점에 붙어 있는지 봅니다.

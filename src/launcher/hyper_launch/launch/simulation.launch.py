@@ -76,8 +76,8 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('use_panel')),
         )
 
-    # waypoint_csv:=track_raw/real.csv 처럼 상대 경로만 준 경우 hyper_waypoint/waypoints/
-    # 아래로 풀어 줍니다. 2e4a6f1에서 코스가 simulation/ track_raw/ track/ 로 갈렸으므로
+    # waypoint_csv:=track/real.csv 처럼 상대 경로만 준 경우 hyper_waypoint/waypoints/
+    # 아래로 풀어 줍니다. 2e4a6f1에서 코스가 simulation/ track/ school/ 로 갈렸으므로
     # 파일명만으로는 더 이상 안 풀립니다 -- 하위 폴더까지 함께 주세요.
     waypoint_csv_resolved = PathJoinSubstitution([
         EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
@@ -104,7 +104,7 @@ def generate_launch_description():
         DeclareLaunchArgument('datum_site', default_value='sim'),
         # behavior 스테이지가 mission_manager에 넘길 웨이포인트 CSV. 기본은
         # hyper_waypoint/waypoints/simulation/sim1.csv (behavior.launch.py의 기본값).
-        # 절대 경로로도, waypoints/ 아래 상대 경로(track_raw/real.csv 등)로도 넘길 수
+        # 절대 경로로도, waypoints/ 아래 상대 경로(track/real.csv 등)로도 넘길 수
         # 있게 아래에서 풀어 줍니다.
         DeclareLaunchArgument(
             'waypoint_csv', default_value='',

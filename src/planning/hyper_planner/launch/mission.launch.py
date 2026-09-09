@@ -73,6 +73,13 @@ def generate_launch_description():
         # ratio = speed_limit / vx_max를 곱하는 방식이라, 더 큰 값을 보내면 vx_max를
         # 오히려 올려 버립니다.
         # 임시 저속 테스트: 1.0 (원래 2.22 -- nav2_controller.yaml의 FollowPath.vx_max와 같아야 함)
+        #
+        # 주의: 이 값은 컨트롤러 하나를 가정합니다. mission_track처럼 RPP가 기본이고
+        # MPPI는 한 구간에서만 쓰는 미션에서는, 감속 프로파일이 붙은 스텝이 전부 RPP이므로
+        # RPP의 desired_linear_vel(2.22)을 넘겨야 합니다:
+        #   ros2 launch hyper_planner mission.launch.py mission:=mission_track \
+        #       controller_vx_max:=2.22 ...
+        # 안 넘기면 프로파일이 1.0에서 포화해 제동이 한참 늦게 걸립니다(정지선을 넘습니다).
         DeclareLaunchArgument('controller_vx_max', default_value='1.0'),
         # controller_server의 speed_limit_topic과 같아야 합니다.
         DeclareLaunchArgument('speed_limit_topic', default_value='/speed_limit'),

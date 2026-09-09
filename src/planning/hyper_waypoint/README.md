@@ -10,7 +10,7 @@
 
 ```bash
 ros2 launch hyper_waypoint record.launch.py \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track_raw/real.csv
+  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/real.csv
 ```
 
 레코더가 `auto_start:=false`로 떠서 **GUI의 `● Record`를 누를 때까지 기다립니다.**
@@ -54,7 +54,7 @@ ros2 service call /waypoint_recorder/stop  std_srvs/srv/Trigger
 ```bash
 colcon build --packages-select hyper_waypoint
 source install/setup.bash
-ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track_raw/real.csv -p min_spacing_m:=0.5
+ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/real.csv -p min_spacing_m:=0.5
 ```
 
 - `auto_start` 파라미터의 기본값이 `true`라 이렇게 띄우면 **즉시 기록을 시작**합니다(기존 사용법 그대로). `Ctrl-C`로 원하는 시점에 종료하세요.
@@ -83,7 +83,7 @@ ros2 run hyper_waypoint_studio waypoint_studio \
 
 # 실차 코스를 항공사진 위에 (정렬값은 real_course.align.yaml)
 ros2 run hyper_waypoint_studio waypoint_studio \
-  src/planning/hyper_waypoint/waypoints/track_raw/full_track.csv \
+  src/planning/hyper_waypoint/waypoints/track/full_track.csv \
   --overlay src/simulator/hyper_gazebo/worlds/models/driving_course/meshes/real_course.png
 ```
 
@@ -96,6 +96,7 @@ ros2 run hyper_waypoint_studio waypoint_studio \
 ```
 waypoints/
   simulation/   시뮬 코스 (sim1.csv가 mission_sim.yaml의 짝입니다)
-  track_raw/    실차에서 그대로 녹화한 원본
-  track/        손으로 정리한 코스 (스튜디오의 "다른 이름으로 저장" 기본 위치)
+  track/        실차 트랙 코스 -- 녹화 원본과 손으로 정리한 코스가 함께 있습니다
+                (스튜디오의 "다른 이름으로 저장" 기본 위치)
+  school/       교내 코스
 ```

@@ -139,75 +139,211 @@ def write_course(path, xs, ys, yaws, frame_id="map"):
 
 # ------------------------------------------------------------------ mission.yaml
 
+# 라벨 하나를 가리키는 키. 라벨 이름은 코스마다 독립이라(mission_loader.hpp의 주석)
+# 이름만으로는 유일하지 않습니다 -- 코스를 같이 들고 다녀야 합니다. Qt의 UserRole처럼
+# 스칼라 하나만 담을 수 있는 자리를 위해 문자열로 만듭니다.
+KEY_SEPARATOR = "\x1f"
+
+
+def label_key(course, name):
+    return f"{course}{KEY_SEPARATOR}{name}"
+
+
+def split_key(key):
+    course, _, name = key.partition(KEY_SEPARATOR)
+    return course, name
+
+
 def load_mission(path):
-    """mission.yaml -> (raw_text, doc, required_labels, positions).
+    """mission.yaml -> (raw_text, doc, required, positions, sentinels).
 
     raw_text를 들고 다니는 이유가 이 파일의 핵심입니다. 저장할 때 PyYAML로 다시
     쓰면 mission_sim.yaml의 300줄짜리 튜닝 주석이 전부 날아가므로, labels 블록만
     바이트 단위로 갈아끼웁니다(splice_labels).
+
+    required / positions / sentinels는 전부 **코스 이름으로 묶인** dict입니다.
+    최상위 labels:는 main의 것이고, courses.<n>.labels는 그 갈래의 것입니다 --
+    mission_loader가 라벨을 그 코스의 CSV에만 스냅하므로, 스냅 거리를 엉뚱한 코스에
+    대고 재지 않으려면 여기서부터 갈라 놓아야 합니다.
+
+    sentinels는 좌표가 아니라 `last`로 적힌 라벨입니다("그 코스의 마지막 점").
+    좌표가 없으니 화면에 찍을 수도 옮길 수도 없지만, **저장할 때 반드시 도로
+    써 줘야 합니다** -- 안 그러면 저장 한 번에 파일에서 사라지고 미션이 로드되지
+    않습니다.
     """
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
     doc = yaml.safe_load(text) or {}
 
     # 찍어야 할 라벨 목록은 하드코딩이 아니라 steps가 until로 참조하는 이름입니다.
-    # 스텝을 추가하면 스튜디오가 자동으로 그 위치를 요구합니다.
-    required = []
+    # 스텝을 추가하면 스튜디오가 자동으로 그 위치를 요구합니다. routes의 스텝도 같이
+    # 봅니다 -- 갈래 안의 drive도 라벨을 참조하고, 그쪽이 갈래 코스의 라벨입니다.
+    required = {}
+
+    def note_step(step):
+        if not isinstance(step, dict):
+            return
+        name = step.get("until")
+        if name in (None, ""):
+            return
+        course = step.get("course") or "main"
+        names = required.setdefault(course, [])
+        if name not in names:
+            names.append(name)
+
     for step in doc.get("steps") or []:
-        if isinstance(step, dict) and step.get("until") not in (None, ""):
-            if step["until"] not in required:
-                required.append(step["until"])
+        note_step(step)
+    for route in (doc.get("routes") or {}).values():
+        for step in route or []:
+            note_step(step)
 
     positions = {}
-    for name, value in (doc.get("labels") or {}).items():
-        if isinstance(value, dict) and "x" in value and "y" in value:
-            positions[name] = (float(value["x"]), float(value["y"]))
-    return text, doc, required, positions
+    sentinels = {}
+
+    def note_labels(course, block):
+        for name, value in (block or {}).items():
+            if isinstance(value, dict) and "x" in value and "y" in value:
+                positions.setdefault(course, {})[name] = (
+                    float(value["x"]), float(value["y"]))
+            elif value == "last":
+                sentinels.setdefault(course, set()).add(name)
+
+    note_labels("main", doc.get("labels"))
+    for course, entry in (doc.get("courses") or {}).items():
+        if isinstance(entry, dict):
+            note_labels(course, entry.get("labels"))
+
+    return text, doc, required, positions, sentinels
 
 
-def render_labels_block(positions, indices, order):
-    """labels 블록을 직렬화합니다. 어떤 step도 참조하지 않는 orphan은 맨 뒤에 --
-    조용히 사라지면 지울 기회가 없으므로 눈에 보이게 남깁니다."""
+def render_labels_block(positions, indices, order, sentinels=()):
+    """한 코스의 labels 블록을 직렬화합니다. 항상 들여쓰기 0으로 씁니다 --
+    갈래 코스의 블록은 splice_labels가 제자리 들여쓰기를 붙여 줍니다.
+
+    어떤 step도 참조하지 않는 orphan은 맨 뒤에 -- 조용히 사라지면 지울 기회가
+    없으므로 눈에 보이게 남깁니다.
+
+    sentinels(`last`)는 좌표가 없지만 그대로 다시 써야 합니다. 빠뜨리면 저장
+    한 번에 미션이 로드되지 않습니다.
+    """
     lines = [LABELS_HEADER]
-    orphans = [n for n in positions if n not in order]
+    known = set(positions) | set(sentinels)
+    orphans = [n for n in known if n not in order]
     for name in list(order) + sorted(orphans):
-        if name not in positions:
+        if name not in known:
+            continue
+        # 주석은 하나로 모읍니다. 예전에는 orphan 표시를 값 뒤에 그냥 붙였는데, 그 앞의
+        # "# wp #N"이 없으면(= 코스를 안 연 채 저장하면) 주석이 아니라 값의 일부가 되어
+        # 저장한 yaml이 파싱조차 안 됐습니다.
+        notes = []
+        if name in indices:
+            notes.append(f"wp #{indices[name]}")
+        if name in orphans:
+            notes.append("orphan: 어떤 step도 참조하지 않음")
+        comment = ("   # " + ", ".join(notes)) if notes else ""
+        if name in sentinels:
+            lines.append(f"  {name}: last{comment}\n")
             continue
         x, y = positions[name]
-        note = f"   # wp #{indices[name]}" if name in indices else ""
-        tag = "  (orphan: 어떤 step도 참조하지 않음)" if name in orphans else ""
-        lines.append(f"  {name}: {{x: {x:.3f}, y: {y:.3f}}}{note}{tag}\n")
+        lines.append(f"  {name}: {{x: {x:.3f}, y: {y:.3f}}}{comment}\n")
     return "".join(lines)
 
 
-def splice_labels(text, block):
-    """text의 최상위 `labels:` 매핑을 block으로 교체합니다. 나머지 바이트는 그대로."""
-    lines = text.splitlines(keepends=True)
-    start = None
-    for i, line in enumerate(lines):
-        if re.match(r"^labels:\s*(#.*)?$", line):
-            start = i
-            break
+def _key_line(lines, key, indent, lo, hi):
+    """[lo, hi)에서 정확히 indent 칸 들여쓴 `key:` 줄의 인덱스. 없으면 None."""
+    pattern = re.compile(r"^" + " " * indent + re.escape(key) + r":\s*(#.*)?$")
+    for i in range(lo, hi):
+        if pattern.match(lines[i]):
+            return i
+    return None
 
-    if start is None:
-        # labels 키가 아직 없으면 steps: 바로 위에 넣고, 그것도 없으면 끝에 붙입니다.
-        for i, line in enumerate(lines):
-            if re.match(r"^steps:\s*(#.*)?$", line):
-                return "".join(lines[:i]) + block + "\n" + "".join(lines[i:])
-        return text + ("" if text.endswith("\n") else "\n") + block
 
-    # 블록은 다음 0열 시작 줄(형제 키, 또는 그 키를 소개하는 주석)까지입니다.
-    # 뒤따르는 빈 줄은 구분자에 속하지 우리 것이 아닙니다.
+def _body_end(lines, start, indent, hi):
+    """start(키 줄)가 소유하는 블록의 끝(exclusive).
+
+    블록은 다음으로 indent 이하로 나오는 줄까지입니다 -- 형제 키든, 그 키를
+    소개하는 주석이든. 뒤따르는 빈 줄은 구분자에 속하지 우리 것이 아닙니다.
+    """
     end = start + 1
-    while end < len(lines) and (lines[end].strip() == "" or lines[end][:1] in " \t"):
+    while end < hi:
+        line = lines[end]
+        if line.strip() == "":
+            end += 1
+            continue
+        if len(line) - len(line.lstrip(" \t")) <= indent:
+            break
         end += 1
     while end > start + 1 and lines[end - 1].strip() == "":
         end -= 1
-    return "".join(lines[:start]) + block + "".join(lines[end:])
+    return end
 
 
-def save_mission(path, original_text, block):
-    """labels 블록만 갈아끼워 저장합니다. 원자적으로 씁니다.
+def _indented(block, indent):
+    if indent <= 0:
+        return block
+    pad = " " * indent
+    return "".join(
+        (pad + line if line.strip() else line) for line in block.splitlines(keepends=True))
+
+
+def splice_labels(text, block, course=None):
+    """text에서 한 코스의 labels 매핑을 block으로 교체합니다. 나머지 바이트는 그대로.
+
+    course가 None이거나 'main'이면 최상위 `labels:`, 아니면
+    `courses:` -> `<course>:` -> `labels:`입니다. block은 들여쓰기 0으로 받아서
+    제자리 들여쓰기를 여기서 붙입니다 -- 호출자가 갈래 블록의 깊이를 알 필요가
+    없게 하려는 것입니다.
+    """
+    lines = text.splitlines(keepends=True)
+
+    if course in (None, "", "main"):
+        start = _key_line(lines, "labels", 0, 0, len(lines))
+        if start is None:
+            # labels 키가 아직 없으면 steps: 바로 위에 넣고, 그것도 없으면 끝에 붙입니다.
+            for i, line in enumerate(lines):
+                if re.match(r"^steps:\s*(#.*)?$", line):
+                    return "".join(lines[:i]) + block + "\n" + "".join(lines[i:])
+            return text + ("" if text.endswith("\n") else "\n") + block
+        end = _body_end(lines, start, 0, len(lines))
+        return "".join(lines[:start]) + block + "".join(lines[end:])
+
+    courses = _key_line(lines, "courses", 0, 0, len(lines))
+    if courses is None:
+        raise ValueError("mission.yaml에 최상위 'courses:' 블록이 없습니다.")
+    courses_end = _body_end(lines, courses, 0, len(lines))
+
+    entry = entry_indent = None
+    pattern = re.compile(r"^(\s+)" + re.escape(course) + r":\s*(#.*)?$")
+    for i in range(courses + 1, courses_end):
+        match = pattern.match(lines[i])
+        if match:
+            entry, entry_indent = i, len(match.group(1))
+            break
+    if entry is None:
+        raise ValueError(f"'courses:' 아래에 '{course}:' 항목이 없습니다.")
+    entry_end = _body_end(lines, entry, entry_indent, courses_end)
+
+    labels = labels_indent = None
+    pattern = re.compile(r"^(\s+)labels:\s*(#.*)?$")
+    for i in range(entry + 1, entry_end):
+        match = pattern.match(lines[i])
+        if match and len(match.group(1)) > entry_indent:
+            labels, labels_indent = i, len(match.group(1))
+            break
+    if labels is None:
+        # 이 코스에 아직 labels:가 없습니다. 항목 끝에 새로 답니다.
+        return ("".join(lines[:entry_end]) + _indented(block, entry_indent + 2)
+                + "".join(lines[entry_end:]))
+    labels_end = _body_end(lines, labels, labels_indent, entry_end)
+    return ("".join(lines[:labels]) + _indented(block, labels_indent)
+            + "".join(lines[labels_end:]))
+
+
+def save_mission(path, original_text, blocks):
+    """labels 블록들만 갈아끼워 저장합니다. 원자적으로 씁니다.
+
+    blocks는 (코스 이름, 블록) 목록입니다 -- 코스마다 자기 labels 블록이 따로
+    있으므로 한 번의 저장이 여러 자리를 건드립니다.
 
     바이트 스플라이스는 그 바이트를 읽은 시점의 파일에 대해서만 유효하므로,
     연 뒤에 파일이 밖에서 바뀌었으면 거부합니다 -- 그대로 쓰면 남의 편집을
@@ -218,7 +354,10 @@ def save_mission(path, original_text, block):
     if on_disk != original_text:
         raise FileChangedError(path)
 
-    updated = splice_labels(original_text, block)
+    updated = original_text
+    for course, block in blocks:
+        updated = splice_labels(updated, block, course)
+
     directory = os.path.dirname(os.path.abspath(path)) or "."
     handle = tempfile.NamedTemporaryFile(
         "w", delete=False, dir=directory, prefix=".studio-", suffix=".yaml",

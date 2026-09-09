@@ -112,7 +112,7 @@ def generate_launch_description():
             description='Launch the hyper_rqt HYPER Panel (mission start/cancel)'),
         # 미션이 실제로 따라갈 코스 CSV. 기본값이 시뮬 코스라는 점이 중요합니다 --
         # 실차에서는 반드시 녹화한 파일로 덮어쓰세요:
-        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track_raw/real.csv
+        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/common_1.csv
         # 이 인자를 여기서 선언하고 behavior 스테이지로 넘겨주지 않으면, 넘긴 값이
         # 조용히 무시된 채 시뮬레이션 코스가 실차에 실립니다.
         DeclareLaunchArgument(
@@ -120,7 +120,7 @@ def generate_launch_description():
             default_value=PathJoinSubstitution([
                 EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
                 'waypoints', 'simulation', 'sim1.csv']),
-            description='미션이 따를 웨이포인트 CSV (실차는 track_raw/real.csv로 덮어쓰세요)'),
+            description='미션이 따를 웨이포인트 CSV (실차는 track/common_1.csv로 덮어쓰세요)'),
         robot_state_publisher,
         rviz,
         gps_accuracy_gui,

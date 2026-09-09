@@ -12,6 +12,9 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
 - `follow_path_client_node`: 코스 전체를 목표 하나로 보내던 예전 노드입니다. **레거시** -- 아래
   [follow_path_client_node (레거시)](#follow_path_client_node-레거시) 참고.
 - `config/mission_sim.yaml`: 대회 미션(시뮬). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
+- `config/mission_track.yaml`: 대회 미션(실차 트랙). 갈림길이 넷이라 `track/`의 조각 CSV들을
+  `courses`/`routes`로 엮습니다. 실행에 `waypoint_csv:=.../track/common_1.csv`와
+  `controller_vx_max:=2.22`가 **둘 다** 필요합니다 -- 이유는 그 파일 머리 주석에 있습니다.
 - `config/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
 - `config/nav2_controller.yaml`: nav2 `controller_server`(= `follow_path` 액션 서버) 파라미터입니다.
 - `src/mission_manager_parameters.yaml`: `mission_manager_node`의 파라미터 정의
@@ -99,7 +102,7 @@ n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 �
 라벨 찍기는
 ```bash
 ros2 run hyper_waypoint_studio waypoint_studio \
-    src/planning/hyper_waypoint/waypoints/track_raw/real.csv \
+    src/planning/hyper_waypoint/waypoints/track/real.csv \
     --mission src/planning/hyper_planner/config/stopline.yaml --mode edit
 ```
 
@@ -144,6 +147,21 @@ costmap 반지름(10 m)부터 기어가기 시작해 정지까지 5초 넘게 �
 후진 세그먼트에서는 `decel_profile_a`가 로드 시점에 자동으로 꺼집니다(RPP는 goal checker에 도달해야
 합니다). `a` 값은 2.0이면 6 m/s에서 제동거리 9 m입니다. "reached ... above cancel_on_arrival_speed"
 경고가 나면 차가 프로파일만큼 못 줄이고 있다는 뜻이니 낮추세요.
+
+**`handoff_m`** -- 라벨에서 서지 않고 다음 `drive` 스텝으로 넘어갑니다. 골까지 이만큼 남으면 그 자리에서
+"지금 위치 -> 다음 drive 스텝의 끝"을 새 골로 보내고, 실행 중인 골은 취소하지 않고 **갈아끼웁니다**
+(prearm과 같은 preemption이므로 `/cmd_vel`이 끊기지 않습니다).
+
+쓰는 이유는 하나입니다. `controller_id`는 FollowPath 골에 실려 나가므로 컨트롤러를 바꾸려면 새 골을
+보내야 하는데, 보통의 스텝 전환은 골 판정을 기다리므로 차가 라벨에서 한 번 섰다 다시 출발합니다.
+`handoff_m`은 그 전환을 정차 없이 합니다 -- `mission_track.yaml`의 s자 구간이 이렇게 RPP와 MPPI를
+오갑니다. prearm과 달리 두 스텝의 컨트롤러가 다른지는 **보지 않습니다**(다른 것이 목적입니다).
+
+`decel_profile_a` / `cancel_on_arrival_m`과 **같이 쓸 수 없습니다.** 둘 다 "라벨에서 선다"는 뜻이고,
+cancel-on-arrival이 먼저 골을 취소해 버리면 갈아끼울 골이 없습니다. 그 밖에 다음 스텝이 `drive`가
+아니거나, 어느 한쪽이 후진 세그먼트이거나(한 골 안에 방향 전환이 생깁니다), 이 스텝에 이미 prearm이
+걸려 있으면(신호를 보는 쪽이 이깁니다) 로드 시점에 경고를 남기고 그 자리의 handoff만 끕니다 -- 그러면
+예전처럼 라벨에서 한 번 섭니다.
 
 ### wait_signal 스텝과 prearm
 
@@ -226,6 +244,18 @@ routes:
 
 표지 값(`ban` / `allow`)은 `hyper_object_detection`이 냅니다 -- YOLO 클래스 이름이 다르면
 `sign_class_map` 파라미터로 맞추세요(그 패키지의 README 참고).
+
+**`select_by: position`** -- 표지가 아니라 **차의 현재 위치**로 갈래를 고릅니다. 갈래마다 그 첫
+`drive` 스텝의 시작 웨이포인트(= `branch_seam_tolerance_m`가 재는 그 점)까지의 거리를 비교해 가까운
+쪽으로 갑니다. 출발선이 둘인 코스에서 "차를 어디에 놓았느냐가 곧 어느 코스인가"를 그대로 조건으로 쓰는
+용도입니다 -- `mission_track.yaml`의 첫 스텝이 이렇게 `start_left` / `start_right`를 고릅니다.
+
+판정에 신호가 필요 없으므로 `debounce_frames`는 쓰이지 않고, `prearm_distance_m`도 켤 수 없습니다
+(미리 볼 표지가 없습니다 -- 켜 두면 경고를 남기고 끕니다). tf를 못 읽으면 아무 일도 일어나지 않고
+`timeout_s` 뒤 `default`로 갑니다. 표지 분기와 같은 실패 방식입니다.
+
+`cases`는 그대로 두는 편이 좋습니다. 위치 판정이 우선이지만, `/perception/sign`으로 값을 밀어 넣어
+갈래를 손수 강제할 수 있는 통로가 남습니다.
 
 ### 후진 세그먼트 (`reverse: true`)
 

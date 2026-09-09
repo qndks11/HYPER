@@ -14,7 +14,7 @@ from python_qt_binding.QtWidgets import (
     QAbstractItemView, QCheckBox, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget)
 
-from .. import theme
+from .. import formats, theme
 
 
 class EditPanel(QWidget):
@@ -164,7 +164,12 @@ class EditPanel(QWidget):
             f'color: {theme.COLOR_BAD if bad else theme.COLOR_STALE};')
 
     def set_labels(self, report, mission_name=None, active=None, orphans=()):
-        """report는 mission_model.snap_report()의 결과입니다."""
+        """report는 mission_model.snap_report()의 결과입니다.
+
+        라벨은 코스마다 독립이므로 코스별로 묶어 보여 주고, 목록의 식별자는 이름이
+        아니라 formats.label_key(코스, 이름)입니다 -- 같은 이름이 두 코스에 있어도
+        서로 다른 라벨입니다.
+        """
         self._list.blockSignals(True)
         self._list.clear()
         if mission_name is None:
@@ -173,9 +178,10 @@ class EditPanel(QWidget):
             self._list.blockSignals(False)
             return
 
-        over = sum(1 for entry in report if entry[3] == 'over')
-        missing = sum(1 for entry in report if entry[3] == 'missing')
-        summary = f'{mission_name} -- 라벨 {len(report)}개'
+        placeable = [e for e in report if e[4] != 'sentinel']
+        over = sum(1 for entry in report if entry[4] == 'over')
+        missing = sum(1 for entry in report if entry[4] == 'missing')
+        summary = f'{mission_name} -- 라벨 {len(placeable)}개'
         if missing:
             summary += f', 미배치 {missing}개'
         if over:
@@ -184,8 +190,23 @@ class EditPanel(QWidget):
         self._labels_hint.setStyleSheet(
             f'color: {theme.COLOR_BAD if over else theme.COLOR_STALE};')
 
-        for name, index, distance, state in report:
-            if state == 'missing':
+        orphan_keys = {formats.label_key(c, n) for c, n in orphans}
+        current_course = None
+        for course, name, index, distance, state in report:
+            if course != current_course:
+                current_course = course
+                header = QListWidgetItem(f'— {course} —')
+                header.setForeground(QColor(theme.COLOR_STALE))
+                header.setFlags(Qt.NoItemFlags)
+                self._list.addItem(header)
+
+            key = formats.label_key(course, name)
+            if state == 'sentinel':
+                # `last`는 좌표가 아니라 "그 코스의 마지막 점"입니다. 옮길 수 없으므로
+                # 고를 수도 없게 둡니다 -- 저장할 때는 그대로 다시 쓰입니다.
+                text = f'{name}   (last)'
+                color = theme.COLOR_STALE
+            elif state == 'missing':
                 text = f'{name}   (미배치)'
                 color = theme.COLOR_STALE
             elif state == 'nocourse':
@@ -195,19 +216,21 @@ class EditPanel(QWidget):
                 text = f'{name}   wp #{index}   {distance:.2f} m'
                 color = {'ok': theme.COLOR_GOOD, 'near': theme.COLOR_OK,
                          'over': theme.COLOR_BAD}[state]
+            if key in orphan_keys:
+                text += '   (orphan: 어떤 step도 참조 안 함)'
+                color = theme.COLOR_STALE
             item = QListWidgetItem(text)
             item.setForeground(QColor(color))
-            item.setData(Qt.UserRole, name)
+            item.setData(Qt.UserRole, key)
+            if state == 'sentinel':
+                item.setFlags(Qt.ItemIsEnabled)
+                item.setToolTip(
+                    "`last` 라벨입니다. 좌표가 아니라 그 코스의 마지막 웨이포인트를 "
+                    "뜻하므로 옮길 수 없습니다.")
             if state == 'over':
                 item.setToolTip(
                     '이 거리면 mission_manager가 미션 로드를 거부합니다 '
                     '(label_snap_tolerance_m 초과).')
-            self._list.addItem(item)
-
-        for name in orphans:
-            item = QListWidgetItem(f'{name}   (orphan: 어떤 step도 참조 안 함)')
-            item.setForeground(QColor(theme.COLOR_STALE))
-            item.setData(Qt.UserRole, name)
             self._list.addItem(item)
 
         if active is not None:

@@ -454,10 +454,17 @@ private:
         wait_until_ = now() + rclcpp::Duration::from_seconds(step.timeout_s);
         sign_streak_ = 0;
         value_streak_ = 0;
-        RCLCPP_INFO(
-          get_logger(), "%s branching on %s (%s; %d frame(s), timeout %.0f s -> '%s').",
-          progress().c_str(), params_.sign_topic.c_str(), branch_values(step).c_str(),
-          step.debounce_frames, step.timeout_s, step.default_route.c_str());
+        if (step.select_by_position) {
+          RCLCPP_INFO(
+            get_logger(), "%s branching on position (%s; timeout %.0f s -> '%s').",
+            progress().c_str(), branch_values(step).c_str(), step.timeout_s,
+            step.default_route.c_str());
+        } else {
+          RCLCPP_INFO(
+            get_logger(), "%s branching on %s (%s; %d frame(s), timeout %.0f s -> '%s').",
+            progress().c_str(), params_.sign_topic.c_str(), branch_values(step).c_str(),
+            step.debounce_frames, step.timeout_s, step.default_route.c_str());
+        }
         break;
     }
     publish_status(status_text());
@@ -517,7 +524,9 @@ private:
         update_progress();
         update_prearm();
         // 통과 신호가 확인되면 설 이유가 없으므로 cancel-on-arrival보다 먼저 봅니다.
-        if (!try_preempt()) {
+        // handoff도 같은 이유로 앞에 둡니다 -- 어느 쪽이든 갈아끼우면 이 스텝은 이미
+        // 끝난 것이라 도착 판정을 볼 이유가 없습니다.
+        if (!try_preempt() && !try_handoff()) {
           check_cancel_on_arrival();
         }
         break;
@@ -613,7 +622,16 @@ private:
     const Step & step = steps_[step_index_];
     std::size_t target = 0;
     std::string matched;
-    if (pick_branch(step, target, matched)) {
+    if (step.select_by_position) {
+      if (pick_branch_by_position(step, target)) {
+        RCLCPP_INFO(
+          get_logger(), "%s branch: taking route '%s' (nearest start point).",
+          progress().c_str(), route_name(step, target).c_str());
+        goto_step(target);
+        return;
+      }
+      // tf를 아직 못 읽었습니다. 아래 timeout이 default로 받아 줍니다.
+    } else if (pick_branch(step, target, matched)) {
       RCLCPP_INFO(
         get_logger(), "%s branch: '%s' confirmed; taking route '%s'.",
         progress().c_str(), matched.c_str(), route_name(step, target).c_str());
@@ -621,14 +639,72 @@ private:
       return;
     }
     if (now() >= wait_until_) {
-      RCLCPP_WARN(
-        get_logger(),
-        "%s branch: no lane sign confirmed within %.0f s (last saw '%s'). Taking the default "
-        "route '%s' -- check the sign detector.",
-        progress().c_str(), step.timeout_s, last_sign_.empty() ? "nothing" : last_sign_.c_str(),
-        step.default_route.c_str());
+      if (step.select_by_position) {
+        RCLCPP_WARN(
+          get_logger(),
+          "%s branch: could not read the vehicle pose within %.0f s. Taking the default route "
+          "'%s' -- check that odometry is running.",
+          progress().c_str(), step.timeout_s, step.default_route.c_str());
+      } else {
+        RCLCPP_WARN(
+          get_logger(),
+          "%s branch: no lane sign confirmed within %.0f s (last saw '%s'). Taking the default "
+          "route '%s' -- check the sign detector.",
+          progress().c_str(), step.timeout_s, last_sign_.empty() ? "nothing" : last_sign_.c_str(),
+          step.default_route.c_str());
+      }
       goto_step(step.default_target);
     }
+  }
+
+  // 위치로 갈래를 고릅니다: 갈래마다 그 첫 drive 스텝의 시작 웨이포인트까지의 거리를 재고
+  // 가장 가까운 쪽입니다. 재는 점은 check_branch_seams가 이음매를 재는 그 점과 같습니다
+  // -- 즉 "차가 지금 어느 갈래의 출발선에 서 있는가"입니다.
+  //
+  // tf를 못 읽으면 false. 그때 호출자는 아무 것도 하지 않고, timeout이 default로 받습니다
+  // (표지를 못 본 분기와 같은 실패 방식 -- 찍지 않고 정해진 곳으로).
+  bool pick_branch_by_position(const Step & branch, std::size_t & target)
+  {
+    const std::vector<std::size_t> targets = hyper_planner::branch_targets(branch);
+    geometry_msgs::msg::PoseStamped robot;
+    if (targets.empty() ||
+      !lookup_robot_pose(courses_.front().waypoints.frame_id, robot, params_.tf_timeout_sec))
+    {
+      return false;
+    }
+
+    double best = std::numeric_limits<double>::max();
+    std::string report;
+    for (const std::size_t candidate : targets) {
+      if (candidate >= steps_.size() || steps_[candidate].type != StepType::kDrive) {
+        continue;
+      }
+      const Step & first = steps_[candidate];
+      const hyper_planner::Course & course = course_of(first);
+      if (first.begin_index >= course.waypoints.points.size()) {
+        continue;
+      }
+      const auto & start = course.waypoints.points[first.begin_index];
+      const double distance = std::hypot(
+        start.x - robot.pose.position.x, start.y - robot.pose.position.y);
+      if (!report.empty()) {
+        report += ", ";
+      }
+      report += route_name(branch, candidate) + " " + std::to_string(distance).substr(0, 5) + " m";
+      if (distance < best) {
+        best = distance;
+        target = candidate;
+      }
+    }
+    if (best == std::numeric_limits<double>::max()) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "%s branch selects by position, but no route starts with a usable drive step.",
+        progress().c_str());
+      return false;
+    }
+    RCLCPP_INFO(get_logger(), "%s branch by position: %s.", progress().c_str(), report.c_str());
+    return true;
   }
 
   // ------------------------------------------------------------------ 막힘 처리
@@ -1013,6 +1089,61 @@ private:
     sign_streak_ = 0;
     value_streak_ = 0;
     send_goal(route_step, path);
+    return true;
+  }
+
+  // 컨트롤러를 바꾸려면 새 골을 보내는 수밖에 없는데, 보통의 스텝 전환은 골 판정을
+  // 기다리므로 차가 라벨에서 한 번 섭니다. handoff는 그 전환을 prearm과 같은 preemption으로
+  // 합니다 -- 골까지 handoff_m가 남으면 "지금 위치 -> 다음 drive 스텝의 끝"을 새 골로
+  // 보내고, 옛 골은 취소하지 않고 갈아끼웁니다. 새 골에는 다음 스텝의 controller_id가
+  // 실리므로 그 순간 컨트롤러가 바뀝니다(RPP <-> MPPI).
+  //
+  // 신호를 보지 않는다는 것만 빼면 try_preempt_for_signal과 같습니다. 조건이 맞는지는
+  // 로드 시점에 link_handoff_steps가 이미 봤습니다.
+  bool try_handoff()
+  {
+    const Step & step = steps_[step_index_];
+    if (!step.handoff_enabled || !goal_handle_ || arrival_requested_ || !progress_.valid()) {
+      return false;
+    }
+    if (progress_.distance_to_stop_m() > step.handoff_m) {
+      return false;
+    }
+
+    const std::size_t merge_index = step.handoff_merge_step;
+    const Step & merge_step = steps_[merge_index];
+
+    std::vector<PathSegment> segments;
+    if (step.course_id == merge_step.course_id) {
+      segments.push_back({&course_of(step), step.begin_index, merge_step.end_index});
+    } else {
+      segments.push_back(segment_of(step));
+      segments.push_back(segment_of(merge_step));
+    }
+
+    nav_msgs::msg::Path path;
+    if (build_path(
+        segments, merge_step.tail_after_label_m, false, merge_step.label, path) != PathBuild::kOk)
+    {
+      // 다음 tick에 다시 시도합니다. 끝내 못 만들면 handoff가 그냥 안 일어나고, 원래 골
+      // 그대로 라벨에 서서 다음 스텝이 자기 골을 보냅니다 -- 안전한 쪽으로 실패합니다.
+      return false;
+    }
+
+    RCLCPP_INFO(
+      get_logger(),
+      "%s handing off %.1f m before '%s': continuing to '%s' with controller '%s' "
+      "(%zu-pose path preempts the running goal).",
+      progress().c_str(), progress_.distance_to_stop_m(), step.label.c_str(),
+      merge_step.label.c_str(), merge_step.controller_id.c_str(), path.poses.size());
+
+    superseded_goal_id_ = goal_handle_->get_goal_id();
+    has_superseded_goal_ = true;
+
+    step_index_ = merge_index;
+    retries_ = 0;
+    prearmed_ = false;
+    send_goal(merge_step, path);
     return true;
   }
 

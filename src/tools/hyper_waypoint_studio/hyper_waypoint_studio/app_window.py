@@ -552,14 +552,22 @@ class StudioWindow(QMainWindow):
         if course is None or self._mission is None:
             self._edit.set_reverse_note('')
             return
-        steps = self._mission.doc.get('steps') or []
+        # 지금 편집 중인 코스에 지정된 미션 코스의 스텝만 봅니다. 라벨이 코스마다
+        # 독립이라, 다른 코스의 스텝을 여기 대고 재면 엉뚱한 구간이 걸립니다.
+        bound = course.mission_course or 'main'
+        steps = list(self._mission.doc.get('steps') or [])
+        for route in (self._mission.doc.get('routes') or {}).values():
+            steps.extend(route or [])
         for step in steps:
             if not isinstance(step, dict) or step.get('type') != 'drive':
                 continue
-            label = step.get('until')
-            if not label or label not in self._mission.positions:
+            if (step.get('course') or 'main') != bound:
                 continue
-            x, y = self._mission.positions[label]
+            label = step.get('until')
+            point = self._mission.position(bound, label) if label else None
+            if point is None:
+                continue
+            x, y = point
             end, _ = course.nearest(x, y)
             start = max(0, end - 60)
             if not start <= index <= end:
@@ -663,12 +671,21 @@ class StudioWindow(QMainWindow):
             self._on_handle_clicked(new_index)
             self._refresh_layers()
             return
-        # 라벨이 골라져 있으면 클릭이 곧 그 라벨의 배치입니다.
+        # 라벨이 골라져 있으면 클릭이 곧 그 라벨의 배치입니다. 스냅 대상은 편집 중인
+        # 코스가 아니라 그 라벨이 속한 코스입니다 -- 갈래 라벨을 고른 채 main을 클릭했다고
+        # 라벨이 main으로 옮겨 붙으면 안 됩니다.
         if self._active_label and self._mission is not None:
-            index, distance = course.nearest(x, y)
-            self._mission.place(self._active_label, course.xs[index], course.ys[index])
+            label_course, name = formats.split_key(self._active_label)
+            target = self._course_for(label_course)
+            if target is None:
+                self._edit.set_place_hint(
+                    f"'{name}'은 코스 '{label_course}'의 라벨입니다. 그 CSV를 열어야 "
+                    f"배치할 수 있습니다.")
+                return
+            index, distance = target.nearest(x, y)
+            self._mission.place(label_course, name, target.xs[index], target.ys[index])
             self._edit.set_place_hint(
-                f'{self._active_label} -> wp #{index}, 스냅 {distance:.2f} m'
+                f'{name} [{label_course}] -> wp #{index}, 스냅 {distance:.2f} m'
                 + ('   ** 경로에서 먼 클릭입니다 **' if distance > 2.0 else ''))
             self._refresh_labels()
             self._update_title()
@@ -710,6 +727,17 @@ class StudioWindow(QMainWindow):
                 return course
         return None
 
+    def _bound_courses(self):
+        """{미션 코스 이름: 그 코스로 지정된 CourseItem 또는 None}.
+
+        라벨은 자기 코스의 CSV에만 스냅되므로(mission_loader.snap_labels), 스냅 거리도
+        저장도 코스마다 따로 봐야 합니다. 안 연 코스는 None -- 그 코스의 라벨은 거리를
+        못 재지만 저장할 때 좌표는 그대로 다시 쓰입니다.
+        """
+        if self._mission is None:
+            return {}
+        return {name: self._course_for(name) for name in self._mission.course_names}
+
     def _refresh_labels(self):
         for marker in self._labels.values():
             self._scene.removeItem(marker)
@@ -718,45 +746,63 @@ class StudioWindow(QMainWindow):
             self._edit.set_labels([], None)
             return
 
-        course = self._course_for('main')
-        report = self._mission.snap_report(course)
-        states = {name: state for name, _i, _d, state in report}
-        for name, (x, y) in self._mission.positions.items():
-            marker = LabelMarker(name, x, y, self._on_label_moved, self._select_label)
-            marker.set_state(states.get(name, 'ok'))
-            marker.set_active(name == self._active_label)
+        report = self._mission.snap_report(self._bound_courses())
+        for course, name, _index, _distance, state in report:
+            if state in ('sentinel', 'missing'):
+                continue          # 찍을 좌표가 없습니다.
+            key = formats.label_key(course, name)
+            x, y = self._mission.position(course, name)
+            # 화면 글자에는 main이 아닐 때만 코스를 붙입니다. 같은 이름이 두 갈래에
+            # 있으면(t_left_end / t_right_end 같은 짝) 어느 쪽인지 보여야 합니다.
+            text = name if course == 'main' else f'{name} [{course}]'
+            marker = LabelMarker(key, text, x, y,
+                                 self._on_label_moved, self._select_label)
+            marker.set_state(state if state != 'nocourse' else 'ok')
+            marker.set_active(key == self._active_label)
             self._scene.addItem(marker)
-            self._labels[name] = marker
+            self._labels[key] = marker
         self._edit.set_labels(report, self._mission.name, self._active_label,
                               self._mission.orphans())
 
-    def _select_label(self, name):
-        self._active_label = name
-        for marker_name, marker in self._labels.items():
-            marker.set_active(marker_name == name)
-        self._edit.set_place_hint(
-            f"'{name}' 선택됨 -- 코스를 클릭하면 그 자리로 옮깁니다.")
+    def _select_label(self, key):
+        self._active_label = key
+        for marker_key, marker in self._labels.items():
+            marker.set_active(marker_key == key)
+        course, name = formats.split_key(key)
+        if self._course_for(course) is None:
+            self._edit.set_place_hint(
+                f"'{name}' 선택됨 -- 코스 '{course}'가 안 열려 있어 배치할 수 없습니다. "
+                f"그 CSV를 먼저 여세요.")
+        else:
+            self._edit.set_place_hint(
+                f"'{name}' 선택됨 -- '{course}' 코스를 클릭하면 그 자리로 옮깁니다.")
 
-    def _clear_label(self, name):
+    def _clear_label(self, key):
         if self._mission is None:
             return
-        self._mission.remove(name)
-        if self._active_label == name:
+        course, name = formats.split_key(key)
+        self._mission.remove(course, name)
+        if self._active_label == key:
             self._active_label = None
         self._refresh_labels()
         self._update_title()
 
-    def _on_label_moved(self, name, x, y):
+    def _on_label_moved(self, key, x, y):
         if self._mission is None:
             return
-        course = self._course_for('main') or self._active
+        label_course, name = formats.split_key(key)
+        # 끌어 놓은 라벨은 언제나 **자기 코스**에 스냅합니다. 지금 편집 중인 코스가
+        # 아니라 -- 그러면 갈래 라벨이 조용히 main 위로 옮겨 붙습니다.
+        course = self._course_for(label_course)
         if course is not None:
             index, distance = course.nearest(x, y)
-            self._mission.place(name, course.xs[index], course.ys[index])
+            self._mission.place(label_course, name, course.xs[index], course.ys[index])
             self._edit.set_place_hint(
-                f'{name} -> wp #{index}, 스냅 {distance:.2f} m')
+                f'{name} [{label_course}] -> wp #{index}, 스냅 {distance:.2f} m')
         else:
-            self._mission.place(name, x, y)
+            self._mission.place(label_course, name, x, y)
+            self._edit.set_place_hint(
+                f"{name}: 코스 '{label_course}'가 안 열려 있어 클릭한 좌표 그대로 뒀습니다.")
         self._refresh_labels()
         self._update_title()
 
@@ -882,17 +928,17 @@ class StudioWindow(QMainWindow):
     def _save_mission(self):
         if self._mission is None:
             return
-        course = self._course_for('main') or self._active
-        report = self._mission.snap_report(course)
-        over = [entry for entry in report if entry[3] == 'over']
-        missing = [entry for entry in report if entry[3] == 'missing']
+        courses = self._bound_courses()
+        report = self._mission.snap_report(courses)
+        over = [entry for entry in report if entry[4] == 'over']
+        missing = [entry for entry in report if entry[4] == 'missing']
         if over or missing:
             lines = []
-            for name, _i, distance, state in over:
-                lines.append(f'  {name}: {distance:.2f} m '
+            for course, name, _i, distance, _s in over:
+                lines.append(f'  {name} [{course}]: {distance:.2f} m '
                              f'(허용 {self._mission.snap_tolerance:.2f} m)')
-            for name, _i, _d, _s in missing:
-                lines.append(f'  {name}: 미배치')
+            for course, name, _i, _d, _s in missing:
+                lines.append(f'  {name} [{course}]: 미배치')
             answer = QMessageBox.warning(
                 self, '이대로 저장하면 미션이 로드되지 않습니다',
                 'mission_manager는 라벨이 허용 오차를 넘으면 미션 전체를 거부합니다.\n\n'
@@ -901,7 +947,7 @@ class StudioWindow(QMainWindow):
             if answer != QMessageBox.Save:
                 return
         try:
-            self._mission.save(course)
+            self._mission.save(courses)
         except formats.FileChangedError:
             answer = QMessageBox.question(
                 self, '파일이 바뀌었습니다',

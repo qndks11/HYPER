@@ -27,7 +27,7 @@ def generate_launch_description():
             'waypoint_csv',
             default_value=PathJoinSubstitution([
                 EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-                'waypoints', 'track_raw', 'real.csv']),
+                'waypoints', 'track', 'real.csv']),
             description='녹화 결과를 쓸 CSV. Record를 누르는 순간 truncate됩니다'),
         DeclareLaunchArgument(
             'min_spacing_m', default_value='0.5',
