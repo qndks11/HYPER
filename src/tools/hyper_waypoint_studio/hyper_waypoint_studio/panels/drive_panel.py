@@ -26,6 +26,8 @@ class DrivePanel(QWidget):
     goto_only = Signal(int, str)
     teleport_requested = Signal(str, float)   # label, offset_m
     start = Signal()
+    pause = Signal()
+    resume = Signal()
     cancel = Signal()
     skip = Signal()
     restart = Signal()
@@ -47,8 +49,11 @@ class DrivePanel(QWidget):
         root.addWidget(self._status)
 
         controls = QHBoxLayout()
+        self._button_captions = []
         for caption, signal, tip in (
                 ('시작', self.start, '현재 스텝부터 시작/재개합니다'),
+                ('일시정지', self.pause, '지금 자리에 세웁니다. 취소가 아니라서 스텝과 남은 시간이 그대로 남습니다'),
+                ('재개', self.resume, '일시정지를 풀고 멈춘 자리에서 이어 갑니다'),
                 ('취소', self.cancel, '진행 중인 목표를 취소하고 그 스텝에서 대기'),
                 ('건너뛰기', self.skip, '현재 스텝을 포기하고 다음으로'),
                 ('처음으로', self.restart, '스텝 0으로 되돌립니다')):
@@ -57,6 +62,7 @@ class DrivePanel(QWidget):
             button.clicked.connect(signal.emit)
             controls.addWidget(button)
             setattr(self, f'_button_{caption}', button)
+            self._button_captions.append(caption)
         root.addLayout(controls)
 
         box = QGroupBox('스텝')
@@ -186,6 +192,8 @@ class DrivePanel(QWidget):
         lowered = text.lower()
         if 'fail' in lowered:
             color = '#a32424'
+        elif 'paused' in lowered:
+            color = '#6a4b9c'
         elif 'block' in lowered or 'wait' in lowered:
             color = '#a86a00'
         elif lowered.startswith('idle') or 'cancel' in lowered:
@@ -207,7 +215,9 @@ class DrivePanel(QWidget):
                 pass
 
     def set_services_ready(self, ready, reason=''):
-        for caption in ('시작', '취소', '건너뛰기', '처음으로'):
+        # 위에서 만든 버튼 그대로 돕니다. 목록을 따로 적어 두면 버튼을 추가할 때
+        # 여기 빠뜨려서 새 버튼이 영영 비활성으로 남습니다.
+        for caption in self._button_captions:
             button = getattr(self, f'_button_{caption}', None)
             if button is not None:
                 button.setEnabled(ready)

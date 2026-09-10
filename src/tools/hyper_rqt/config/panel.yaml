@@ -47,10 +47,21 @@ groups:
         service: /mission_manager/start
         style: go
         tooltip: 첫 스텝부터 미션 주행을 시작합니다 (auto_start=false라 이걸 눌러야 출발).
+      - label: Pause
+        service: /mission_manager/pause
+        style: warn
+        tooltip: |
+          미션을 지금 스텝의 지금 자리에 세워 둡니다. 취소가 아니라 일시정지라서
+          스텝도, 그 스텝에 남은 시간도 그대로 있습니다 (Resume으로 이어서 갑니다).
+          조이스틱의 정지 버튼이 부르는 것과 같은 서비스입니다.
+      - label: Resume
+        service: /mission_manager/resume
+        style: go
+        tooltip: 일시정지를 풀고 멈춘 자리에서 이어 갑니다 (경로는 현재 위치에서 다시 잘립니다).
       - label: Cancel
         service: /mission_manager/cancel
         style: stop
-        tooltip: 실행 중인 골을 취소하고 미션을 멈춥니다.
+        tooltip: 실행 중인 골을 취소하고 미션을 멈춥니다 (스텝 처음이 아니라 그 스텝에서 대기).
       - label: Skip step
         service: /mission_manager/skip
         style: warn

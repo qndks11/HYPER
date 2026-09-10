@@ -188,6 +188,7 @@ public:
     // 던집니다. 처음 읽히기 전에 반드시 대입되지만 그래도 여기서 맞춰 둡니다.
     blocked_since_ = now();
     blocked_retry_at_ = now();
+    paused_at_ = now();
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
     // spin_thread = true: 아래 lookupTransform()이 타임아웃까지 블록하므로 리스너는
@@ -227,6 +228,20 @@ public:
         const std_srvs::srv::Trigger::Request::SharedPtr,
         std_srvs::srv::Trigger::Response::SharedPtr response) {
         handle_cancel(response);
+      });
+    pause_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/pause",
+      [this](
+        const std_srvs::srv::Trigger::Request::SharedPtr,
+        std_srvs::srv::Trigger::Response::SharedPtr response) {
+        handle_pause(response);
+      });
+    resume_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/resume",
+      [this](
+        const std_srvs::srv::Trigger::Request::SharedPtr,
+        std_srvs::srv::Trigger::Response::SharedPtr response) {
+        handle_resume(response);
       });
     skip_srv_ = create_service<std_srvs::srv::Trigger>(
       "~/skip",
@@ -484,6 +499,14 @@ private:
     begin_step();
   }
 
+  // "미션이 지금 굴러가고 있는가". 일시정지 중에도 true입니다 -- phase_는 "스텝의 어디쯤"을
+  // 뜻하고 멈춤 여부는 paused_가 따로 들고 있으므로, 여기서 paused_를 보면 안 됩니다.
+  bool is_running() const
+  {
+    return phase_ == Phase::kDriving || phase_ == Phase::kStarting ||
+           phase_ == Phase::kHolding || phase_ == Phase::kWaiting || phase_ == Phase::kBlocked;
+  }
+
   void fail(const std::string & reason)
   {
     phase_ = Phase::kFailed;
@@ -499,6 +522,18 @@ private:
         RCLCPP_INFO(get_logger(), "Parameters updated at runtime.");
       }
       params_logged_once_ = true;
+    }
+
+    // 일시정지: 아무 것도 진행시키지 않습니다. 골도 안 보내고, 기한도 안 보고, 갈래도 고르지
+    // 않습니다. 차는 골이 없으니 워치독이 세우고 있습니다(enter_blocked 위 주석과 같은 방식).
+    //
+    // update_speed_limit()이 아니라 여기서 직접 0.0(제한 없음)을 내보내는 이유: 취소 결과가
+    // 아직 안 왔으면 phase_는 여전히 kDriving이고, 그때 progress_가 유효하지 않으면
+    // update_speed_limit은 "마지막 값을 그대로 둔다"며 감속 제한을 붙잡고 있습니다.
+    // SpeedLimitPublisher가 같은 값은 걸러 주므로 매 tick 보내도 메시지는 한 번뿐입니다.
+    if (paused_) {
+      speed_limit_->publish(0.0, now());
+      return;
     }
 
     switch (phase_) {
@@ -857,6 +892,17 @@ private:
         return;
       }
       goal_handle_ = handle;
+      // 골을 보낸 직후(async_send_goal ~ 이 콜백 사이)에 '~/pause'나 '~/cancel'이 들어오면
+      // 그때는 취소할 핸들이 아직 없었습니다. 여기서 받은 핸들이 바로 그 골이므로, 멈추라는
+      // 말을 이미 들은 상태라면 붙잡지 않고 곧바로 취소합니다 -- 안 그러면 GUI와 로그는
+      // paused/canceled인데 nav2는 계속 차를 몰고 갑니다.
+      if (paused_ || phase_ == Phase::kIdle || phase_ == Phase::kFinished ||
+        phase_ == Phase::kFailed)
+      {
+        pause_requested_ = paused_;
+        client_->async_cancel_goal(handle);
+        return;
+      }
       phase_ = Phase::kDriving;
       publish_status(status_text());
     };
@@ -1254,6 +1300,11 @@ private:
       return;
     }
     goal_handle_.reset();
+    // 골이 어떻게 끝났든 "일시정지 때문에 건 취소"라는 표시는 여기서 소비됩니다. 아래
+    // CANCELED 분기 안에서만 지우면, 취소가 abort와 엇갈렸을 때 표시가 남아 다음 골의
+    // 결과를 잘못 해석할 수 있습니다.
+    const bool canceled_for_pause = pause_requested_;
+    pause_requested_ = false;
     if (phase_ == Phase::kFinished || phase_ == Phase::kFailed || phase_ == Phase::kIdle) {
       return;   // 취소로 이미 정리된 뒤 도착한 결과.
     }
@@ -1284,6 +1335,16 @@ private:
           skip_requested_ = false;
           RCLCPP_WARN(get_logger(), "%s skipped.", progress().c_str());
           advance();
+        } else if (canceled_for_pause) {
+          // '~/pause'가 건 취소입니다. kIdle로 떨어지지 않는 것이 취소와 일시정지의 차이
+          // 전부입니다 -- 스텝은 그대로 두고 kStarting으로 되돌려, '~/resume'이 같은 골을
+          // 지금 위치에서 다시 보내게 합니다(경로는 trim_to_robot이 다시 자릅니다).
+          phase_ = Phase::kStarting;
+          starting_since_ = now();
+          RCLCPP_INFO(
+            get_logger(), "%s pause: goal canceled; '~/resume' re-sends it from here.",
+            progress().c_str());
+          publish_status(status_text());
         } else {
           phase_ = Phase::kIdle;
           RCLCPP_WARN(
@@ -1454,6 +1515,13 @@ private:
 
   void on_sign(const std::string & value)
   {
+    // 일시정지 중에는 세지 않습니다. 계속 세면 서 있는 동안 debounce가 채워져,
+    // '~/resume'을 부르는 순간 판정이 이미 끝나 있습니다 -- reset_to가 점프 전 연속 프레임을
+    // 지우는 것과 같은 이유입니다.
+    if (paused_) {
+      return;
+    }
+
     last_sign_ = value;
 
     // 값별 연속 프레임 수. 스텝 종류와 무관하게 항상 셉니다 -- branch는 "허용 목록 안인가"가
@@ -1494,9 +1562,15 @@ private:
       response->message = "Mission was not loaded; see the node log.";
       return;
     }
-    if (phase_ == Phase::kDriving || phase_ == Phase::kStarting ||
-      phase_ == Phase::kHolding || phase_ == Phase::kWaiting || phase_ == Phase::kBlocked)
-    {
+    // paused_를 phase_보다 먼저 봅니다 -- 일시정지 중의 phase_는 kStarting일 수 있어서
+    // 아래 검사만으로는 "이미 달리는 중"이라는 엉뚱한 사유가 나갑니다.
+    if (paused_) {
+      response->success = false;
+      response->message = "Mission is paused at step " + std::to_string(step_index_) +
+        "; call '~/resume' to continue (or '~/cancel' to give up the step).";
+      return;
+    }
+    if (is_running()) {
       response->success = false;
       response->message = "Mission is already running (step " + std::to_string(step_index_) + ").";
       return;
@@ -1511,10 +1585,94 @@ private:
     response->message = "Started at step " + std::to_string(step_index_) + ".";
   }
 
+  // 미션을 지금 스텝의 지금 자리에 그대로 세워 둡니다. '~/cancel'과 달리 kIdle로 떨어지지
+  // 않으므로, '~/resume'이 스텝 안에서 이어 갑니다.
+  //
+  // 왜 phase_를 kPaused로 안 바꾸는가: phase_는 "이 스텝의 어디쯤인가"이고 그건 일시정지
+  // 중에도 그대로 유효한 정보입니다. kPaused를 만들면 돌아갈 phase를 따로 들고 있어야 해서
+  // 같은 걸 두 번 저장하게 됩니다. 그래서 멈춤 여부만 paused_로 따로 둡니다.
+  void handle_pause(std_srvs::srv::Trigger::Response::SharedPtr response)
+  {
+    if (paused_) {
+      response->success = false;
+      response->message = "Already paused at step " + std::to_string(step_index_) + ".";
+      return;
+    }
+    if (!is_running()) {
+      response->success = false;
+      response->message = "Nothing to pause; the mission is not running (" + status_text() + ").";
+      return;
+    }
+
+    paused_ = true;
+    paused_at_ = now();
+
+    // 도착/건너뛰기 취소가 이미 날아가 있으면 건드리지 않습니다. 그 취소는 "이 스텝은
+    // 끝났다"는 뜻이므로 제 뜻대로 끝내게 두고, advance()가 다음 스텝을 열어도 paused_가
+    // 그 자리에서 다시 얼립니다. 반대로 여기서 취소를 하나 더 걸면 그 뜻을 잃습니다.
+    if (goal_handle_ && !arrival_requested_ && !skip_requested_) {
+      pause_requested_ = true;
+      client_->async_cancel_goal(goal_handle_);
+    }
+
+    RCLCPP_WARN(
+      get_logger(), "%s paused; call '%s/resume' to continue.", progress().c_str(), get_name());
+    publish_status(status_text());
+    response->success = true;
+    response->message = "Paused at step " + std::to_string(step_index_) + ".";
+  }
+
+  // 일시정지를 풀고 스텝 안에서 이어 갑니다.
+  //
+  // 멈춰 있던 동안 시계도 멈춘 것으로 칩니다. 안 그러면 wait_signal 스텝에서 2분 쉬었다가
+  // 재개하는 순간 timeout_s가 이미 지나 있어 곧바로 실패(또는 엉뚱한 default 갈래)로 갑니다.
+  void handle_resume(std_srvs::srv::Trigger::Response::SharedPtr response)
+  {
+    if (!paused_) {
+      response->success = false;
+      response->message = "Mission is not paused (" + status_text() + ").";
+      return;
+    }
+
+    // 기한을 전부 멈춘 시간만큼 뒤로 밉니다. 멈춘 사이에 새로 잡힌 기한(취소 결과가 늦게
+    // 와서 advance()된 경우)은 그만큼 더 밀려 필요보다 오래 기다리지만, 짧아지는 쪽이
+    // 아니라 길어지는 쪽이라 안전합니다.
+    const rclcpp::Duration paused_for = now() - paused_at_;
+    hold_until_ = hold_until_ + paused_for;
+    wait_until_ = wait_until_ + paused_for;
+    blocked_since_ = blocked_since_ + paused_for;
+    blocked_retry_at_ = blocked_retry_at_ + paused_for;
+
+    // 이 셋은 밀지 않고 지금으로 되돌립니다 -- 멈춘 동안 흐른 시간을 "서버를 못 찾았다 /
+    // 진행도가 끊겼다"로 오해하면 안 됩니다.
+    starting_since_ = now();
+    progress_ok_since_ = now();
+    last_feedback_time_ = now();
+    // 멈추기 전 피드백 속도입니다. cancel-on-arrival이 이 값을 믿으면 서 있는 차를
+    // "아직 빠르다"고 볼 수 있으므로 버립니다.
+    have_speed_ = false;
+    last_speed_ = 0.0;
+    // debounce는 처음부터 다시 셉니다(on_sign이 멈춘 동안 세지 않았으므로 값은 멈출 때의
+    // 것입니다 -- 그걸 그대로 이어받으면 재개 즉시 판정될 수 있습니다).
+    sign_streak_ = 0;
+    value_streak_ = 0;
+    streak_value_.clear();
+
+    paused_ = false;
+    RCLCPP_INFO(
+      get_logger(), "%s resumed after %.1f s.", progress().c_str(), paused_for.seconds());
+    publish_status(status_text());
+    response->success = true;
+    response->message = "Resumed at step " + std::to_string(step_index_) + ".";
+  }
+
   void handle_cancel(std_srvs::srv::Trigger::Response::SharedPtr response)
   {
     skip_requested_ = false;
     arrival_requested_ = false;
+    // 취소는 일시정지보다 셉니다. 멈춰 있던 미션도 여기서 kIdle로 내려놓습니다.
+    paused_ = false;
+    pause_requested_ = false;
     if (goal_handle_) {
       client_->async_cancel_goal(goal_handle_);
     } else {
@@ -1531,6 +1689,14 @@ private:
     if (step_index_ >= steps_.size()) {
       response->success = false;
       response->message = "Nothing to skip; the mission is finished.";
+      return;
+    }
+    // 멈춘 상태에서 건너뛰면 advance() -> begin_step()으로 곧바로 출발합니다. 조이스틱
+    // 일시정지 중이라면 /estop이 아직 걸려 있어 사람은 차가 서 있는 걸 보고 있으므로,
+    // 그렇게 몰래 출발시키지 않고 거절합니다.
+    if (paused_) {
+      response->success = false;
+      response->message = "Mission is paused; call '~/resume' before skipping.";
       return;
     }
     const std::string skipped = std::to_string(step_index_);
@@ -1562,6 +1728,10 @@ private:
     arrival_requested_ = false;
     prearmed_ = false;
     blocked_ = false;
+    // 스텝을 옮기는 것이므로 일시정지도 함께 풉니다. 어차피 kIdle로 내려놓으니
+    // 차가 저절로 출발하지는 않습니다.
+    paused_ = false;
+    pause_requested_ = false;
     // 갈아끼운 옛 골의 표시도 지웁니다. 그 결과가 아직 날아오는 중일 수 있지만,
     // 위와 같은 이유로 kIdle에서 무시됩니다.
     has_superseded_goal_ = false;
@@ -1645,9 +1815,7 @@ private:
       return;
     }
 
-    const bool was_running =
-      phase_ == Phase::kDriving || phase_ == Phase::kStarting ||
-      phase_ == Phase::kHolding || phase_ == Phase::kWaiting || phase_ == Phase::kBlocked;
+    const bool was_running = is_running();
     reset_to(target);
     if (was_running) {
       RCLCPP_INFO(
@@ -1697,10 +1865,13 @@ private:
     return text;
   }
 
+  // 접두사를 여기서 붙이는 이유: status를 내보내는 곳은 여기만이 아니라 begin_step,
+  // enter_blocked, reset_to도 각자 부릅니다. 한곳에서 붙여야 멈춘 사이에 스텝이 넘어가도
+  // (늦게 온 도착 결과) GUI에서 "paused"가 사라지지 않습니다.
   void publish_status(const std::string & text)
   {
     std_msgs::msg::String msg;
-    msg.data = text;
+    msg.data = paused_ ? "paused " + text : text;
     status_pub_->publish(msg);
   }
 
@@ -1722,6 +1893,13 @@ private:
   bool skip_requested_{false};
   // 도착으로 치려고 우리가 건 취소인지(true), 사람이 부른 '~/cancel'인지 구분합니다.
   bool arrival_requested_{false};
+  // 일시정지('~/pause'). phase_와 나란한 별개의 상태입니다 -- phase_는 "스텝의 어디쯤"을
+  // 그대로 들고 있고, paused_는 "지금은 아무 것도 진행시키지 않는다"만 뜻합니다.
+  // pause_requested_는 일시정지 때문에 건 취소인지(true) 사람이 부른 '~/cancel'인지
+  // on_result에서 가리는 표시입니다(arrival_requested_/skip_requested_와 같은 방식).
+  bool paused_{false};
+  bool pause_requested_{false};
+  rclcpp::Time paused_at_;
   // prearm으로 갈아끼운 옛 골. 그 골의 결과와 피드백은 무시해야 합니다.
   bool has_superseded_goal_{false};
   rclcpp_action::GoalUUID superseded_goal_id_{};
@@ -1760,6 +1938,8 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sign_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr cancel_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr skip_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr restart_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr goto_step_srv_;

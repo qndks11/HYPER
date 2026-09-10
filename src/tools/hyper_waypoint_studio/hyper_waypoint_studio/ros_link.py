@@ -138,6 +138,7 @@ class RosLink(QObject):
         self._clients = {}
         for name in (f'{self.recorder_ns}/start', f'{self.recorder_ns}/stop',
                      f'{self.manager_ns}/start', f'{self.manager_ns}/cancel',
+                     f'{self.manager_ns}/pause', f'{self.manager_ns}/resume',
                      f'{self.manager_ns}/skip', f'{self.manager_ns}/restart',
                      f'{self.manager_ns}/goto_step',
                      f'{self.teleport_ns}/teleport'):

@@ -328,6 +328,10 @@ class HyperPanelWidget(QWidget):
         lowered = text.lower()
         if 'fail' in lowered or 'error' in lowered:
             background = '#a32424'
+        # paused를 blocked보다 먼저 봅니다 -- 막힌 채로 일시정지하면
+        # "paused blocked [3/21] ..."이 되는데, 그때 알려야 하는 것은 멈춘 쪽입니다.
+        elif 'paused' in lowered:
+            background = '#6a4b9c'
         elif 'blocked' in lowered or 'wait' in lowered:
             background = '#a86a00'
         elif lowered.startswith('idle') or 'cancel' in lowered:

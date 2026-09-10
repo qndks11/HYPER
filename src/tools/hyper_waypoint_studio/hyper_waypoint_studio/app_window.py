@@ -193,6 +193,8 @@ class StudioWindow(QMainWindow):
             lambda i, name: self._goto_step(i, name, then_start=False))
         self._drive.teleport_requested.connect(self._teleport)
         self._drive.start.connect(lambda: self._call('start'))
+        self._drive.pause.connect(lambda: self._call('pause'))
+        self._drive.resume.connect(lambda: self._call('resume'))
         self._drive.cancel.connect(lambda: self._call('cancel'))
         self._drive.skip.connect(lambda: self._call('skip'))
         self._drive.restart.connect(lambda: self._call('restart'))

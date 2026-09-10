@@ -36,10 +36,41 @@ source install/setup.bash
 | 서비스 | 하는 일 |
 | --- | --- |
 | `/mission_manager/start` | 현재 스텝부터 미션 시작/재개 |
+| `/mission_manager/pause` | 스텝 안에서 일시정지 (`resume`으로 이어 감) |
+| `/mission_manager/resume` | 일시정지를 풀고 멈춘 자리에서 이어 감 |
 | `/mission_manager/cancel` | 진행 중인 목표를 취소하고 그 스텝에서 대기 |
 | `/mission_manager/skip` | 현재 스텝을 포기하고 다음으로 |
 | `/mission_manager/restart` | 스텝 0으로 되돌림 (`start`로 다시 시작) |
 | `/mission_manager/goto_step` | 임의의 스텝 앞으로 점프하고 대기 (`start`로 시작) |
+
+### `~/pause` / `~/resume` -- 스텝 안에서 멈추기
+
+`~/cancel`은 미션을 `idle`로 내려놓습니다. 시험 주행 중에 잠깐 세울 때마다 그러면 스텝에
+남아 있던 상태(멈춰야 할 남은 시간, 신호 대기 기한, `obstacle_hold_s` 예산)가 사라지고
+패널의 Start를 다시 눌러야 합니다. 그래서 **잠깐 세우는 일은 `~/pause`**입니다.
+
+```bash
+ros2 service call /mission_manager/pause std_srvs/srv/Trigger    # 지금 자리에 선다
+ros2 service call /mission_manager/resume std_srvs/srv/Trigger   # 이어서 간다
+```
+
+멈추면 status에 `paused` 접두사가 붙습니다(`paused [3/21] drive until=stopline_1`).
+조이스틱의 정지 버튼(`estop_controller_node`)이 부르는 것이 바로 이 둘입니다.
+
+무엇이 멈추는가:
+
+- **골은 실제로 취소합니다.** nav2의 `FollowPath`에는 일시정지가 없고, `/cmd_vel`이 계속
+  나가면 워치독이 차를 세우지 못합니다. 대신 스텝은 그대로 두므로(`kIdle`로 안 갑니다)
+  `~/resume`이 같은 골을 **지금 위치에서 다시 잘라** 보냅니다 -- `kBlocked`가 장애물이
+  치워진 뒤 이어 가는 것과 같은 방식입니다. 따라서 멈춘 사이에 차를 조금 밀어 놓아도 됩니다.
+- **시계도 멈춥니다.** 기한은 재개할 때 멈춰 있던 만큼 뒤로 밀립니다. 이게 없으면
+  `wait_signal` 스텝에서 2분 쉬었다 재개하는 순간 `timeout_s`가 이미 지나 있어 곧바로
+  실패(분기라면 엉뚱한 default 갈래)로 갑니다.
+- **신호 debounce는 세지 않고, 재개할 때 0부터 다시 셉니다.** 서 있는 동안 초록불이
+  채워져 재개하자마자 튀어나가는 일을 막습니다.
+
+멈춘 동안 `~/start`와 `~/skip`은 거절합니다(`~/resume`을 쓰라고 알려 줍니다). `~/cancel`,
+`~/restart`, `~/goto_step`은 일시정지보다 세서, 부르면 멈춘 상태를 풀고 `idle`로 갑니다.
 
 ### `~/goto_step` -- 미션을 중간부터
 
