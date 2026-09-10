@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""미션 매니저 -- config/<mission>.yaml의 스텝 큐를 follow_path 액션으로 실행합니다.
+"""미션 매니저 -- mission/<mission>.yaml의 스텝 큐를 follow_path 액션으로 실행합니다.
 
 nav2 controller_server가 이미 떠 있어야 합니다(nav2_controller.launch.py).
 
-  ros2 launch hyper_planner mission.launch.py                  # config/mission_sim.yaml (대회 미션)
-  ros2 launch hyper_planner mission.launch.py mission:=simple  # config/simple.yaml (한 바퀴)
+  ros2 launch hyper_planner mission.launch.py                  # mission/mission_sim.yaml (대회 미션)
+  ros2 launch hyper_planner mission.launch.py mission:=simple  # mission/simple.yaml (한 바퀴)
 
 simple은 코스 전체를 골 하나로 보냅니다 -- follow_path_client_node가 하던 일이지만
 실주행과 같은 경로 처리(path_loader.hpp)를 거치므로 컨트롤러 튜닝 확인에 그대로 씁니다.
@@ -18,22 +18,27 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    default_csv = PathJoinSubstitution([
+    # 미션 파일이 `csv: track/common_1.csv`처럼 상대 경로로 적은 코스를 푸는 기준입니다.
+    # 어느 코스를 달릴지는 여기가 아니라 미션 파일의 courses:가 정합니다 --
+    # 이 인자를 건드릴 일은 웨이포인트 폴더를 통째로 옮겼을 때뿐입니다.
+    default_waypoints_dir = PathJoinSubstitution([
         EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-        'waypoints', 'simulation', 'sim1.csv'])
-    # config/<mission>.yaml. 이름만 받는 이유는 전체 경로를 손으로 적기 번거롭기 때문입니다
+        'waypoints'])
+    # mission/<mission>.yaml. 이름만 받는 이유는 전체 경로를 손으로 적기 번거롭기 때문입니다
     # (share 디렉터리는 `ros2 pkg prefix`를 거쳐야 나옵니다). 절대 경로가 필요하면
     # mission_yaml을 직접 주면 됩니다 -- 그쪽이 이 기본값을 덮어씁니다.
     default_mission = PathJoinSubstitution([
-        FindPackageShare('hyper_planner'), 'config',
+        FindPackageShare('hyper_planner'), 'mission',
         [LaunchConfiguration('mission'), '.yaml']])
 
     return LaunchDescription([
         DeclareLaunchArgument(
             'mission', default_value='mission_sim',
-            description='config/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
+            description='mission/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
         DeclareLaunchArgument('mission_yaml', default_value=default_mission),
-        DeclareLaunchArgument('waypoint_csv', default_value=default_csv),
+        DeclareLaunchArgument(
+            'waypoints_dir', default_value=default_waypoints_dir,
+            description='미션 파일의 상대 CSV 경로를 푸는 기준 디렉터리'),
         DeclareLaunchArgument('action_name', default_value='follow_path'),
         DeclareLaunchArgument('sign_topic', default_value='/perception/sign'),
         # mission.yaml에서 controller/goal_checker를 안 적은 스텝이 쓰는 기본값.
@@ -78,7 +83,7 @@ def generate_launch_description():
         # MPPI는 한 구간에서만 쓰는 미션에서는, 감속 프로파일이 붙은 스텝이 전부 RPP이므로
         # RPP의 desired_linear_vel(2.22)을 넘겨야 합니다:
         #   ros2 launch hyper_planner mission.launch.py mission:=mission_track \
-        #       controller_vx_max:=2.22 ...
+        #       controller_vx_max:=2.22
         # 안 넘기면 프로파일이 1.0에서 포화해 제동이 한참 늦게 걸립니다(정지선을 넘습니다).
         DeclareLaunchArgument('controller_vx_max', default_value='1.0'),
         # controller_server의 speed_limit_topic과 같아야 합니다.
@@ -102,7 +107,7 @@ def generate_launch_description():
             name='mission_manager', output='screen',
             parameters=[{
                 'mission_yaml': LaunchConfiguration('mission_yaml'),
-                'waypoint_csv': LaunchConfiguration('waypoint_csv'),
+                'waypoints_dir': LaunchConfiguration('waypoints_dir'),
                 'action_name': LaunchConfiguration('action_name'),
                 'sign_topic': LaunchConfiguration('sign_topic'),
                 'controller_id': LaunchConfiguration('controller_id'),

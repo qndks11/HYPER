@@ -51,9 +51,30 @@ class MissionModel:
             return 1.0
 
     @property
+    def has_main(self):
+        """이 미션에 main 코스가 있는지.
+
+        main은 선택입니다(mission_loader.hpp). 있으면 course:를 생략한 스텝의 기본
+        코스이자 최상위 labels:의 임자이고, 없으면(mission_track처럼 조각을 이어 붙이는
+        미션) 모든 라벨이 courses.<이름>.labels에 있습니다. 없는데도 목록에 넣으면
+        유령 항목이 생기고, _auto_bind가 거기에 코스를 묶어 최상위 labels:를 새로
+        써 버립니다 -- 로더가 임자 없는 블록이라며 미션을 거부합니다.
+        """
+        if "main" in (self.doc.get("courses") or {}):
+            return True
+        return bool(self.required.get("main") or self.positions.get("main")
+                    or self.sentinels.get("main"))
+
+    @property
     def course_names(self):
-        """미션이 아는 코스 이름들. main은 waypoint_csv 하나를 가리킵니다."""
-        return ["main"] + sorted((self.doc.get("courses") or {}).keys())
+        """미션이 아는 코스 이름들. main이 있으면 항상 먼저입니다.
+
+        main은 courses:에도 `main: {csv: ...}`로 적혀 있지만 라벨은 최상위 labels:에
+        있습니다. 여기서 걸러내지 않으면 main이 두 번 나오고, save()가 코스마다 블록을
+        하나씩 만들므로 labels: 블록이 두 벌 써집니다.
+        """
+        others = sorted(n for n in (self.doc.get("courses") or {}) if n != "main")
+        return (["main"] + others) if self.has_main else others
 
     def labels_for_course(self, course_name):
         """그 코스에 붙는 라벨 이름들. 배치해야 할 것(required)이 먼저이고,

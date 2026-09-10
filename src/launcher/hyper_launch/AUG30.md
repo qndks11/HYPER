@@ -11,5 +11,5 @@ Waypoint labeling
 ```bash
 ros2 run hyper_waypoint_studio waypoint_studio --mode edit \
   src/planning/hyper_waypoint/waypoints/real.csv \
-  --mission src/planning/hyper_planner/config/stopline.yaml
+  --mission src/planning/hyper_planner/mission/stopline.yaml
 ```

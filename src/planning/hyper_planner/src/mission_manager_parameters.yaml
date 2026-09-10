@@ -19,11 +19,14 @@ mission_manager:
       일부러 not_empty 검증을 걸지 않았습니다 -- 비어 있으면 load_mission이 훨씬 친절한
       메시지를 남기고, 노드는 살아남아 launch 로그에서 이유를 볼 수 있습니다.
 
-  waypoint_csv:
+  waypoints_dir:
     type: string
     default_value: ""
     read_only: true
-    description: "hyper_waypoint가 녹화한 코스 CSV 경로. 시작 시 한 번만 읽습니다."
+    description: |
+      mission.yaml에 상대 경로로 적힌 CSV(courses.<이름>.csv)를 푸는 기준 디렉터리.
+      보통 hyper_waypoint/waypoints이고, mission.launch.py가 채웁니다. 어느 코스를
+      달릴지는 이 파라미터가 아니라 미션 파일의 courses:가 정합니다.
 
   frame_id:
     type: string

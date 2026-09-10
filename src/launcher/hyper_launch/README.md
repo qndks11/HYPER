@@ -74,6 +74,8 @@ Terminal 8: Mission
 ```bash
 ros2 launch hyper_launch behavior.launch.py \
   use_sim_time:=false \
-  mission:=simple \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/full_track.csv
+  mission:=simple
 ```
+
+달릴 코스는 `hyper_planner/mission/<mission>.yaml`의 `courses:`가 정합니다
+(`simple.yaml`은 코스가 하나 -- `main`의 그 한 줄을 바꾸면 다른 코스를 한 바퀴 돕니다).

@@ -35,7 +35,7 @@ from .scene import StudioScene, StudioView
 
 HYPER = os.path.expanduser('~/HYPER')
 WAYPOINT_DIR = os.path.join(HYPER, 'src/planning/hyper_waypoint/waypoints')
-MISSION_DIR = os.path.join(HYPER, 'src/planning/hyper_planner/config')
+MISSION_DIR = os.path.join(HYPER, 'src/planning/hyper_planner/mission')
 COURSE_MESHES = os.path.join(
     HYPER, 'src/simulator/hyper_gazebo/worlds/models/driving_course/meshes')
 
@@ -372,20 +372,54 @@ class StudioWindow(QMainWindow):
             self._frame_all()
 
     def _auto_bind(self, course):
-        """파일 이름으로 미션 코스를 짐작합니다. 틀리면 목록에서 바꾸면 됩니다."""
+        """파일 이름으로 미션 코스를 짐작합니다. 틀리면 목록에서 바꾸면 됩니다.
+
+        미션의 `csv:`는 waypoints_dir 기준 상대 경로일 수 있고(`track/common_1.csv`),
+        스튜디오는 그 waypoints_dir을 모릅니다 -- 연 파일의 절대 경로만 압니다. 그래서
+        경로를 통째로 맞추지 않고 꼬리부터 맞춥니다.
+        """
         if self._mission is None:
             return
+        path = os.path.abspath(course.path)
         stem = os.path.splitext(course.name)[0]
+        by_name = None
         for name in self._mission.course_names:
-            if name == 'main':
-                continue
             entry = (self._mission.doc.get('courses') or {}).get(name) or {}
-            if os.path.splitext(str(entry.get('csv', '')))[0] == stem:
-                course.mission_course = name
+            csv = str(entry.get('csv') or '')
+            if not csv:
+                continue
+            # 1순위: 미션이 적은 경로가 연 파일의 꼬리와 그대로 맞는 것. 폴더까지 같으므로
+            # 이름만 같은 다른 폴더의 CSV(simulation/sim.csv <-> track/sim.csv)와 헷갈리지
+            # 않습니다.
+            tail = csv.lstrip('./')
+            if path == csv or path.endswith(os.sep + tail):
+                self._claim_course(course, name)
                 return
-        # 갈래가 아니면서 아직 main이 없으면 main으로 둡니다.
+            # 2순위: 파일 이름만 같은 것. 다른 데로 복사해 둔 CSV도 잡습니다.
+            if by_name is None and os.path.splitext(os.path.basename(csv))[0] == stem:
+                by_name = name
+        if by_name is not None:
+            self._claim_course(course, by_name)
+            return
+        # 이름으로 못 찾았습니다. 갈래가 아니면서 아직 main이 없으면 main으로 둡니다.
+        # main이 없는 미션(mission_track처럼 조각을 이어 붙이는 것)에서는 묶을 곳이
+        # 없으므로 그대로 둡니다 -- 목록에서 손으로 고르면 됩니다.
+        if not self._mission.has_main:
+            return
         if not any(c.mission_course == 'main' for c in self._courses):
             course.mission_course = 'main'
+
+    def _claim_course(self, course, name):
+        """파일 이름이 맞은 코스에 미션 코스를 묶습니다.
+
+        같은 이름을 이미 물고 있는 코스가 있으면 뺏습니다 -- 그쪽은 위의 main 추정처럼
+        이름이 맞아서가 아니라 자리가 비어서 묶인 것이고, `_course_for`는 먼저 묶인
+        쪽을 돌려주므로 그대로 두면 라벨 거리를 엉뚱한 CSV에 대고 재게 됩니다.
+        """
+        for other in self._courses:
+            if other is not course and other.mission_course == name:
+                other.mission_course = None
+        course.mission_course = name
 
     def _remove_course(self, row):
         if not 0 <= row < len(self._courses):
@@ -1139,7 +1173,7 @@ class StudioWindow(QMainWindow):
         if self._mission is not None and self._mission.dirty:
             documents.append((
                 self._mission.name,
-                lambda: self._mission.save(self._course_for('main') or self._active)))
+                lambda: self._mission.save(self._bound_courses())))
         if self._overlay_dirty and self._overlay_alignable:
             item = self._overlay_item
             documents.append((

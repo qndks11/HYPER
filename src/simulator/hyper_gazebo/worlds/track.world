@@ -199,7 +199,7 @@
 
     <!-- Acceleration path obstacles.
          Path runs from accel_start (-36.231, 41.459) to accel_end (-39.314, -34.026)
-         (see hyper_planner/config/mission.yaml); heading along the path is -1.6116 rad. -->
+         (see hyper_planner/mission/mission_sim.yaml); heading along the path is -1.6116 rad. -->
 
     <!-- Pedestrian at the midpoint of the acceleration path, facing oncoming traffic. -->
     <include>

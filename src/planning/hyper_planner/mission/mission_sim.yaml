@@ -11,7 +11,7 @@
 # labels 채우는 법:
 #   ros2 run hyper_waypoint_studio waypoint_studio \
 #       src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
-#       --mission src/planning/hyper_planner/config/mission_sim.yaml --mode edit
+#       --mission src/planning/hyper_planner/mission/mission_sim.yaml --mode edit
 #
 # 실행:
 #   ros2 launch hyper_planner nav2_controller.launch.py   # 액션 서버가 먼저 떠 있어야 합니다
@@ -25,8 +25,9 @@
 # 갈림길이 있으면 세 번째 부분이 붙습니다.
 #   courses: "어느 코스"  -- 갈래마다 따로 녹화한 CSV와 그 CSV의 labels
 #   routes:  "고르면 무엇을" -- branch가 고를 수 있는 스텝 시퀀스들
-# 자세한 것은 아래 `branch` 스텝 설명과 파일 끝의 예시를 보세요. courses를 안 쓰면
-# 코스는 waypoint_csv 하나("main")뿐이고 동작은 분기 기능이 없던 때와 같습니다.
+# 자세한 것은 아래 `branch` 스텝 설명과 파일 끝의 예시를 보세요. 이 미션의 main 코스가
+# 갈래 없이 도는 한 바퀴이고, 갈래 CSV는 main과 같은 폴더에 두어 파일 이름만 적습니다.
+# (main은 선택입니다 -- mission_track.yaml처럼 조각을 이어 붙이는 미션에는 없습니다.)
 
 label_snap_tolerance_m: 1.0
 
@@ -277,6 +278,12 @@ steps:
       - {value: "allow_right", goto: right_route}
 
 courses:
+  # main = 이 미션이 달리는 코스. 상대 경로는 waypoints_dir(기본
+  # hyper_waypoint/waypoints) 기준이고, 아래 갈래들은 main과 같은 폴더에서 찾습니다.
+  # main의 라벨은 최상위 labels:입니다(여기에 labels를 적지 마세요).
+  main:
+    csv: simulation/sim1.csv
+
   sim_left:
     csv: sim_left.csv
     labels:

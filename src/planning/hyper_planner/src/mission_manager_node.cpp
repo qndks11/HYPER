@@ -1,6 +1,6 @@
 // HYPER 미션 매니저.
 //
-// config/mission.yaml의 스텝 큐를 순서대로 실행합니다. 핵심 아이디어는
+// mission/<mission>.yaml의 스텝 큐를 순서대로 실행합니다. 핵심 아이디어는
 // "한 스텝 = FollowPath 골 하나"입니다 -- 정지선/신호등/주차 지점이 곧 세그먼트의 끝이므로
 // "도착했는가?"를 따로 판정할 필요 없이 nav2의 goal checker가 알려 줍니다.
 //
@@ -278,7 +278,7 @@ private:
   bool load_mission()
   {
     hyper_planner::MissionLoadConfig config;
-    config.waypoint_csv = params_.waypoint_csv;
+    config.waypoints_dir = params_.waypoints_dir;
     config.min_spacing_m = params_.min_spacing_m;
     config.frame_id = params_.frame_id;
     config.mission_yaml = params_.mission_yaml;

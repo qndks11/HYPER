@@ -19,12 +19,12 @@ ros2 run hyper_waypoint_studio waypoint_studio
 # 코스와 미션을 열고 시뮬 코스 텍스처를 배경으로
 ros2 run hyper_waypoint_studio waypoint_studio \
   src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
-  --mission src/planning/hyper_planner/config/mission_sim.yaml \
+  --mission src/planning/hyper_planner/mission/mission_sim.yaml \
   --overlay gazebo --mode edit
 
 # launch로
 ros2 launch hyper_waypoint_studio studio.launch.py mode:=drive \
-  mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/config/mission_sim.yaml
+  mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_sim.yaml
 ```
 
 > **이 머신의 VSCode 통합 터미널에서는** snap이 주입하는 `GTK_PATH` 때문에 GUI가 즉시
@@ -116,9 +116,14 @@ CSV의 `yaw`는 EKF가 준 실제 **차체 헤딩**이고, `path_loader.hpp`의 
 ## 라벨은 코스마다 독립입니다
 
 `mission_loader`에서 라벨 이름은 **코스마다 따로**입니다. 최상위 `labels:`는 `main`
-(= `waypoint_csv`)의 것이고, 갈래 코스는 `courses.<이름>.labels`를 씁니다. 같은 이름이
+코스의 것이고, 나머지 코스는 `courses.<이름>.labels`를 씁니다. 같은 이름이
 두 코스에 있어도 되고(`t_left_end` / `t_right_end`처럼 짝을 이루는 라벨), 한 코스에만
 있어도 됩니다.
+
+`main`은 선택입니다 -- `mission_track.yaml`처럼 코스가 전부 조각인 미션에는 없고, 그때는
+최상위 `labels:`도 없습니다. 그런 미션에서는 코스 목록에 `main` 항목이 나오지 않으므로,
+연 CSV는 파일 이름으로 자동으로 묶이거나(`courses.<이름>.csv`와 같으면) 목록에서 손으로
+골라야 합니다.
 
 스튜디오도 그대로 따라갑니다.
 

@@ -13,5 +13,5 @@ services and topics. Only the things it doesn't say belong here.
 - **Stopping is a timeout, not a command**: `cmd_vel_to_ackermann_node`'s `input_timeout`
   watchdog is how a `stop` step halts the car. Anything that keeps publishing `/cmd_vel` during
   a stop silently defeats it.
-- Verify changes by relaunching `mission.launch.py` against `config/simple.yaml` — it's one goal,
+- Verify changes by relaunching `mission.launch.py` against `mission/simple.yaml` — it's one goal,
   no signals or parking, so a regression shows up immediately.

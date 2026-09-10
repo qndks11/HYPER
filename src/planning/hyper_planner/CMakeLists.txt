@@ -39,5 +39,5 @@ ament_target_dependencies(cmd_vel_to_ackermann_node
 install(TARGETS mission_manager_node cmd_vel_to_ackermann_node
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config launch mission DESTINATION share/${PROJECT_NAME})
 ament_package()

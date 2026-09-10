@@ -5,17 +5,17 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
 
 ## 구성
 
-- `mission_manager_node`: `config/<mission>.yaml`의 스텝 큐(주행/정지/신호 대기)를 순서대로 실행합니다.
+- `mission_manager_node`: `mission/<mission>.yaml`의 스텝 큐(주행/정지/신호 대기)를 순서대로 실행합니다.
   대회 주행도, 한 바퀴 시험 주행도 전부 이 노드입니다.
 - `cmd_vel_to_ackermann_node`: nav2가 내는 `/cmd_vel`(Twist)을 `/velocity`, `/steering_angle`로 변환합니다.
   `input_timeout`(0.3초) 워치독이 있어 목표가 없으면 차가 섭니다 -- 이것이 `stop` 스텝의 정지 방식입니다.
 - `follow_path_client_node`: 코스 전체를 목표 하나로 보내던 예전 노드입니다. **레거시** -- 아래
   [follow_path_client_node (레거시)](#follow_path_client_node-레거시) 참고.
-- `config/mission_sim.yaml`: 대회 미션(시뮬). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
-- `config/mission_track.yaml`: 대회 미션(실차 트랙). 갈림길이 넷이라 `track/`의 조각 CSV들을
-  `courses`/`routes`로 엮습니다. 실행에 `waypoint_csv:=.../track/common_1.csv`와
-  `controller_vx_max:=2.22`가 **둘 다** 필요합니다 -- 이유는 그 파일 머리 주석에 있습니다.
-- `config/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
+- `mission/mission_sim.yaml`: 대회 미션(시뮬). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
+- `mission/mission_track.yaml`: 대회 미션(실차 트랙). 갈림길이 넷이라 `track/`의 조각 CSV들을
+  `courses`/`routes`로 엮습니다. 실행에 `controller_vx_max:=2.22`가 필요합니다 -- 이유는 그
+  파일 머리 주석에 있습니다.
+- `mission/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
 - `config/nav2_controller.yaml`: nav2 `controller_server`(= `follow_path` 액션 서버) 파라미터입니다.
 - `src/mission_manager_parameters.yaml`: `mission_manager_node`의 파라미터 정의
   (generate_parameter_library가 여기서 헤더를 생성합니다). 파라미터의 의미는 이 파일이 원본입니다.
@@ -86,7 +86,7 @@ n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 �
 장애물 회피는 스텝이 아닙니다. MPPI가 해당 `drive` 스텝 안에서 로컬 costmap을 보며 알아서 처리합니다.
 
 파일은 "어디서"(`labels`)와 "무엇을"(`steps`)로 나뉩니다. 각 필드의 의미와 튜닝 지침은
-[config/mission.yaml](config/mission.yaml)의 주석이 원본입니다 -- 여기서는 구조만 설명합니다.
+[mission/mission_sim.yaml](mission/mission_sim.yaml)의 주석이 원본입니다 -- 여기서는 구조만 설명합니다.
 
 ### 라벨과 세그먼트
 
@@ -103,7 +103,7 @@ n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 �
 ```bash
 ros2 run hyper_waypoint_studio waypoint_studio \
     src/planning/hyper_waypoint/waypoints/track/real.csv \
-    --mission src/planning/hyper_planner/config/stopline.yaml --mode edit
+    --mission src/planning/hyper_planner/mission/stopline.yaml --mode edit
 ```
 
 ### drive 스텝: 감속과 도착 판정
@@ -212,13 +212,27 @@ routes:
     - {type: drive, course: lane_ban, until: lane_ban_end, ...}
 ```
 
-**라벨은 코스마다 독립입니다.** 최상위 `labels:`는 `main` 코스(= `waypoint_csv`)의 것이고
--- waypoint studio가 그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 갈래 코스는
+**미션이 달릴 코스는 `courses:`가 정합니다.** launch 인자로 넘기는 것이 아니므로, 어느 미션이
+어느 코스로 도는지는 미션 파일만 보면 됩니다. 이름은 자유이고 `main`만 특별합니다:
+
+- **`main`이 있는 미션** -- 코스가 사실상 하나인 미션(`simple.yaml`, `mission_sim.yaml`)이
+  이 모양입니다. `course:`를 안 적은 `drive` 스텝은 `main`을 달리고, 최상위 `labels:`가
+  `main`의 라벨입니다.
+- **`main`이 없는 미션** -- 트랙을 조각으로 녹화해 이어 붙이는 미션(`mission_track.yaml`)에는
+  "이 미션이 달리는 코스" 하나가 없습니다. `main`을 두지 않으면 모든 `drive` 스텝이 `course:`를
+  명시해야 하고(빠지면 로드가 거부됩니다), 최상위 `labels:`는 임자가 없으므로 두면 안 됩니다
+  (역시 거부됩니다).
+
+**라벨은 코스마다 독립입니다.** 최상위 `labels:`는 `main` 코스의 것이고 -- waypoint studio가
+그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 나머지 코스는
 `courses.<이름>.labels`를 씁니다. `drive` 스텝은 자기 `course:`의 라벨만 찾습니다.
 
-**CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) mission.yaml이 있는 디렉터리,
-(3) 준 그대로 순으로 찾습니다. 갈래 CSV를 `sim.csv` 옆에 두고 파일 이름만 적으면
-`waypoint_csv:=.../real.csv`로 실차 코스를 실을 때 갈래도 같이 따라갑니다.
+**CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) `waypoints_dir` 파라미터
+(기본 `hyper_waypoint/waypoints`), (3) mission.yaml이 있는 디렉터리, (4) 준 그대로 순으로
+찾습니다. 기본은 (2)입니다 -- 코스마다 `track/common_1.csv`처럼 `waypoints/` 아래 상대 경로를
+적습니다(`mission_track.yaml`). (1)은 `main`이 있는 미션의 편의로, 갈래를 main과 같은 폴더에
+두면 파일 이름만 적어도 되고 코스 폴더를 옮길 때 `main` 한 줄만 고치면 갈래가 전부 따라옵니다
+(`mission_sim.yaml`).
 
 **갈래 CSV는 반드시 분기 지점에서 시작해야 합니다.** 첫 점이 분기 라벨에서
 `branch_seam_tolerance_m`(기본 2 m)보다 멀면 로드가 **거부**됩니다. 안 그러면 차가 분기 지점에서
@@ -235,11 +249,11 @@ routes:
 답이 나오지 않습니다.
 
 **`prearm_distance_m`**는 `wait_signal`과 같습니다. 확인되면 서지 않고 그대로 갈래로 들어갑니다:
-골을 "지금 위치 -> 분기 지점(main 코스) -> 고른 갈래의 끝(갈래 코스)"으로 갈아끼웁니다. 두 코스에
+골을 "지금 위치 -> 분기 지점(앞 코스) -> 고른 갈래의 끝(갈래 코스)"으로 갈아끼웁니다. 두 코스에
 걸친 경로를 한 골로 만드는 것이 신호등 prearm과의 유일한 차이입니다. 확인이 안 되면 원래 골 그대로
 분기 지점에 서고, 거기서 `branch` 스텝이 다시 봅니다.
 
-갈래가 끝나면 `branch` 뒤의 main 스텝으로 **합류**하고, `branch`가 main의 마지막 스텝이면 미션이
+갈래가 끝나면 `branch` 뒤의 `steps:` 스텝으로 **합류**하고, `branch`가 `steps:`의 마지막이면 미션이
 끝납니다. route 안에 또 `branch`를 두는 것은 지원하지 않습니다(합류 지점이 모호해집니다).
 
 표지 값(`ban` / `allow`)은 `hyper_object_detection`이 냅니다 -- YOLO 클래스 이름이 다르면

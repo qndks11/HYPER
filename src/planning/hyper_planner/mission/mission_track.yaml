@@ -1,24 +1,17 @@
 # HYPER 실차 미션 (용인 트랙) -- mission_manager_node가 읽습니다.
 #
-# 필드 하나하나의 뜻과 튜닝 지침은 config/mission_sim.yaml의 주석이 원본입니다.
+# 필드 하나하나의 뜻과 튜닝 지침은 mission/mission_sim.yaml의 주석이 원본입니다.
 # 여기서는 이 코스에만 해당하는 것 -- 코스가 어떻게 이어지는지, 어느 라벨이 아직
 # 가짜인지, 왜 컨트롤러가 구간마다 다른지 -- 만 적습니다.
 #
 # 실행:
-#   TRACK=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/common_1.csv
 #   ros2 launch hyper_planner nav2_controller.launch.py
-#   ros2 launch hyper_planner mission.launch.py mission:=mission_track \
-#       waypoint_csv:=$TRACK controller_vx_max:=2.22
+#   ros2 launch hyper_planner mission.launch.py mission:=mission_track controller_vx_max:=2.22
 #   ros2 service call /mission_manager/start std_srvs/srv/Trigger
 #
-# controller_vx_max:=2.22도 반드시 넘겨야 합니다. 기본값 1.0은 MPPI의 vx_max에 맞춘
+# controller_vx_max:=2.22는 반드시 넘겨야 합니다. 기본값 1.0은 MPPI의 vx_max에 맞춘
 # 값인데, 이 미션에서 감속 프로파일이 붙은 스텝은 전부 RPP(desired_linear_vel 2.22)라
 # 1.0으로 두면 /speed_limit이 포화해 제동이 늦게 걸립니다 -- 정지선을 넘습니다.
-#
-# waypoint_csv를 반드시 넘겨야 합니다. 상대 경로로 적은 갈래 CSV는 "main CSV가 있는
-# 디렉터리"에서 먼저 찾으므로(mission_loader.hpp의 resolve_csv_path), main이
-# track/common_1.csv일 때만 나머지 12개가 같이 잡힙니다. 안 넘기면 기본값이
-# simulation/sim1.csv라 로드가 통째로 실패합니다.
 #
 #
 # 코스 구성
@@ -29,25 +22,9 @@
 #   start_left  --0.65--> common_1 --0.50--> t_left  --0.54--> common_2 --0.41--> p_up   --0.57--> common_3 --1.04--> end_left
 #   start_right --1.79--> common_1 --0.50--> t_right --0.61--> common_2 --0.70--> p_down --1.23--> common_3 --0.64--> end_right
 #
-# main 코스는 common_1입니다. 최상위 labels:는 main의 것이고, 갈래 코스의 라벨은
-# courses.<이름>.labels에 있습니다. waypoint studio는 두 가지를 모두 편집/저장합니다
-# (레이어 목록에서 코스를 고르면 그 코스의 라벨이 나옵니다).
 #
 # 주의: studio는 labels: 블록을 **통째로 재작성**합니다. 라벨 옆에 손으로 쓴 설명을
 # 두면 저장 한 번에 사라지므로, 설명은 labels: 줄 *위*에 두세요(거기는 안 건드립니다).
-#
-#
-# ! 아직 가짜인 라벨 7개
-# ----------------------
-# stopline_left, stopline_right, light_1, sign_2, light_2, accel_start, accel_end.
-# 전부 "그 CSV에 실제로 있는 웨이포인트"라 스냅은 통과하고 미션도 끝까지 돕니다.
-# 다만 정지선/신호등/가속 구간의 진짜 위치가 아닙니다. 실측 전에 대회 주행에 쓰지
-# 마세요. 고치는 법:
-#   ros2 run hyper_waypoint_studio waypoint_studio \
-#       src/planning/hyper_waypoint/waypoints/track/common_1.csv \
-#       --mission src/planning/hyper_planner/config/mission_track.yaml --mode edit
-# 스튜디오는 common_1(main)의 라벨만 저장합니다. start_left / start_right / common_2의
-# 라벨은 아래 courses: 블록에서 직접 좌표를 고치세요.
 #
 #
 # 컨트롤러
@@ -71,63 +48,69 @@ label_snap_tolerance_m: 1.0
 # 실제 최악 이음매는 end_left의 1.04 m입니다(common_3 끝 -> end_left 첫 점).
 branch_seam_tolerance_m: 2.0
 
-# --- waypoint studio가 관리하는 블록 (main = common_1.csv) ---
-labels:
-  # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
-  light_1: {x: -0.846, y: 1.740}   # wp #68
-  s_curve_start: {x: -23.101, y: -23.846}   # wp #138
-  s_curve_end: {x: -43.334, y: -1.138}   # wp #185
-  sign_2: {x: -11.639, y: -6.560}   # wp #232
-  park_t_entry: {x: -2.325, y: -35.877}   # wp #289
-  common_3_end: {x: 1.592, y: 7.693}   # wp #59
-
+# 이 미션에는 main 코스가 없습니다 -- 트랙이 조각으로 녹화되어 있어 "이 미션이 달리는
+# 코스" 하나를 고를 수 없기 때문입니다. 그래서 최상위 labels: 블록도 없고(그건 main의
+# 것입니다), 라벨은 코스마다 courses.<이름>.labels에, CSV 경로는 코스마다 waypoints/
+# 기준으로(track/common_1.csv) 적습니다. 모든 drive 스텝은 course:를 명시해야 합니다.
 courses:
-  # main(common_1)은 waypoint_csv 파라미터가 싣습니다. 여기 적지 않는 이유는
-  # courses.main.csv의 상대 경로가 waypoint_csv의 디렉터리를 기준으로 풀려 순환하기
-  # 때문입니다 -- 즉 어차피 waypoint_csv를 제대로 넘겨야 합니다.
-
   # 1) 출발 갈래. 차를 어느 출발선에 놓았느냐로 정해집니다(start_branch).
   #    두 CSV 모두 정지선이 하나씩 있고, 끝에서 common_1으로 합류합니다.
   start_left:
-    csv: start_left.csv
+    csv: track/start_left.csv
     # stopline_left: PLACEHOLDER -- 좌측 출발 정지선으로 옮길 것.
     # start_left_end가 last가 아닌 이유: 마지막 점(#121)의 yaw가 2.564로, 이웃
     # (#117~120: -0.886 -> -0.684)과 약 173도 어긋난 녹화 오류입니다. 골 포즈가 뒤집힌
     # 헤딩을 물고 가지 않도록 한 점 앞(#120)에서 끊습니다. CSV를 고치면 last로 되돌리세요.
     labels:
-      stopline_left: {x: -1.314, y: 29.442}   # wp #60
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      stopline_left: {x: 3.028, y: 27.858}   # wp #52
       start_left_end: {x: -28.716, y: 13.809}   # wp #120
+      
   start_right:
-    csv: start_right.csv
+    csv: track/start_right.csv
     # stopline_right: PLACEHOLDER -- 우측 출발 정지선으로 옮길 것.
     labels:
-      stopline_right: {x: -10.356, y: 35.911}   # wp #60
-      start_right_end: last
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      stopline_right: {x: 4.341, y: 30.910}   # wp #41
+      start_right_end: {x: -29.300, y: 14.054}   # wp #121
+
+  common_1:
+    csv: track/common_1.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      light_1: {x: -0.846, y: 1.740}   # wp #68
+      s_curve_start: {x: -23.101, y: -23.846}   # wp #138
+      s_curve_end: {x: -43.334, y: -1.138}   # wp #185
+      cone_2: {x: 5.037, y: -17.705}   # wp #264
+      park_t_entry: {x: -2.297, y: -35.820}   # wp #289
+      light_2: {x: -12.994, y: -6.010}   # wp #230, orphan: 어떤 step도 참조하지 않음
 
   # 2) T자 주차 갈래. 두 CSV 모두 common_1의 끝(park_t_entry)에서 *후진으로* 시작합니다
   #    -- 녹화가 그렇게 되어 있습니다(t_left #0~23, t_right #0~24가 후진 구간). 그래서
   #    갈래의 첫 스텝이 ReverseFollowPath이고, 칸 안의 방향 전환점이 *_spot 라벨입니다.
   t_left:
-    csv: t_left.csv
+    csv: track/t_left.csv
     # t_left_spot은 후진 끝(방향 전환점)입니다 -- wp #23.
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       t_left_spot: {x: 9.130, y: -32.359}   # wp #23
       t_left_end: last
   t_right:
-    csv: t_right.csv
+    csv: track/t_right.csv
     # t_right_spot은 후진 끝(방향 전환점)입니다 -- wp #24.
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       t_right_spot: {x: 10.209, y: -30.443}   # wp #24
       t_right_end: last
 
   # 3) T자 주차 뒤의 공통 구간. 신호등 -> 가속 구간 -> 평행 주차 진입까지입니다.
   common_2:
-    csv: common_2.csv
-    # light_2 / accel_start / accel_end: 셋 다 PLACEHOLDER입니다 -- 각각 두 번째 신호등
+    csv: track/common_2.csv
     # 정지선, 가속 구간 시작선, 가속 구간 종료선으로 옮길 것.
     labels:
-      light_2: {x: -10.161, y: -31.740}   # wp #80
-      accel_start: {x: -51.336, y: 2.659}   # wp #180
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      light_3: {x: -5.245, y: -19.289}   # wp #98
+      accel_start: {x: -53.250, y: -26.930}   # wp #227
       accel_end: {x: 2.155, y: -49.931}   # wp #300
       park_p_entry: last
 
@@ -135,31 +118,36 @@ courses:
   #    p_up   : 전진 #0~8 -> 후진 #8~23 -> 전진 #23~41 (진입 스텝이 하나 더 있습니다)
   #    p_down : 후진 #0~9 -> 전진 #9~30 (첫 점부터 이미 후진입니다)
   p_up:
-    csv: p_up.csv
+    csv: track/p_up.csv
     # p_up_entry(wp #8)에서 후진으로 바뀌고, p_up_spot(wp #23)이 칸 안 방향 전환점입니다.
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       p_up_entry: {x: 12.908, y: -10.057}   # wp #8
       p_up_spot: {x: 20.226, y: -7.118}   # wp #23
       p_up_end: last
   p_down:
-    csv: p_down.csv
+    csv: track/p_down.csv
     # p_down_spot은 칸 안 방향 전환점입니다 -- wp #9.
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       p_down_spot: {x: 26.946, y: -9.690}   # wp #9
       p_down_end: last
 
   # 5) 주차 뒤 합류 구간과 마지막 차선 갈래.
   common_3:
-    csv: common_3.csv
+    csv: track/common_3.csv
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       common_3_end: last
   end_left:
-    csv: end_left.csv
+    csv: track/end_left.csv
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       end_left_end: last
   end_right:
-    csv: end_right.csv
+    csv: track/end_right.csv
     labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       end_right_end: last
 
 # --- 미션 시퀀스 ---
@@ -185,7 +173,7 @@ steps:
       - {value: "start_right", goto: start_right_route}
 
   # [1~2] 합류 뒤 첫 신호등.
-  - {type: drive, until: light_1, controller: ForwardFollowPath,
+  - {type: drive, course: common_1, until: light_1, controller: ForwardFollowPath,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
   - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
      prearm_distance_m: 12.0}
@@ -194,14 +182,14 @@ steps:
   # 앞뒤 경계에서 서지 않도록 handoff_m으로 골을 갈아끼웁니다(컨트롤러 전환).
   # 이 세 스텝에 decel_profile_a / cancel_on_arrival_m이 없는 것은 실수가 아닙니다:
   # 둘 다 "라벨에서 선다"는 뜻이라 handoff와 같이 쓸 수 없습니다.
-  - {type: drive, until: s_curve_start, controller: ForwardFollowPath, handoff_m: 6.0}
-  - {type: drive, until: s_curve_end, controller: FollowPath, handoff_m: 6.0}
-  # sign_2는 T주차 안내 표지를 읽는 지점입니다(판정은 아직 미구현 -- 아래 [7] 참고).
+  - {type: drive, course: common_1, until: s_curve_start, controller: ForwardFollowPath, handoff_m: 6.0}
+  - {type: drive, course: common_1, until: s_curve_end, controller: FollowPath, handoff_m: 6.0}
+  # cone_2는 T주차 안내 표지를 읽는 지점입니다(판정은 아직 미구현 -- 아래 [7] 참고).
   # 라벨만 두고 그대로 통과합니다 -- ~/goto_step으로 이 구간부터 다시 달릴 때 씁니다.
-  - {type: drive, until: sign_2, controller: ForwardFollowPath, handoff_m: 6.0}
+  - {type: drive, course: common_1, until: cone_2, controller: ForwardFollowPath, handoff_m: 6.0}
 
   # [6] T자 주차 갈림길까지. common_1은 여기서 끝납니다(park_t_entry = last).
-  - {type: drive, until: park_t_entry, controller: ForwardFollowPath,
+  - {type: drive, course: common_1, until: park_t_entry, controller: ForwardFollowPath,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
   # [7] T자 주차 갈래.
@@ -221,7 +209,7 @@ steps:
       - {value: "t_right", goto: t_right_route}
 
   # [8~9] 합류(common_2) 뒤 두 번째 신호등.
-  - {type: drive, course: common_2, until: light_2, controller: ForwardFollowPath,
+  - {type: drive, course: common_2, until: light_3, controller: ForwardFollowPath,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
   - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
      prearm_distance_m: 12.0}

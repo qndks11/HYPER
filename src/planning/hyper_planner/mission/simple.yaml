@@ -10,19 +10,30 @@
 #
 # 실행:
 #   ros2 launch hyper_planner nav2_controller.launch.py   # 액션 서버가 먼저 떠 있어야 합니다
-#   ros2 launch hyper_planner mission.launch.py mission_yaml:=<이 파일 경로>
+#   ros2 launch hyper_planner mission.launch.py mission:=simple
 #   ros2 service call /mission_manager/start std_srvs/srv/Trigger
 
 label_snap_tolerance_m: 1.0
 
+courses:
+  main:
+    # ** 다른 코스를 한 바퀴 돌려 보려면 이 한 줄만 바꾸세요. **
+    # 상대 경로는 waypoints_dir(기본 hyper_waypoint/waypoints) 기준입니다 --
+    # 예: track/common_1.csv, school/test.csv.
+    #
+    # 아래 course_end가 `last`라 어느 CSV로 바꿔도 그대로 맞습니다(라벨을 고칠 필요가
+    # 없습니다). 시뮬에서 다른 코스를 돌릴 때는 차를 그 CSV의 0번 행에 스폰시키세요
+    # (simulation.launch.py의 x/y/Y) -- 안 그러면 리드인이 코스를 가로지릅니다.
+    csv: simulation/sim1.csv
+
 labels:
-  # `last` = waypoint_csv의 마지막 웨이포인트. 좌표가 아니라 센티널입니다
+  # `last` = main 코스의 마지막 웨이포인트. 좌표가 아니라 센티널입니다
   # (mission_loader.hpp의 snap_labels).
   #
   # 여기만 좌표를 안 쓰는 이유: 이 미션은 "녹화한 데까지 다 간다"가 전부라
   # 코스마다 끝점 좌표가 달라집니다. 예전에는 sim.csv의 #1371 좌표가 박혀 있어서
-  # waypoint_csv:=real.csv로 바꾸면 스냅 거리가 label_snap_tolerance_m를 넘어
-  # 로드가 거부됐습니다. `last`는 어느 CSV로 실행하든 그대로 맞습니다.
+  # 위 csv를 다른 코스로 바꾸면 스냅 거리가 label_snap_tolerance_m를 넘어 로드가
+  # 거부됐습니다. `last`는 어느 CSV로 실행하든 그대로 맞습니다.
   #
   # mission.yaml의 finish(#1354)가 아니라 CSV 끝을 쓰는 이유: finish는 "완주 판정"
   # 라벨이라 코스가 그 뒤로 더 남아 있고, 한 바퀴 돌리는 게 목적이면 녹화한 데까지

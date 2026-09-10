@@ -36,10 +36,9 @@ from std_srvs.srv import Trigger
 
 DEFAULT_MISSION_YAML = os.path.join(
     os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_planner',
-    'config', 'mission_sim.yaml')
-DEFAULT_WAYPOINT_CSV = os.path.join(
-    os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-    'waypoints', 'simulation', 'sim1.csv')
+    'mission', 'mission_sim.yaml')
+DEFAULT_WAYPOINTS_DIR = os.path.join(
+    os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_waypoint', 'waypoints')
 
 
 class TeleportService(Node):
@@ -49,7 +48,7 @@ class TeleportService(Node):
         self.declare_parameter('world_name', 'course_world')
         self.declare_parameter('model_name', 'ackermann_steering_vehicle')
         self.declare_parameter('mission_yaml', DEFAULT_MISSION_YAML)
-        self.declare_parameter('waypoint_csv', DEFAULT_WAYPOINT_CSV)
+        self.declare_parameter('waypoints_dir', DEFAULT_WAYPOINTS_DIR)
         self.declare_parameter('label', '')
         # 스폰 높이와 같게 둡니다. 바닥에 박아 넣으면 물리 엔진이 튕겨 냅니다.
         self.declare_parameter('z', 0.36)
@@ -77,8 +76,25 @@ class TeleportService(Node):
             raise ValueError(f'{path}에 labels가 없습니다')
         return labels
 
+    def _main_csv(self):
+        path = self.get_parameter('mission_yaml').value
+        with open(path) as handle:
+            mission = yaml.safe_load(handle) or {}
+        csv_path = ((mission.get('courses') or {}).get('main') or {}).get('csv')
+        if not csv_path:
+            raise ValueError(f'{path}에 courses.main.csv가 없습니다')
+        if os.path.isabs(csv_path):
+            return csv_path
+        return os.path.join(self.get_parameter('waypoints_dir').value, csv_path)
+
     def _load_waypoints(self):
-        path = self.get_parameter('waypoint_csv').value
+        """main 코스의 CSV를 읽습니다.
+
+        코스 이름은 mission.yaml의 courses.main.csv가 정합니다 -- mission_manager와
+        같은 곳을 봐야 라벨의 헤딩을 엉뚱한 코스에서 빌려 오지 않습니다.
+        상대 경로는 mission_loader.hpp와 같은 규칙으로 waypoints_dir 아래에서 찾습니다.
+        """
+        path = self._main_csv()
         points = []
         with open(path) as handle:
             for row in csv.DictReader(handle):

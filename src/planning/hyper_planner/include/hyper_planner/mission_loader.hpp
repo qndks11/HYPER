@@ -15,8 +15,11 @@
 // 라벨이 CSV를 따라 단조 증가해야 하기 때문입니다. 그래서 갈래마다 CSV를 따로 녹화하고
 // (Course), branch 스텝이 신호를 보고 그중 하나(routes의 한 갈래)를 고릅니다.
 //
-// courses:를 안 쓰면 코스는 waypoint_csv 파라미터가 가리키는 "main" 하나뿐이고, 미션
-// 파일의 동작은 분기 기능이 없던 때와 완전히 같습니다(mission.yaml/simple.yaml 그대로).
+// 코스는 미션 파일의 courses:가 정합니다. 이름은 자유이고, `main`만 특별합니다 --
+// 있으면 course:를 안 적은 스텝의 기본 코스이자 최상위 labels:의 임자입니다(simple.yaml처럼
+// 코스가 하나뿐인 미션이 이 모양입니다). 조각을 이어 붙이는 미션(mission_track)에는 "그
+// 미션이 달리는 코스" 하나가 없으므로 main을 두지 않고, 스텝마다 course:를 적습니다.
+// 상대 경로는 resolve_csv_path가 풉니다.
 
 #include <algorithm>
 #include <cmath>
@@ -218,7 +221,7 @@ inline std::vector<std::size_t> branch_targets(const Step & branch)
 // 것만 추려 두었으므로, 여기 없는 파라미터는 주행 중에만 쓰인다는 뜻입니다.
 struct MissionLoadConfig
 {
-  std::string waypoint_csv;         // main 코스의 CSV (courses.main.csv가 덮어씁니다)
+  std::string waypoints_dir;        // mission.yaml의 상대 CSV 경로를 푸는 기준 디렉터리
   double min_spacing_m{0.0};
   std::string frame_id;             // CSV에 frame_id가 없을 때의 기본값
   std::string mission_yaml;
@@ -326,12 +329,18 @@ private:
 
   // mission.yaml에 적힌 CSV 경로를 실제 파일로 풉니다.
   //
-  // 절대 경로면 그대로 씁니다. 상대 경로는 (1) main CSV가 있는 디렉터리, (2) mission.yaml이
-  // 있는 디렉터리, (3) 준 그대로(현재 작업 디렉터리) 순으로 찾습니다.
+  // 절대 경로면 그대로 씁니다. 상대 경로는 (1) main CSV가 있는 디렉터리, (2) waypoints_dir
+  // 파라미터, (3) mission.yaml이 있는 디렉터리, (4) 준 그대로(현재 작업 디렉터리)
+  // 순으로 찾습니다.
   //
-  // (1)이 먼저인 이유: 갈래 CSV는 녹화 코스와 같은 곳(hyper_waypoint/waypoints/)에 둡니다.
-  // 그러면 파일 이름만 적으면 되고, waypoint_csv:=.../real.csv로 실차 코스를 실을 때
-  // 갈래 CSV도 같이 real 쪽으로 따라갑니다 -- 미션 파일을 안 고쳐도 됩니다.
+  // (2)가 기본 규칙입니다 -- 미션 파일에는 `track/common_1.csv`처럼 waypoints/ 아래
+  // 상대 경로를 적습니다. main도 이 규칙으로 풉니다((1)이 아직 비어 있습니다 -- 자기
+  // 자신을 기준으로 삼을 수 없습니다).
+  //
+  // (1)은 main이 있는 미션의 편의입니다: 갈래 CSV를 main과 같은 폴더에 두면 파일 이름만
+  // 적으면 되고, courses.main.csv 한 줄을 다른 폴더로 바꾸면 갈래도 통째로 따라갑니다
+  // (mission_sim.yaml이 이렇게 씁니다). main이 없는 미션에는 이 후보가 없으므로 코스마다
+  // waypoints_dir 기준 경로를 적습니다.
   std::string resolve_csv_path(const std::string & given) const
   {
     namespace fs = std::filesystem;
@@ -341,8 +350,11 @@ private:
     }
 
     std::vector<fs::path> candidates;
-    if (!config_.waypoint_csv.empty()) {
-      candidates.push_back(fs::path(config_.waypoint_csv).parent_path() / path);
+    if (!main_csv_path_.empty()) {
+      candidates.push_back(fs::path(main_csv_path_).parent_path() / path);
+    }
+    if (!config_.waypoints_dir.empty()) {
+      candidates.push_back(fs::path(config_.waypoints_dir) / path);
     }
     if (!config_.mission_yaml.empty()) {
       candidates.push_back(fs::path(config_.mission_yaml).parent_path() / path);
@@ -404,52 +416,89 @@ private:
   bool load_courses(const YAML::Node & root, double snap_tolerance_m)
   {
     const YAML::Node courses_node = root["courses"];
-    if (courses_node && !courses_node.IsMap()) {
-      RCLCPP_ERROR(logger_, "'courses' must be a map of <name>: {csv: ..., labels: ...}.");
+    if (!courses_node || !courses_node.IsMap() || courses_node.size() == 0) {
+      RCLCPP_ERROR(
+        logger_,
+        "'%s' has no 'courses' -- name the course(s) this mission drives:\n"
+        "  courses:\n"
+        "    common1: {csv: track/common_1.csv, labels: {...}}   # 상대 경로는 '%s' 기준입니다\n"
+        "미션이 CSV 하나만 돌면 그 하나를 'main'이라 부르면 됩니다 -- 그러면 스텝의 course:를"
+        " 생략할 수 있고 라벨은 최상위 labels:에 둡니다.",
+        config_.mission_yaml.c_str(), config_.waypoints_dir.c_str());
       return false;
     }
 
-    // main 코스는 항상 존재합니다. CSV는 courses.main.csv가 있으면 그것, 없으면
-    // waypoint_csv 파라미터입니다(= 분기를 안 쓰는 미션의 예전 동작).
-    std::string main_csv = config_.waypoint_csv;
-    if (courses_node && courses_node["main"] && courses_node["main"]["csv"]) {
-      main_csv = resolve_csv_path(courses_node["main"]["csv"].as<std::string>());
-    }
-    if (!add_course("main", main_csv)) {
-      return false;
+    // main은 선택입니다. 있으면 세 가지를 겸합니다: course:를 안 적은 스텝의 기본 코스,
+    // 최상위 labels:의 임자, 그리고 나머지 코스의 상대 경로 기준 디렉터리. 코스가 하나뿐인
+    // 미션(simple.yaml)과 갈래만 따로 녹화한 미션(mission_sim.yaml)이 이 모양입니다.
+    //
+    // 조각을 이어 붙이는 미션(mission_track.yaml)에는 "그 미션이 달리는 코스" 하나가
+    // 없습니다. 그런 미션은 main을 두지 않고 코스마다 waypoints_dir 기준 경로를 적으며,
+    // 모든 스텝이 course:를 명시합니다.
+    //
+    // main을 먼저 싣는 이유는 기준 디렉터리(main_csv_path_)를 나머지보다 먼저 정해야 하기
+    // 때문입니다. main 자신은 자기 자신을 기준으로 풀 수 없으므로 main_csv_path_가 비어
+    // 있는 상태에서(= waypoints_dir 기준) 풉니다.
+    if (courses_node["main"]) {
+      if (!courses_node["main"].IsMap() || !courses_node["main"]["csv"]) {
+        RCLCPP_ERROR(logger_, "Course 'main' has no 'csv'.");
+        return false;
+      }
+      const std::string main_csv =
+        resolve_csv_path(courses_node["main"]["csv"].as<std::string>());
+      if (!add_course("main", main_csv)) {
+        return false;
+      }
+      main_csv_path_ = main_csv;
     }
 
-    if (courses_node) {
-      for (const auto & entry : courses_node) {
-        const auto name = entry.first.as<std::string>();
-        if (name == "main") {
-          continue;   // 위에서 이미 실었습니다.
-        }
-        if (!entry.second.IsMap() || !entry.second["csv"]) {
-          RCLCPP_ERROR(logger_, "Course '%s' has no 'csv'.", name.c_str());
-          return false;
-        }
-        if (!add_course(name, resolve_csv_path(entry.second["csv"].as<std::string>()))) {
-          return false;
-        }
+    for (const auto & entry : courses_node) {
+      const auto name = entry.first.as<std::string>();
+      if (name == "main") {
+        continue;   // 위에서 이미 실었습니다.
+      }
+      if (!entry.second.IsMap() || !entry.second["csv"]) {
+        RCLCPP_ERROR(logger_, "Course '%s' has no 'csv'.", name.c_str());
+        return false;
+      }
+      if (!add_course(name, resolve_csv_path(entry.second["csv"].as<std::string>()))) {
+        return false;
       }
     }
 
     // 라벨 스냅. 최상위 labels:는 main 코스의 것입니다 -- label_waypoints.py가 그 블록을
-    // 통째로 재작성하므로 위치를 바꾸지 않습니다. 갈래 코스는 courses.<이름>.labels를 씁니다.
-    if (!root["labels"] || !root["labels"].IsMap() || root["labels"].size() == 0) {
-      RCLCPP_ERROR(
-        logger_,
-        "'%s' has no 'labels'. Place them first:\n"
-        "  python3 src/planning/hyper_waypoint/scripts/label_waypoints.py %s",
-        config_.mission_yaml.c_str(), courses_.front().csv_path.c_str());
-      return false;
-    }
-    if (!snap_labels(courses_.front(), root["labels"], snap_tolerance_m)) {
-      return false;
+    // 통째로 재작성하므로 위치를 바꾸지 않습니다. 나머지 코스는 courses.<이름>.labels를 씁니다.
+    const YAML::Node top_labels = root["labels"];
+    const bool has_top_labels = top_labels && top_labels.IsMap() && top_labels.size() > 0;
+    if (main_csv_path_.empty()) {
+      // main이 없으면 최상위 labels:는 임자가 없습니다. 조용히 무시하면 "라벨을 적었는데
+      // 스텝이 못 찾는다"로 나타나므로 여기서 거부합니다(빈 블록은 그냥 둡니다).
+      if (has_top_labels) {
+        RCLCPP_ERROR(
+          logger_,
+          "'%s' has a top-level 'labels' block but no course named 'main' to own it. Labels "
+          "belong to one course -- move each one under courses.<name>.labels.",
+          config_.mission_yaml.c_str());
+        return false;
+      }
+    } else {
+      if (!has_top_labels) {
+        RCLCPP_ERROR(
+          logger_,
+          "'%s' has no 'labels' for course 'main'. Place them first:\n"
+          "  python3 src/planning/hyper_waypoint/scripts/label_waypoints.py %s",
+          config_.mission_yaml.c_str(), courses_.front().csv_path.c_str());
+        return false;
+      }
+      if (!snap_labels(courses_.front(), top_labels, snap_tolerance_m)) {
+        return false;
+      }
     }
 
-    for (std::size_t i = 1; i < courses_.size(); ++i) {
+    for (std::size_t i = 0; i < courses_.size(); ++i) {
+      if (courses_[i].name == "main") {
+        continue;   // 위에서 최상위 labels:로 실었습니다.
+      }
       const YAML::Node labels = courses_node[courses_[i].name]["labels"];
       if (!labels || !labels.IsMap() || labels.size() == 0) {
         RCLCPP_ERROR(
@@ -616,12 +665,20 @@ private:
     }
     step.label = node["until"].as<std::string>();
 
+    // course:를 생략하면 'main'입니다. main이 없는 미션에서는 생략할 수 없습니다.
     const auto course_name = node["course"]
       ? node["course"].as<std::string>() : std::string("main");
     if (!find_course(course_name, step.course_id)) {
-      RCLCPP_ERROR(
-        logger_, "Step %zu references course '%s', which is not in 'courses'.",
-        index, course_name.c_str());
+      if (!node["course"]) {
+        RCLCPP_ERROR(
+          logger_,
+          "Step %zu has no 'course', and this mission has no course named 'main' to fall back "
+          "to. Name the course this step drives: {course: <name>, ...}.", index);
+      } else {
+        RCLCPP_ERROR(
+          logger_, "Step %zu references course '%s', which is not in 'courses'.",
+          index, course_name.c_str());
+      }
       return false;
     }
     const Course & course = courses_[step.course_id];
@@ -1163,6 +1220,12 @@ private:
 
   rclcpp::Logger logger_;
   MissionLoadConfig config_;
+
+  // main 코스가 풀린 절대 경로. 나머지 코스의 상대 경로를 이 디렉터리 기준으로 먼저
+  // 풉니다(resolve_csv_path). main을 풀 때는 아직 비어 있고 -- 자기 자신이 기준일 수
+  // 없습니다 -- main이 없는 미션에서는 끝까지 비어 있습니다("main이 있는가"의 판정도
+  // 이 값으로 합니다).
+  std::string main_csv_path_;
 
   std::vector<Course> courses_;
   std::vector<Step> steps_;

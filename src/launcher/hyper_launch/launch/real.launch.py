@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
@@ -95,8 +95,13 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
+        # 어떤 미션을 실을지. hyper_planner/mission/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
+        #
+        # 실차에서는 mission:=mission_track을 반드시 주세요. 미션 파일이 자기가 달릴
+        # 코스를 정하므로(courses:), 기본값 mission_sim으로 띄우면 실차에
+        # 시뮬레이션 코스(simulation/sim1.csv)가 그대로 실립니다:
+        #   ros2 launch hyper_launch real.launch.py mission:=mission_track
         DeclareLaunchArgument('mission', default_value='mission_sim'),
         # navsat_transform의 GPS 원점. hyper_localization/config/datums.yaml의 키입니다.
         # 스테이지 기본값은 시뮬레이션 원점(sim)이라 실차 진입점에서는 여기서 덮어써야
@@ -110,17 +115,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_panel', default_value='true',
             description='Launch the hyper_rqt HYPER Panel (mission start/cancel)'),
-        # 미션이 실제로 따라갈 코스 CSV. 기본값이 시뮬 코스라는 점이 중요합니다 --
-        # 실차에서는 반드시 녹화한 파일로 덮어쓰세요:
-        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/common_1.csv
-        # 이 인자를 여기서 선언하고 behavior 스테이지로 넘겨주지 않으면, 넘긴 값이
-        # 조용히 무시된 채 시뮬레이션 코스가 실차에 실립니다.
-        DeclareLaunchArgument(
-            'waypoint_csv',
-            default_value=PathJoinSubstitution([
-                EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-                'waypoints', 'simulation', 'sim1.csv']),
-            description='미션이 따를 웨이포인트 CSV (실차는 track/common_1.csv로 덮어쓰세요)'),
         robot_state_publisher,
         rviz,
         gps_accuracy_gui,
@@ -149,7 +143,6 @@ def generate_launch_description():
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             stage('behavior.launch.py',
                   mission=LaunchConfiguration('mission'),
-                  waypoint_csv=LaunchConfiguration('waypoint_csv'),
                   # 위와 같은 이유. 이쪽은 nav2_controller.launch.py가 RewrittenYaml로
                   # nav2_controller.yaml의 use_sim_time을 덮어쓰므로 인자만 넘기면 됩니다.
                   use_sim_time='false'),

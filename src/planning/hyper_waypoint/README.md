@@ -78,7 +78,7 @@ ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/H
 # 코스를 시뮬 텍스처 위에 올리고 미션 라벨을 찍기
 ros2 run hyper_waypoint_studio waypoint_studio \
   src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
-  --mission src/planning/hyper_planner/config/mission_sim.yaml \
+  --mission src/planning/hyper_planner/mission/mission_sim.yaml \
   --overlay gazebo --mode edit
 
 # 실차 코스를 항공사진 위에 (정렬값은 real_course.align.yaml)

@@ -4,9 +4,8 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
-from launch.conditions import LaunchConfigurationEquals, LaunchConfigurationNotEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # Stages are staggered to give Gazebo time to come up before the nodes that
@@ -76,19 +75,12 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('use_panel')),
         )
 
-    # waypoint_csv:=track/real.csv 처럼 상대 경로만 준 경우 hyper_waypoint/waypoints/
-    # 아래로 풀어 줍니다. 2e4a6f1에서 코스가 simulation/ track/ school/ 로 갈렸으므로
-    # 파일명만으로는 더 이상 안 풀립니다 -- 하위 폴더까지 함께 주세요.
-    waypoint_csv_resolved = PathJoinSubstitution([
-        EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-        'waypoints', LaunchConfiguration('waypoint_csv')])
-
     def behavior_stage(**extra):
         return stage('behavior.launch.py',
                      mission=LaunchConfiguration('mission'), **extra)
 
     return LaunchDescription([
-        # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
+        # 어떤 미션을 실을지. hyper_planner/mission/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
         DeclareLaunchArgument('mission', default_value='mission_sim'),
         # 차량 스폰 위치/방위(map 프레임). 기본은 sim.csv 시작점입니다. real.csv처럼
@@ -102,14 +94,6 @@ def generate_launch_description():
         # (sim | school | track). 기본값 sim은 track.world의 <spherical_coordinates>와
         # 맞는 시뮬 원점입니다. datum_site:=track이면 실차 트랙 좌표로 시뮬을 돌립니다.
         DeclareLaunchArgument('datum_site', default_value='sim'),
-        # behavior 스테이지가 mission_manager에 넘길 웨이포인트 CSV. 기본은
-        # hyper_waypoint/waypoints/simulation/sim1.csv (behavior.launch.py의 기본값).
-        # 절대 경로로도, waypoints/ 아래 상대 경로(track/real.csv 등)로도 넘길 수
-        # 있게 아래에서 풀어 줍니다.
-        DeclareLaunchArgument(
-            'waypoint_csv', default_value='',
-            description='웨이포인트 CSV. 상대 경로(simulation/sim1.csv 등)를 주면 '
-                        'hyper_waypoint/waypoints/ 아래에서 찾습니다'),
         # headless:=true면 Gazebo 3D 창을 띄우지 않습니다. 센서 렌더링은 오프스크린으로
         # 그대로 돌아가므로 카메라/라이다 토픽은 동일하게 나오고, 시각화는 rviz로 하면 됩니다.
         DeclareLaunchArgument(
@@ -157,14 +141,10 @@ def generate_launch_description():
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage('perception.launch.py', lane_input_backend='ros_raw',
                   drivable_area=LaunchConfiguration('drivable_area'))]),
-        # waypoint_csv 미지정: behavior.launch.py 기본값(sim.csv)을 씁니다.
+        # 어느 코스를 달릴지는 mission이 고른 mission/<이름>.yaml의 courses:가
+        # 정합니다(예: mission_sim -> simulation/sim1.csv).
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             behavior_stage(),
             mission_panel(),
-        ], condition=LaunchConfigurationEquals('waypoint_csv', '')),
-        # waypoint_csv 지정: waypoints/ 아래로 풀어 넘깁니다.
-        TimerAction(period=BEHAVIOR_DELAY_S, actions=[
-            behavior_stage(waypoint_csv=waypoint_csv_resolved),
-            mission_panel(),
-        ], condition=LaunchConfigurationNotEquals('waypoint_csv', '')),
+        ]),
     ])
