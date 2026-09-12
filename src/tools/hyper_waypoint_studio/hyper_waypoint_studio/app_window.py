@@ -102,6 +102,7 @@ class StudioWindow(QMainWindow):
         self.setCentralWidget(self._view)
         self._view.clicked_at.connect(self._on_canvas_click)
         self._view.cursor_moved.connect(self._on_cursor_moved)
+        self._view.follow_released.connect(self._on_follow_released)
 
         # 녹화 중인 경로와 미션이 보낸 경로. 코스 레이어와 구분되는 색으로 둡니다.
         self._live_path = CourseItem(theme.COLOR_PATH)
@@ -268,6 +269,13 @@ class StudioWindow(QMainWindow):
         grid.setChecked(True)
         grid.toggled.connect(self._view.set_grid_visible)
         view_menu.addAction(grid)
+        self._follow_action = QAction('차량 화면 고정', self)
+        self._follow_action.setCheckable(True)
+        self._follow_action.setShortcut('C')
+        self._follow_action.setStatusTip(
+            '차량을 화면 한가운데에 고정합니다. 가운데 버튼으로 팬하면 풀립니다.')
+        self._follow_action.toggled.connect(self._set_follow)
+        view_menu.addAction(self._follow_action)
         self._headings_action = QAction('헤딩 표시', self)
         self._headings_action.setCheckable(True)
         self._headings_action.setChecked(True)
@@ -286,6 +294,9 @@ class StudioWindow(QMainWindow):
             group.addAction(action)
             bar.addAction(action)
             self._mode_actions[mode] = action
+        # 주행/녹화를 보는 동안 제일 자주 켜고 끄는 것이라 모드 옆에 같이 둡니다.
+        bar.addSeparator()
+        bar.addAction(self._follow_action)
 
     def _wire_ros(self):
         link = self._link
@@ -1151,6 +1162,19 @@ class StudioWindow(QMainWindow):
     def _on_vehicle_pose(self, x, y, yaw):
         self._vehicle.set_pose(x, y, yaw)
         self._vehicle.set_stale(False)
+        self._view.follow_to(x, y)
+
+    # ================================================================== 화면 고정
+    def _set_follow(self, follow):
+        known = self._view.set_follow(follow)
+        if follow and not known:
+            self.statusBar().showMessage(
+                '차량 위치가 아직 없습니다 -- odometry가 들어오면 화면이 따라갑니다.', 4000)
+
+    def _on_follow_released(self):
+        # 뷰가 이미 고정을 풀었습니다. 버튼도 같이 풀어야 왜 안 따라가는지 보입니다.
+        self._follow_action.setChecked(False)
+        self.statusBar().showMessage('팬 -- 차량 화면 고정이 풀렸습니다.', 2000)
 
     def _on_call_finished(self, name, ok, message):
         target = self._record if name.startswith(self._link.recorder_ns) else self._drive

@@ -21,10 +21,14 @@ class ObjectDetection(Node):
     # 신호등: red / green / left_arrow
     # 차선 안내: ban / allow  -- 코스 끝의 갈림길에서 어느 차선으로 갈지 알려 주는 표지.
     #            mission.yaml의 branch 스텝이 이 값을 보고 두 갈래 중 하나를 고릅니다.
-    # 차선 안내(상대 위치): allow_left / allow_right  -- 'allow'와 'ban' 표지가 한 프레임에
-    #            같이 보일 때, 'allow'가 'ban'보다 화면에서 왼쪽에 있으면 allow_left,
-    #            오른쪽에 있으면 allow_right. "허용 차선으로 가라"를 어느 쪽 차선인지까지
-    #            알려 주는 갈림길에서 branch 스텝이 이 값을 봅니다.
+    # 차선 안내(상대 위치): allow_left / allow_right  -- 갈림길 표지판 세 장 중 왼쪽 두 장을
+    #            보고 어느 쪽 차선이 허용인지까지 정한 값입니다(publish_lane_fork_sign).
+    #            "허용 차선으로 가라"를 어느 쪽 차선인지까지 알려 주는 갈림길에서
+    #            branch 스텝이 이 값을 봅니다.
+    # blank:   **내부 전용입니다 -- 토픽으로 나가지 않습니다.** 꺼져 있는 칸(꺼진 신호등,
+    #            깜빡이는 중인 갈림길 표지판)을 뜻합니다. 갈림길에서는 꺼진 칸도 슬롯
+    #            하나를 차지해야 판정이 되므로 값이 따로 필요하지만, 중앙 선택으로
+    #            내보낼 때는 예전 그대로 'none'으로 바꿔 냅니다(publish_center_sign).
     # none:    유효한 신호를 못 봤다.
     VALID_SIGNS = frozenset({
         'red',
@@ -34,14 +38,38 @@ class ObjectDetection(Node):
         'allow',
         'allow_left',
         'allow_right',
+        'blank',
         'none',
     })
 
+    # 갈림길 표지 두 칸의 (왼쪽, 오른쪽) 조합 -> 신호.
+    #
+    # 실제 갈림길에는 표지판이 세 장 나란히 서 있고, 그것들이 깜빡입니다. 세 장이 한꺼번에
+    # 'Blank'로 읽히는 순간도 있습니다. 그래서 예전처럼 "allow와 ban이 한 프레임에 같이
+    # 보일 때"만 판정하면 판정이 드문드문해지고, 판단 노드 쪽 연속 프레임은 깜빡임에 계속
+    # 끊깁니다. 대신 왼쪽 두 칸만 보고, 한 칸만 읽혀도 답이 정해지는 조합을 표로 둡니다:
+    #   왼쪽이 allow  -> 왼쪽 차선          왼쪽이 ban   -> 오른쪽 차선
+    #   오른쪽이 allow -> 오른쪽 차선        오른쪽이 ban  -> 왼쪽 차선
+    # 두 칸이 같은 값이면(allow/allow, ban/ban, blank/blank) 아무것도 알 수 없으므로 표에
+    # 넣지 않습니다 -- 없는 키가 곧 "판정 없음"입니다.
+    LANE_FORK_VERDICT = {
+        ('allow', 'ban'): 'allow_left',
+        ('ban', 'allow'): 'allow_right',
+        ('allow', 'blank'): 'allow_left',
+        ('blank', 'allow'): 'allow_right',
+        ('ban', 'blank'): 'allow_right',
+        ('blank', 'ban'): 'allow_left',
+    }
+
+    # 갈림길 슬롯을 채울 수 있는 신호. 나머지(신호등 값)는 후보에서 빠집니다.
+    LANE_FORK_SIGNS = frozenset({'allow', 'ban', 'blank'})
+
     # YOLO 모델의 클래스 이름 -> 위 신호 값.
     #
-    # models/best.pt가 실제로 가진 클래스는 여섯입니다:
-    #   Allow, Ban, Go, LeftTurn, Stop, Warn
-    # 아래 매핑은 그 여섯을 전부 덮습니다. 모델을 다시 학습해 이름이 바뀌면 그 신호가
+    # models/best_track.pt가 실제로 가진 클래스는 일곱입니다:
+    #   Allow, Ban, Blank, Go, LeftTurn, Stop, Warn
+    # models/best_sim.pt는 Blank가 없는 나머지 여섯입니다.
+    # 아래 매핑은 그 일곱을 전부 덮습니다. 모델을 다시 학습해 이름이 바뀌면 그 신호가
     # 조용히 사라지므로, 매핑에 없는 이름은 한 번씩 경고로 남깁니다(아래 _map_class).
     # 코드를 안 고치고 맞추려면 sign_class_map 파라미터를 쓰세요.
     SIGNAL_MAP = {
@@ -61,6 +89,14 @@ class ObjectDetection(Node):
         # ('Yellow'는 예전 모델의 이름입니다. 지금 모델은 'Warn'을 씁니다.)
         'Warn': 'none',
         'Yellow': 'none',
+
+        # 꺼져 있는 칸. 꺼진 신호등이기도 하고, 깜빡이는 중인 갈림길 표지판이기도 합니다
+        # (모델이 둘을 같은 클래스로 냅니다). 갈림길에서 꺼진 칸이 슬롯 하나를 차지해야
+        # 판정이 되므로 'none'이 아니라 'blank'로 매핑합니다 -- 대신 중앙 선택으로 나갈
+        # 때 'none'으로 바꿔 내므로(publish_center_sign), 꺼진 신호등이 토픽에 내는 값은
+        # 예전 그대로입니다. 황색등과 같은 이유로 매핑에서 빼지는 않습니다: 빼면 이 박스가
+        # 중앙 선택에서 아예 제외되어, 화면 가장자리의 다른 표지가 대신 뽑힙니다.
+        'Blank': 'blank',
 
         # 차선 안내 표지 -- 코스 끝 갈림길에서 branch 스텝이 봅니다.
         'Ban': 'ban',
@@ -285,7 +321,10 @@ class ObjectDetection(Node):
         """
         판단 노드가 사용하는 형식으로 신호를 발행한다.
 
-        가능한 값은 VALID_SIGNS 참고 (red / green / left_arrow / ban / allow / none).
+        가능한 값은 VALID_SIGNS 참고
+        (red / green / left_arrow / ban / allow / allow_left / allow_right / none).
+        'blank'은 내부 전용이라 여기까지 오지 않습니다 -- publish_center_sign이 'none'으로
+        바꿔서 부릅니다.
         """
         if sign_name not in self.VALID_SIGNS:
             # 여기로 오면 SIGNAL_MAP이나 sign_class_map이 VALID_SIGNS에 없는 값을 냈다는
@@ -356,9 +395,9 @@ class ObjectDetection(Node):
 
         result = results[0]
 
-        # 'allow'와 'ban'이 한 프레임에 같이 보이면 둘의 좌우 배치가 곧 신호이므로
-        # (allow_left / allow_right) 중앙 선택보다 먼저 본다. 둘 중 하나만 보이거나
-        # 아예 없으면 False를 돌려주고 평소의 중앙 선택으로 넘어간다.
+        # 갈림길 표지판이 두 칸 이상 보이면 그 두 칸의 조합이 곧 신호이므로
+        # (allow_left / allow_right) 중앙 선택보다 먼저 본다. 판정이 안 서면 False를
+        # 돌려주고 평소의 중앙 선택으로 넘어간다.
         if not self.publish_lane_fork_sign(result):
             self.publish_center_sign(
                 result,
@@ -408,48 +447,135 @@ class ObjectDetection(Node):
 
     def publish_lane_fork_sign(self, result):
         """
-        'allow'와 'ban' 표지가 한 프레임에 같이 보이면 좌우 배치를 신호로 낸다.
+        갈림길 표지판 중 왼쪽 두 칸을 읽어 어느 쪽 차선이 허용인지를 신호로 낸다.
 
-        allow가 ban보다 왼쪽이면 'allow_left', 오른쪽이면 'allow_right'를 publish하고
-        True를 돌려준다. 둘 중 하나만 보이거나 아예 없으면 아무것도 안 하고 False --
-        그러면 호출부가 평소의 publish_center_sign으로 넘어간다.
+        갈림길에는 표지판이 세 장 나란히 서 있고 깜빡인다. 관심 있는 것은 왼쪽 두 장이다
+        -- 그 두 칸의 조합이 곧 답이기 때문이다(LANE_FORK_VERDICT). 한 칸이 꺼져 있어도
+        (blank) 나머지 한 칸이 allow/ban이면 답이 정해지므로, 깜빡임이 판정을 막지 않는다.
+        판정이 서면 'allow_left' / 'allow_right'를 publish하고 True를 돌려준다. 후보가 두
+        칸이 안 되거나 두 칸이 같은 값이면 아무것도 안 하고 False -- 그러면 호출부가 평소의
+        publish_center_sign으로 넘어간다.
 
-        중앙 50% 제한을 두지 않는다: 갈림길 표지는 보통 나란히 붙어 있어 한쪽이 중앙
-        밖으로 밀리기 쉽고, 여기서 중요한 건 화면 어디에 있느냐가 아니라 둘의 상대
-        위치이기 때문이다. 같은 클래스가 여러 개면 신뢰도가 가장 높은 박스를 쓴다.
+        중앙 50% 제한을 두지 않는다: 갈림길 표지는 나란히 붙어 있어 한쪽이 중앙 밖으로
+        밀리기 쉽고, 여기서 중요한 건 화면 어디에 있느냐가 아니라 두 칸의 상대 위치이기
+        때문이다. 그 대신 같은 줄에 나란히 선 두 장인지를 _is_panel_pair가 본다.
+
+        **한계**: 1번 표지판이 화면 밖으로 벗어나면 왼쪽 두 칸이 사실은 2번과 3번이고,
+        그것을 알아챌 방법이 없다 -- 엉뚱한 조합으로 차선을 정한다. 세 장이 다 화면에
+        들어오게 하는 것은 접근 각도와 prearm_distance_m의 몫이다.
         """
         boxes = result.boxes
         if boxes is None or len(boxes) == 0:
             return False
 
-        best = {'allow': None, 'ban': None}  # sign -> (confidence, box_center_x)
+        # 1) 갈림길 슬롯을 채울 수 있는 박스만 모은다.
+        candidates = []
         for box in boxes:
             raw_class_name = str(self.model.names[int(box.cls[0])])
             sign_name = self._map_class(raw_class_name)
-            if sign_name not in ('allow', 'ban'):
+            if sign_name not in self.LANE_FORK_SIGNS:
                 continue
 
-            confidence = float(box.conf[0])
-            x1, _, x2, _ = box.xyxy[0].tolist()
-            box_center = (x1 + x2) / 2.0
-            if best[sign_name] is None or confidence > best[sign_name][0]:
-                best[sign_name] = (confidence, box_center)
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            candidates.append({
+                'sign': sign_name,
+                'x': (x1 + x2) / 2.0,
+                'y': (y1 + y2) / 2.0,
+                'w': abs(x2 - x1),
+                'h': abs(y2 - y1),
+                'conf': float(box.conf[0]),
+            })
 
-        if best['allow'] is None or best['ban'] is None:
+        if len(candidates) < 2:
             return False
 
-        allow_x = best['allow'][1]
-        ban_x = best['ban'][1]
-        self.publish_sign('allow_left' if allow_x < ban_x else 'allow_right')
+        candidates.sort(key=lambda c: c['x'])
+        candidates = self._merge_overlapping(candidates)
+
+        # 3) 같은 줄에 나란히 선 두 장을 왼쪽부터 찾는다. 그냥 [0], [1]을 쓰지 않는 이유는
+        # _is_panel_pair의 설명 참고 -- 표지판 왼쪽에 꺼진 신호등이 하나 있으면 그것이
+        # 슬롯 하나를 가로챈다.
+        pair = None
+        for left, right in zip(candidates, candidates[1:]):
+            if self._is_panel_pair(left, right):
+                pair = (left, right)
+                break
+
+        if pair is None:
+            return False
+
+        # 4) 두 칸의 조합이 곧 신호. 표에 없는 조합(같은 값 두 개)은 판정 없음이다.
+        verdict = self.LANE_FORK_VERDICT.get((pair[0]['sign'], pair[1]['sign']))
+        if verdict is None:
+            return False
+
+        self.publish_sign(verdict)
         return True
+
+    def _merge_overlapping(self, candidates):
+        """
+        같은 표지판을 두 번 잡은 박스를 하나로 합친다(x 오름차순으로 받는다).
+
+        YOLO의 NMS는 기본이 클래스별이라(agnostic_nms=False), 깜빡이는 도중에 잡힌 표지판
+        한 장이 'Ban' 박스와 'Blank' 박스로 둘 다 살아남을 수 있다. 예전 코드는 클래스마다
+        한 박스만 남기고 allow와 ban을 하나씩 요구해서 이 문제가 없었지만, 지금은 위치로
+        슬롯을 나누므로 그 한 장이 두 칸을 다 차지해 보지도 않은 조합을 만들어 낸다.
+
+        가로 폭의 min을 쓰는 것은, 큰 박스(신호등)가 옆에 붙은 작은 표지판을 삼키지 않게
+        하려는 것이다. 합칠 때 신뢰도가 높은 쪽을 남기는 것은 예전의 "같은 것을 두 번
+        봤으면 신뢰도가 높은 박스"와 같은 규칙을, 클래스가 아니라 위치로 다시 쓴 것이다.
+        """
+        merged = []
+        for candidate in candidates:
+            if merged:
+                previous = merged[-1]
+                same_spot = abs(candidate['x'] - previous['x']) <= \
+                    0.5 * min(previous['w'], candidate['w'])
+                if same_spot:
+                    if candidate['conf'] > previous['conf']:
+                        merged[-1] = candidate
+                    continue
+            merged.append(candidate)
+        return merged
+
+    def _is_panel_pair(self, left, right):
+        """
+        두 박스가 같은 줄에 나란히 선 표지판 두 장으로 보이는지.
+
+        갈림길 표지는 세 장이 같은 높이에 비슷한 크기로 붙어 있다. 꺼진 신호등도 같은
+        클래스('Blank')로 잡히는데, 그것은 이 줄에 없다 -- 높이도 크기도 다르다. 이 검사가
+        없으면 화면 어딘가의 꺼진 등이 왼쪽 두 칸 중 한 칸을 차지해, 보지도 않은 조합으로
+        차선을 정한다. (예전에는 'Blank'가 'none'이라 갈림길 판정에 아예 못 들어왔다.)
+
+        신뢰도로 거르지 않는 이유: 모든 박스는 이미 confidence_threshold를 넘겨서 나온
+        것이고, 또렷하게 잡힌 꺼진 신호등은 오히려 신뢰도가 높다. 표지판과 다른 점은
+        신뢰도가 아니라 "그 줄에 있지 않다"는 것이다.
+        """
+        mean_height = (left['h'] + right['h']) / 2.0
+        mean_width = (left['w'] + right['w']) / 2.0
+        if mean_height <= 0.0 or mean_width <= 0.0:
+            return False
+
+        # 같은 줄인가
+        if abs(left['y'] - right['y']) > 0.8 * mean_height:
+            return False
+
+        # 비슷한 크기인가
+        height_ratio = left['h'] / right['h']
+        if not 0.5 <= height_ratio <= 2.0:
+            return False
+
+        # 붙어 있는가 (화면 양 끝의 남남이 아니라)
+        return (right['x'] - left['x']) <= 6.0 * mean_width
 
     def publish_center_sign(self, result, image_width):
         """
         화면 중앙 50% 영역에 있는 신호 객체 중에서 하나를 선택한다.
 
         신호등과 차선 안내 표지가 같은 프레임에 보이면 중앙에 가까운 쪽 하나만 나간다.
-        그래도 안전한데, mission_manager의 판정은 "같은 값이 연속 N프레임"이라 두 표지가
-        번갈아 나오면 어느 쪽도 확정되지 않기 때문이다 -- 신호등 앞에서는 계속 서 있고,
+        그래도 안전한데, mission_manager가 둘 중 어느 쪽도 확정하지 못하기 때문이다 --
+        wait_signal은 "같은 값이 연속 N프레임"이라 번갈아 나오면 끊기고, branch는 창
+        안의 다수결이라 절반씩 나뉘면 이기는 값이 없다. 신호등 앞에서는 계속 서 있고,
         갈림길에서는 timeout 뒤 default 갈래로 간다. 둘 다 안전한 쪽 실패다.
 
         선택 우선순위:
@@ -520,7 +646,11 @@ class ObjectDetection(Node):
 
         confidence = float(best_box.conf[0])
 
-        self.publish_sign(best_sign_name)
+        # 꺼진 칸은 토픽으로 'none'으로 나갑니다. 매핑이 'blank'인 이유는 갈림길 표지의
+        # 꺼진 칸이 슬롯 하나를 차지해야 하기 때문이고(publish_lane_fork_sign), 중앙
+        # 선택에서의 뜻은 예전과 똑같이 "통과 신호가 아니다"입니다 -- 눈앞의 꺼진 등이
+        # 중앙을 차지한 채 wait_signal의 연속 프레임을 거기서 끊습니다.
+        self.publish_sign('none' if best_sign_name == 'blank' else best_sign_name)
 
 
 def main(args=None):

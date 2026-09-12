@@ -59,7 +59,7 @@ ros2 service call /mission_manager/resume std_srvs/srv/Trigger   # 이어서 간
 
 무엇이 멈추는가:
 
-- **골은 실제로 취소합니다.** nav2의 `FollowPath`에는 일시정지가 없고, `/cmd_vel`이 계속
+- **골은 실제로 취소합니다.** nav2의 `follow_path`에는 일시정지가 없고, `/cmd_vel`이 계속
   나가면 워치독이 차를 세우지 못합니다. 대신 스텝은 그대로 두므로(`kIdle`로 안 갑니다)
   `~/resume`이 같은 골을 **지금 위치에서 다시 잘라** 보냅니다 -- `kBlocked`가 장애물이
   치워진 뒤 이어 가는 것과 같은 방식입니다. 따라서 멈춘 사이에 차를 조금 밀어 놓아도 됩니다.
@@ -109,7 +109,7 @@ n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 �
 
 ## 미션 파일 (mission.yaml / simple.yaml)
 
-핵심 아이디어는 **한 `drive` 스텝 = FollowPath 목표 하나**입니다. 정지선·신호등·주차 지점이 곧
+핵심 아이디어는 **한 `drive` 스텝 = follow_path 목표 하나**입니다. 정지선·신호등·주차 지점이 곧
 세그먼트의 끝이므로 "도착했는가?"를 따로 판정할 필요가 없습니다 -- nav2의 goal checker가 목표를
 성공 처리하는 순간이 도착입니다. 정지에도 별도의 정지 명령이 없습니다. 목표를 보내지 않으면
 `/cmd_vel`이 끊기고 `cmd_vel_to_ackermann`의 워치독이 차를 세웁니다.
@@ -183,7 +183,7 @@ costmap 반지름(10 m)부터 기어가기 시작해 정지까지 5초 넘게 �
 "지금 위치 -> 다음 drive 스텝의 끝"을 새 골로 보내고, 실행 중인 골은 취소하지 않고 **갈아끼웁니다**
 (prearm과 같은 preemption이므로 `/cmd_vel`이 끊기지 않습니다).
 
-쓰는 이유는 하나입니다. `controller_id`는 FollowPath 골에 실려 나가므로 컨트롤러를 바꾸려면 새 골을
+쓰는 이유는 하나입니다. `controller_id`는 follow_path 골에 실려 나가므로 컨트롤러를 바꾸려면 새 골을
 보내야 하는데, 보통의 스텝 전환은 골 판정을 기다리므로 차가 라벨에서 한 번 섰다 다시 출발합니다.
 `handoff_m`은 그 전환을 정차 없이 합니다 -- `mission_track.yaml`의 s자 구간이 이렇게 RPP와 MPPI를
 오갑니다. prearm과 달리 두 스텝의 컨트롤러가 다른지는 **보지 않습니다**(다른 것이 목적입니다).
@@ -230,7 +230,7 @@ steps:
   - type: branch
     default: ban_route        # 표지를 못 읽었을 때 갈 곳. 필수입니다.
     timeout_s: 8.0
-    debounce_frames: 3
+    vote_window_s: 3.0        # 이 시간 동안 모아 다수결. timeout_s보다 작아야 합니다.
     prearm_distance_m: 12.0   # 서지 않고 그대로 갈래로 들어갑니다.
     cases:
       - {value: "allow", goto: allow_route}
@@ -269,10 +269,25 @@ routes:
 `branch_seam_tolerance_m`(기본 2 m)보다 멀면 로드가 **거부**됩니다. 안 그러면 차가 분기 지점에서
 갈래 CSV의 첫 점까지 직선(lead-in)으로 코스를 가로지릅니다 -- 라벨 스냅 허용치와 같은 취지입니다.
 
-**판정은 "같은 값이 `debounce_frames` 연속"입니다.** `wait_signal`의 "허용 목록 안이기만 하면 됨"과
-다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기 때문입니다. 두 표지가 번갈아 보이면 어느 쪽도
-확정되지 않고 `default` 갈래로 갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다. 같은 값이 두 `cases`에
-나오면 로드 시점에 거부합니다.
+**판정은 "`vote_window_s` 동안 모은 표의 다수결"입니다.** `wait_signal`의 "허용 목록 안이기만 하면 됨"과
+다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기 때문입니다. 연속 프레임을 쓰지 않는 이유는 실제
+갈림길 표지판이 세 장 나란히 서서 **깜빡이기** 때문입니다 -- 연속이 계속 끊겨 어느 값도 확정되지 않고
+매번 `default`로 떨어집니다. 대신 창이 다 차면 표가 가장 많은 `cases`의 갈래로 갑니다:
+
+- 어느 `cases`에도 없는 값(`none`, `red`, 짝을 못 찾은 `allow` ...)은 **세기만 하고 이길 수 없습니다.**
+  깜빡이는 표지가 `allow_left` 6표, `none` 11표를 내도 `allow_left`로 갑니다.
+- 표가 모자라거나(이긴 값이 3표 미만) 두 갈래가 **동점**이면 고르지 않고 `timeout_s`까지 계속 모읍니다
+  -- 애매할 때 찍지 않는 쪽이 맞습니다. 그래도 안 갈리면 `default`입니다.
+- 최소 3표를 요구하는 이유는 prearm이 연 창을 분기 스텝이 이어받을 때 창이 이미 다 차 있어, 표 한 장이
+  그대로 길을 정해 버리는 것을 막기 위해서입니다.
+- 고른 순간과 `timeout` 순간에 **표 현황이 로그로 나갑니다** -- `Branch vote over 3.0 s: allow_left 14,
+  allow_right 3, none 6 (23 sample(s)) -> 'allow_left'.` 실패했을 때 `nothing; 0 sample(s)`이면 검출기가
+  죽었거나 토픽 이름이 틀린 것이고, `none 40`이면 갈림길 로직이 표지판 두 칸을 못 잡은 것이며,
+  `allow_left 19, allow_right 19`면 진짜 동점입니다.
+
+`vote_window_s`(기본 3.0초)는 **`timeout_s`보다 작아야 합니다** -- 크거나 같으면 창이 차기 전에 무조건
+`default`로 가는 설정이므로 로드 시점에 **거부**합니다. `debounce_frames`는 `wait_signal`의 것이라 분기에
+적어 두면 경고를 남기고 무시합니다. 같은 값이 두 `cases`에 나오면 로드 시점에 거부합니다.
 
 **`default`가 필수인 이유**: `wait_signal`은 못 보면 서 있으면 되지만(그게 안전), 갈림길에서는
 어디로든 가야 합니다. 그래서 `proceed_on_signal_timeout` 같은 선택지가 없고 timeout이 지나면 반드시
@@ -287,7 +302,9 @@ routes:
 갈래가 끝나면 `branch` 뒤의 `steps:` 스텝으로 **합류**하고, `branch`가 `steps:`의 마지막이면 미션이
 끝납니다. route 안에 또 `branch`를 두는 것은 지원하지 않습니다(합류 지점이 모호해집니다).
 
-표지 값(`ban` / `allow`)은 `hyper_object_detection`이 냅니다 -- YOLO 클래스 이름이 다르면
+표지 값(`allow_left` / `allow_right`)은 `hyper_object_detection`이 냅니다 -- 나란히 선 표지판 세 장 중
+**왼쪽 두 장**을 읽어 어느 쪽 차선이 허용인지까지 정한 값입니다(한 칸이 꺼져 있어도 나머지 한 칸이
+`allow`/`ban`이면 답이 정해집니다). YOLO 클래스 이름이 다르면
 `sign_class_map` 파라미터로 맞추세요(그 패키지의 README 참고).
 
 **`select_by: position`** -- 표지가 아니라 **차의 현재 위치**로 갈래를 고릅니다. 갈래마다 그 첫
@@ -295,7 +312,8 @@ routes:
 쪽으로 갑니다. 출발선이 둘인 코스에서 "차를 어디에 놓았느냐가 곧 어느 코스인가"를 그대로 조건으로 쓰는
 용도입니다 -- `mission_track.yaml`의 첫 스텝이 이렇게 `start_left` / `start_right`를 고릅니다.
 
-판정에 신호가 필요 없으므로 `debounce_frames`는 쓰이지 않고, `prearm_distance_m`도 켤 수 없습니다
+판정에 신호가 필요 없으므로 `vote_window_s`도 `debounce_frames`도 쓰이지 않고(둘 다 검사에서 빠집니다 --
+`vote_window_s >= timeout_s`여도 거부하지 않습니다), `prearm_distance_m`도 켤 수 없습니다
 (미리 볼 표지가 없습니다 -- 켜 두면 경고를 남기고 끕니다). tf를 못 읽으면 아무 일도 일어나지 않고
 `timeout_s` 뒤 `default`로 갑니다. 표지 분기와 같은 실패 방식입니다.
 
@@ -378,7 +396,7 @@ CSV는 헤더 이름으로 파싱하므로 `idx,x,y,yaw,frame_id` 형태와 레�
 
 ## 컨트롤러: MPPI
 
-`FollowPath` 플러그인은 `nav2_mppi_controller`(motion_model `Ackermann`, `min_turning_r` 1.74 m)입니다.
+`MPPI` 플러그인은 `nav2_mppi_controller`(motion_model `Ackermann`, `min_turning_r` 1.74 m)입니다.
 RPP(Regulated Pure Pursuit)는 경로 추종 전용이라 장애물을 만나도 우회하지 않고 abort만 하므로,
 연속 회피(슬라럼)를 위해 교체했습니다. MPPI는 CSV 경로를 참조로 두고 로컬 costmap을 보며
 매 틱 궤적을 재최적화하므로 옆으로 비켰다가 경로로 복귀합니다.
@@ -464,7 +482,7 @@ best-effort로 맞춰 두었습니다(발행 측이 SensorDataQoS라 Reliable로
 MPPI로 바뀐 뒤로는 `ReverseFollowPath`(후진 주차) 세그먼트가 돌 때만 나옵니다. 평상시
 주행 중에 컨트롤러가 무엇을 보고 있는지는 `/transformed_global_plan`으로 확인하세요.
 
-MPPI 쪽 두 토픽은 `nav2_controller.yaml`의 `FollowPath.visualize: true`일 때만 나갑니다.
+MPPI 쪽 두 토픽은 `nav2_controller.yaml`의 `MPPI.visualize: true`일 때만 나갑니다.
 경로가 안 보이면 그 값과 TF(`map` -> `odom` -> `body_link`)를 먼저 확인하세요.
 
 ## 상태 확인

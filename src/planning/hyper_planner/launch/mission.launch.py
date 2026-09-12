@@ -42,7 +42,7 @@ def generate_launch_description():
         DeclareLaunchArgument('action_name', default_value='follow_path'),
         DeclareLaunchArgument('sign_topic', default_value='/perception/sign'),
         # mission.yaml에서 controller/goal_checker를 안 적은 스텝이 쓰는 기본값.
-        DeclareLaunchArgument('controller_id', default_value='FollowPath'),
+        DeclareLaunchArgument('controller_id', default_value='MPPI'),
         DeclareLaunchArgument('goal_checker_id', default_value='general_goal_checker'),
         DeclareLaunchArgument('frame_id', default_value='map'),
         DeclareLaunchArgument('robot_base_frame', default_value='body_link'),
@@ -74,10 +74,10 @@ def generate_launch_description():
         # nav2에서 "제한 해제"라 정반대로 동작합니다. cancel_on_arrival_speed보다
         # 낮게 두세요(그래야 정지점에서 취소 조건이 열립니다).
         DeclareLaunchArgument('decel_profile_min_speed', default_value='0.4'),
-        # nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
+        # nav2_controller.yaml의 MPPI.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
         # ratio = speed_limit / vx_max를 곱하는 방식이라, 더 큰 값을 보내면 vx_max를
         # 오히려 올려 버립니다.
-        # 임시 저속 테스트: 1.0 (원래 2.22 -- nav2_controller.yaml의 FollowPath.vx_max와 같아야 함)
+        # 임시 저속 테스트: 1.0 (원래 2.22 -- nav2_controller.yaml의 MPPI.vx_max와 같아야 함)
         #
         # 주의: 이 값은 컨트롤러 하나를 가정합니다. mission_track처럼 RPP가 기본이고
         # MPPI는 한 구간에서만 쓰는 미션에서는, 감속 프로파일이 붙은 스텝이 전부 RPP이므로

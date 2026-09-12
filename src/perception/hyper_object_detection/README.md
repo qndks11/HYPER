@@ -45,8 +45,9 @@ timeout까지 기다립니다. 미션 주행이 아니라 수집 주행에서만
 
 ### YOLO 클래스 이름 맞추기 (`sign_class_map`)
 
-현재 `models/best.pt`가 가진 클래스는 여섯입니다 -- `Allow`, `Ban`, `Go`, `LeftTurn`, `Stop`,
-`Warn`. `SIGNAL_MAP`이 그 여섯을 전부 덮습니다.
+현재 `models/best_track.pt`가 가진 클래스는 일곱입니다 -- `Allow`, `Ban`, `Blank`, `Go`,
+`LeftTurn`, `Stop`, `Warn`. `models/best_sim.pt`는 `Blank`가 없는 나머지 여섯입니다.
+`SIGNAL_MAP`이 그 일곱을 전부 덮습니다.
 
 | YOLO 클래스 | 신호 값 |
 | --- | --- |
@@ -54,11 +55,12 @@ timeout까지 기다립니다. 미션 주행이 아니라 수집 주행에서만
 | `Go` | `green` |
 | `LeftTurn` | `left_arrow` |
 | `Warn` (구 `Yellow`) | `none` |
+| `Blank` (꺼진 신호등) | `none` |
 | `Ban` | `ban` |
 | `Allow` | `allow` |
 
-황색등을 `none`으로 두는 것은 "무시"가 아니라 "통과 신호가 아니다"입니다. 매핑에서 빼면 그 박스가
-중앙 선택에서 아예 제외되어 화면 가장자리의 다른 표지가 대신 뽑힐 수 있습니다.
+황색등과 꺼진 등을 `none`으로 두는 것은 "무시"가 아니라 "통과 신호가 아니다"입니다. 매핑에서 빼면
+그 박스가 중앙 선택에서 아예 제외되어 화면 가장자리의 다른 표지가 대신 뽑힐 수 있습니다.
 
 **모델을 다시 학습해 클래스 이름이 바뀌면 그 신호는 무시됩니다.** 코드를 고치지 않고 맞추려면:
 

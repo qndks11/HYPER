@@ -82,7 +82,7 @@ mission_manager:
 
   controller_id:
     type: string
-    default_value: "FollowPath"
+    default_value: "MPPI"
     read_only: true
     description: "mission.yaml의 drive 스텝이 controller를 안 적었을 때 쓰는 기본값. 로드 시점에 각 스텝으로 구워집니다."
     validation:
@@ -285,7 +285,7 @@ mission_manager:
     type: double
     default_value: 1.0
     description: |
-      nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
+      nav2_controller.yaml의 MPPI.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
       ratio = speed_limit / vx_max로 vx_max/vx_min/wz를 한꺼번에 곱하므로, vx_max보다 큰
       값을 실어 보내면 설정한 vx_max를 오히려 올려 버립니다. 그래서 여기서 잘라 보내고,
       잘릴 만큼 빠른 구간에서는 아예 제한을 해제(0.0)합니다.

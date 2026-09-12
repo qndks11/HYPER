@@ -66,8 +66,8 @@ struct Course
   std::unordered_map<std::string, std::size_t> label_index;
 };
 
-// branch 스텝의 갈래 하나. accepted 중 하나가 debounce_frames 연속으로 확인되면
-// target 스텝으로 갑니다.
+// branch 스텝의 갈래 하나. vote_window_s 동안 모은 표에서 accepted가 가장 많은 표를
+// 받으면 target 스텝으로 갑니다.
 struct BranchCase
 {
   std::vector<std::string> accepted;
@@ -138,7 +138,8 @@ struct Step
   double timeout_s{120.0};
   int debounce_frames{3};
 
-  // branch. timeout_s / debounce_frames / prearm_distance_m를 wait_signal과 같이 씁니다.
+  // branch. timeout_s / prearm_distance_m를 wait_signal과 같이 씁니다. 다만 판정 방법이
+  // 달라 debounce_frames가 아니라 아래 vote_window_s를 봅니다.
   std::vector<BranchCase> cases;
   std::string default_route;
   std::size_t default_target{kEndOfMission};
@@ -147,6 +148,11 @@ struct Step
   // 출발 위치가 곧 어느 코스인지를 정하는 스타트 분기용입니다. tf를 못 읽으면 아무 일도
   // 일어나지 않고 timeout 뒤 default로 갑니다(신호 분기와 같은 실패 방식).
   bool select_by_position{false};
+
+  // branch 전용. 이 시간 동안 들어온 신호를 모아 다수결로 갈래를 고릅니다. 갈림길 표지는
+  // 세 장이 나란히 깜빡여서 "같은 값이 N프레임 연속"이 거의 성립하지 않기 때문입니다.
+  // timeout_s보다 작아야 합니다 -- 아니면 창이 차기 전에 무조건 default로 갑니다.
+  double vote_window_s{3.0};
 
   // 두 종류가 같이 쓰는 필드. Step은 종류별로 나뉘지 않은 평평한 구조체입니다.
   //   wait_signal/branch에서: mission.yaml이 적어 준 값. 0보다 크면 prearm을 켭니다.
@@ -757,9 +763,21 @@ private:
   {
     step.type = StepType::kBranch;
     step.timeout_s = node["timeout_s"] ? node["timeout_s"].as<double>() : 10.0;
-    step.debounce_frames = node["debounce_frames"] ? node["debounce_frames"].as<int>() : 3;
+    step.vote_window_s = node["vote_window_s"] ? node["vote_window_s"].as<double>() : 3.0;
     step.prearm_distance_m = node["prearm_distance_m"]
       ? node["prearm_distance_m"].as<double>() : 0.0;
+
+    // debounce_frames는 wait_signal의 것입니다. 분기는 연속 프레임이 아니라 투표로 고르므로
+    // 여기서는 쓰이지 않습니다. 조용히 무시하면 "적어 뒀는데 왜 안 듣지"가 되므로 한 줄
+    // 남깁니다(prearm을 못 거는 경우와 같은 방식입니다).
+    if (node["debounce_frames"]) {
+      RCLCPP_WARN(
+        logger_,
+        "Step %zu (branch) sets 'debounce_frames: %d', which branches no longer use -- the "
+        "majority vote over vote_window_s (%.1f s) decides instead. Remove the key; it is "
+        "ignored here (wait_signal still uses it).",
+        index, node["debounce_frames"].as<int>(), step.vote_window_s);
+    }
 
     // 무엇을 보고 고르는가. 기본은 표지("sign")이고, "position"이면 차의 현재 위치에서
     // 가장 가까운 갈래로 갑니다. 오타를 기본값으로 조용히 흘려보내면 스타트 분기가
@@ -821,6 +839,27 @@ private:
         }
       }
       step.cases.push_back(std::move(branch_case));
+    }
+
+    // 위치로 고르는 분기는 신호를 아예 안 보므로 투표 창도 안 봅니다. 거기까지 검사하면
+    // 쓰지도 않는 값 때문에 스타트 분기가 거부됩니다.
+    if (!step.select_by_position) {
+      if (step.vote_window_s <= 0.0) {
+        // 0이면 표 한 장으로 정해집니다. 그건 이 투표가 없애려던 바로 그 동작입니다.
+        RCLCPP_ERROR(
+          logger_, "Step %zu (branch): vote_window_s must be > 0 (got %.2f).",
+          index, step.vote_window_s);
+        return false;
+      }
+      if (step.vote_window_s >= step.timeout_s) {
+        RCLCPP_ERROR(
+          logger_,
+          "Step %zu (branch): vote_window_s (%.1f s) is not shorter than timeout_s (%.1f s), so "
+          "the vote can never finish before the branch gives up -- this branch would always take "
+          "the default route '%s'. Make vote_window_s smaller (or timeout_s larger).",
+          index, step.vote_window_s, step.timeout_s, step.default_route.c_str());
+        return false;
+      }
     }
     return true;
   }
@@ -1088,7 +1127,7 @@ private:
 
   // drive 스텝의 handoff_m을 그 다음 drive 스텝에 이어 줍니다.
   //
-  // 왜 필요한가: 컨트롤러(controller_id)는 FollowPath 골에 실려 나가므로, RPP에서 MPPI로
+  // 왜 필요한가: 컨트롤러(controller_id)는 follow_path 골에 실려 나가므로, RPP에서 MPPI로
   // 바꾸는 유일한 방법은 새 골입니다. 그런데 보통의 스텝 전환은 골 판정(goal checker)을
   // 기다리므로 차가 라벨에서 한 번 섰다가 다시 출발합니다 -- s자 구간 앞뒤로 두 번.
   //

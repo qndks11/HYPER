@@ -1,7 +1,7 @@
 // HYPER 미션 매니저.
 //
 // mission/<mission>.yaml의 스텝 큐를 순서대로 실행합니다. 핵심 아이디어는
-// "한 스텝 = FollowPath 골 하나"입니다 -- 정지선/신호등/주차 지점이 곧 세그먼트의 끝이므로
+// "한 스텝 = follow_path 골 하나"입니다 -- 정지선/신호등/주차 지점이 곧 세그먼트의 끝이므로
 // "도착했는가?"를 따로 판정할 필요 없이 nav2의 goal checker가 알려 줍니다.
 //
 // 정지에는 별도의 정지 명령이 필요 없습니다. 골을 보내지 않으면 /cmd_vel이 끊기고
@@ -54,8 +54,11 @@
 //   하나는 한 번 주행해 녹화한 것이라 갈림길을 표현할 수 없으므로(라벨이 CSV를 따라 단조
 //   증가해야 합니다), 갈래마다 CSV를 따로 녹화해 courses로 등록하고 branch가 고릅니다.
 //
-//   판정은 "같은 값이 debounce_frames 연속"입니다. wait_signal의 "허용 목록 안이기만 하면
-//   됨"과 다른데, 분기는 어느 값이 나왔는지가 곧 어느 길이기 때문입니다(pick_branch).
+//   판정은 "vote_window_s 동안 모은 표의 다수결"입니다. wait_signal의 "허용 목록 안이기만
+//   하면 됨"과 다른데, 분기는 어느 값이 나왔는지가 곧 어느 길이기 때문입니다(pick_branch).
+//   연속 프레임을 안 쓰는 이유는 갈림길 표지판 세 장이 나란히 깜빡여서 연속이 계속 끊기기
+//   때문입니다. 어느 case에도 없는 값은 세기만 하고 이길 수 없으며, 표가 없거나 두 갈래가
+//   동점이면 고르지 않고 timeout까지 계속 모읍니다.
 //
 //   wait_signal과 결정적으로 다른 점은 "못 봤다"의 안전한 답이 없다는 것입니다. 신호등은
 //   못 보면 서 있으면 되지만 갈림길에서는 어디로든 가야 하므로, timeout이 지나면 반드시
@@ -80,6 +83,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -396,28 +400,107 @@ private:
     return branch.default_route;
   }
 
-  // 지금까지 본 신호로 갈래를 고를 수 있으면 true.
-  //
-  // wait_signal의 sign_streak_이 아니라 value_streak_을 쓰는 이유: 신호등은 "허용 목록
-  // 안이기만 하면" 되지만(green이든 left_arrow든 결과가 같습니다), 분기는 *어느 값이*
-  // 확인됐는지가 곧 어느 길로 가느냐입니다. 그래서 같은 값이 연속으로 몇 프레임 나왔는지를
-  // 따로 셉니다. 두 갈래가 번갈아 보이면 어느 쪽도 확정되지 않고, timeout 뒤 default로
-  // 갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다.
-  bool pick_branch(const Step & branch, std::size_t & target, std::string & matched) const
+  // 이긴 값이 최소한 이만큼은 표를 받아야 갈래를 정합니다. 표 한 장으로 길이 갈리는 것을
+  // 막는 바닥값입니다(위 pick_branch 참고).
+  static constexpr int kMinBranchVotes = 3;
+
+  // 표를 버리고 창을 닫습니다.
+  void vote_clear()
   {
-    if (value_streak_ < branch.debounce_frames) {
+    vote_counts_.clear();
+    vote_total_ = 0;
+    vote_open_ = false;
+  }
+
+  // 지금부터 새 창을 엽니다.
+  void vote_open_now()
+  {
+    vote_clear();
+    vote_started_ = now();
+    vote_open_ = true;
+  }
+
+  // 표 현황을 "allow_left 14, allow_right 3, none 6"으로. 어느 case에도 없는 값까지 전부
+  // 넣습니다 -- 운영자가 이 줄을 보는 이유가 "카메라가 실제로 뭘 냈는가"이기 때문입니다.
+  std::string vote_tally() const
+  {
+    std::string text;
+    for (const auto & entry : vote_counts_) {
+      if (!text.empty()) {
+        text += ", ";
+      }
+      text += entry.first + " " + std::to_string(entry.second);
+    }
+    return text.empty() ? std::string("nothing") : text;
+  }
+
+  // 창이 다 찼고 이길 값이 하나로 정해지면 true.
+  //
+  // wait_signal의 sign_streak_("허용 목록 안이기만 하면 됨")과 다른 이유는 예전과 같습니다
+  // -- 분기는 *어느 값이* 나왔는지가 곧 어느 길입니다. 달라진 것은 세는 방법입니다. 갈림길
+  // 표지는 세 장이 나란히 깜빡여서 "같은 값이 N프레임 연속"이 거의 성립하지 않으므로,
+  // vote_window_s 동안 모아 다수결로 정합니다. 어느 case에도 없는 값(none, red, 짝을 못
+  // 찾은 allow ...)은 세기만 하고 이길 수 없습니다. 표가 하나도 없거나 두 갈래가 동점이면
+  // 아직 고르지 않습니다 -- 애매할 때 찍지 않는 쪽이 맞습니다.
+  bool pick_branch(const Step & branch, std::size_t & target, std::string & matched)
+  {
+    // 창이 안 열려 있으면 여기서 엽니다. begin_step과 update_prearm이 정상 경로지만,
+    // 그 둘을 안 거치고 들어오는 길(resume 직후 등)에서도 스스로 낫게 하려는 것입니다.
+    if (!vote_open_) {
+      vote_open_now();
       return false;
     }
+    const double elapsed = (now() - vote_started_).seconds();
+    if (elapsed < branch.vote_window_s) {
+      return false;
+    }
+
+    // case 단위로 셉니다. 한 case의 `value`에 값이 여러 개 적혀 있을 수 있는데(쉼표로
+    // 나뉩니다), 그 값들이 표를 나눠 가졌다고 판정이 막히면 안 됩니다 -- 어차피 같은
+    // 길입니다.
+    int best_votes = 0;
+    bool tied = false;
     for (const auto & branch_case : branch.cases) {
-      if (std::find(branch_case.accepted.begin(), branch_case.accepted.end(), streak_value_) !=
-        branch_case.accepted.end())
-      {
+      int votes = 0;
+      int top_votes = -1;
+      std::string top_value;
+      for (const auto & value : branch_case.accepted) {
+        const auto found = vote_counts_.find(value);
+        const int value_votes = found == vote_counts_.end() ? 0 : found->second;
+        votes += value_votes;
+        if (value_votes > top_votes) {
+          top_votes = value_votes;
+          top_value = value;
+        }
+      }
+      if (votes > best_votes) {
+        best_votes = votes;
+        tied = false;
         target = branch_case.target;
-        matched = streak_value_;
-        return true;
+        matched = top_value;
+      } else if (votes == best_votes) {
+        tied = true;
       }
     }
-    return false;
+
+    // 아직 못 고릅니다. 표는 그대로 둡니다 -- 계속 쌓이다 보면 다음 한 장이 동점을
+    // 깹니다. 그래서 이 창은 "정확히 vote_window_s"가 아니라 "적어도 vote_window_s"입니다.
+    //
+    // 최소 표 수를 따로 두는 이유: prearm에서 연 창을 분기 스텝이 이어받으면 도착 시점에
+    // 이미 창이 다 차 있습니다. 그 상태로 표 한 장이 들어오면 "경과 >= vote_window_s"가
+    // 이미 참이라 그 한 장으로 길이 정해집니다 -- 투표를 넣은 이유가 없어집니다. 초당 몇
+    // 장이 들어오는지는 detection_frequency에 따라 달라져 미리 알 수 없으므로, 비율이
+    // 아니라 예전 debounce_frames와 같은 자릿수의 바닥값으로 막습니다.
+    if (best_votes < kMinBranchVotes || tied) {
+      return false;
+    }
+
+    // 경과 시간을 찍습니다(vote_window_s가 아니라): 한 번 못 고르고 지나간 창은 둘이
+    // 다르고, 표가 초당 몇 장 들어왔는지를 봐야 판단이 섭니다.
+    RCLCPP_INFO(
+      get_logger(), "Branch vote over %.1f s: %s (%d sample(s)) -> '%s'.",
+      elapsed, vote_tally().c_str(), vote_total_, matched.c_str());
+    return true;
   }
 
   // ---------------------------------------------------------------- 상태 진행
@@ -436,6 +519,11 @@ private:
     prearmed_ = false;
     arrival_requested_ = false;
     blocked_ = false;
+    // 분기로 들어갈 때만 prearm이 모으던 표를 이어받습니다(아래 kBranch). 그 밖의 스텝으로
+    // 가면 창을 닫습니다 -- 여기서 안 닫으면 갈래를 고른 뒤에도 계속 세게 됩니다.
+    if (step.type != StepType::kBranch) {
+      vote_clear();
+    }
     switch (step.type) {
       case StepType::kDrive:
         phase_ = Phase::kStarting;
@@ -456,7 +544,6 @@ private:
         phase_ = Phase::kWaiting;
         wait_until_ = now() + rclcpp::Duration::from_seconds(step.timeout_s);
         sign_streak_ = 0;
-        value_streak_ = 0;
         RCLCPP_INFO(
           get_logger(), "%s waiting for '%s' on %s (%d frame(s), timeout %.0f s).",
           progress().c_str(), join_values(step.accepted).c_str(), params_.sign_topic.c_str(),
@@ -468,7 +555,17 @@ private:
         phase_ = Phase::kWaiting;
         wait_until_ = now() + rclcpp::Duration::from_seconds(step.timeout_s);
         sign_streak_ = 0;
-        value_streak_ = 0;
+        // prearm이 이미 표를 모으고 있었다면 그대로 이어받습니다. 그 표들은 바로 이 분기의
+        // 표지를 본 것이고, 여기서 버리면 vote_window_s를 처음부터 다시 채우느라 timeout_s
+        // 안에 못 채울 수 있습니다(그러면 무조건 default입니다).
+        //
+        // 다만 한 장도 못 봤으면 이어받을 것이 없으므로 창을 새로 엽니다. 안 그러면 prearm
+        // 내내 열려만 있던 빈 창을 그대로 물려받아 "경과 >= vote_window_s"가 이미 참인 채로
+        // 시작하고, 그러면 여기서부터는 사실상 창이 없는 것과 같습니다. 버리는 표가 없으니
+        // 손해도 없고, timeout_s > vote_window_s는 로드 시점에 보장됩니다.
+        if (!vote_open_ || vote_total_ == 0) {
+          vote_open_now();
+        }
         if (step.select_by_position) {
           RCLCPP_INFO(
             get_logger(), "%s branching on position (%s; timeout %.0f s -> '%s').",
@@ -476,9 +573,9 @@ private:
             step.default_route.c_str());
         } else {
           RCLCPP_INFO(
-            get_logger(), "%s branching on %s (%s; %d frame(s), timeout %.0f s -> '%s').",
+            get_logger(), "%s branching on %s (%s; vote over %.1f s, timeout %.0f s -> '%s').",
             progress().c_str(), params_.sign_topic.c_str(), branch_values(step).c_str(),
-            step.debounce_frames, step.timeout_s, step.default_route.c_str());
+            step.vote_window_s, step.timeout_s, step.default_route.c_str());
         }
         break;
     }
@@ -681,12 +778,16 @@ private:
           "'%s' -- check that odometry is running.",
           progress().c_str(), step.timeout_s, step.default_route.c_str());
       } else {
+        // 표 현황을 통째로 찍습니다. 여기서 갈리는 실패가 셋인데 last_sign_ 하나로는
+        // 구별이 안 됩니다: "nothing / 0 sample(s)"이면 검출기가 죽었거나 토픽 이름이
+        // 틀린 것이고, "none 40"이면 갈림길 로직이 두 칸을 못 잡은 것이며,
+        // "allow_left 19, allow_right 19"면 진짜 동점입니다.
         RCLCPP_WARN(
           get_logger(),
-          "%s branch: no lane sign confirmed within %.0f s (last saw '%s'). Taking the default "
-          "route '%s' -- check the sign detector.",
-          progress().c_str(), step.timeout_s, last_sign_.empty() ? "nothing" : last_sign_.c_str(),
-          step.default_route.c_str());
+          "%s branch: no lane sign won the vote within %.0f s (votes over %.1f s: %s; "
+          "%d sample(s)). Taking the default route '%s' -- check the sign detector.",
+          progress().c_str(), step.timeout_s, (now() - vote_started_).seconds(),
+          vote_tally().c_str(), vote_total_, step.default_route.c_str());
       }
       goto_step(step.default_target);
     }
@@ -1000,10 +1101,13 @@ private:
       progress_.distance_to_stop_m() <= step.prearm_distance_m;
 
     if (in_range && !prearmed_) {
-      // 진입하는 순간 streak을 비웁니다. 멀리서 -- 표지가 아직 몇 픽셀일 때 -- 우연히
-      // 쌓인 연속 프레임이 그대로 통과/분기 판정으로 이어지지 않게 하려는 것입니다.
+      // 진입하는 순간 streak을 비우고 투표 창을 새로 엽니다. 멀리서 -- 표지가 아직 몇
+      // 픽셀일 때 -- 우연히 쌓인 것이 그대로 통과/분기 판정으로 이어지지 않게 하려는
+      // 것입니다. 분기든 신호등이든 가리지 않고 여는 이유는, wait_signal prearm은 표를
+      // 읽지 않고 도착할 때 begin_step이 버리기 때문입니다 -- 여기서 종류를 따지면
+      // "분기가 무엇인지" 아는 곳이 하나 더 늘 뿐입니다.
       sign_streak_ = 0;
-      value_streak_ = 0;
+      vote_open_now();
       const Step & watched = steps_[step.prearm_wait_step];
       const std::string looking_for = watched.type == StepType::kBranch
         ? branch_values(watched) : join_values(watched.accepted);
@@ -1080,7 +1184,7 @@ private:
     retries_ = 0;
     prearmed_ = false;
     sign_streak_ = 0;
-    value_streak_ = 0;
+    vote_clear();
     send_goal(merge_step, path);
     return true;
   }
@@ -1133,7 +1237,8 @@ private:
     retries_ = 0;
     prearmed_ = false;
     sign_streak_ = 0;
-    value_streak_ = 0;
+    // begin_step을 안 거치고 갈래로 바로 들어가므로 여기서 직접 창을 닫습니다.
+    vote_clear();
     send_goal(route_step, path);
     return true;
   }
@@ -1515,7 +1620,7 @@ private:
 
   void on_sign(const std::string & value)
   {
-    // 일시정지 중에는 세지 않습니다. 계속 세면 서 있는 동안 debounce가 채워져,
+    // 일시정지 중에는 세지 않습니다. 계속 세면 서 있는 동안 debounce와 표가 채워져,
     // '~/resume'을 부르는 순간 판정이 이미 끝나 있습니다 -- reset_to가 점프 전 연속 프레임을
     // 지우는 것과 같은 이유입니다.
     if (paused_) {
@@ -1524,13 +1629,12 @@ private:
 
     last_sign_ = value;
 
-    // 값별 연속 프레임 수. 스텝 종류와 무관하게 항상 셉니다 -- branch는 "허용 목록 안인가"가
-    // 아니라 "어느 값이 확인됐는가"로 갈래를 고르기 때문입니다(pick_branch 참고).
-    if (value == streak_value_) {
-      ++value_streak_;
-    } else {
-      streak_value_ = value;
-      value_streak_ = 1;
+    // 분기의 투표. 창이 열려 있는 동안 들어온 값을 값별로 셉니다. 어느 case에도 없는
+    // 값(none, red, 짝을 못 찾은 allow ...)도 셉니다 -- 이길 수는 없지만, 나중에 로그로
+    // "카메라가 실제로 뭘 봤는지"를 보여 주는 것이 바로 그 값들이기 때문입니다.
+    if (vote_open_) {
+      ++vote_counts_[value];
+      ++vote_total_;
     }
 
     // 아래는 wait_signal 전용 카운터입니다. 신호를 세는 상황은 둘입니다. kWaiting은
@@ -1652,11 +1756,14 @@ private:
     // "아직 빠르다"고 볼 수 있으므로 버립니다.
     have_speed_ = false;
     last_speed_ = 0.0;
-    // debounce는 처음부터 다시 셉니다(on_sign이 멈춘 동안 세지 않았으므로 값은 멈출 때의
-    // 것입니다 -- 그걸 그대로 이어받으면 재개 즉시 판정될 수 있습니다).
+    // debounce와 표는 처음부터 다시 셉니다(on_sign이 멈춘 동안 세지 않았으므로 값은 멈출
+    // 때의 것입니다 -- 그걸 그대로 이어받으면 재개 즉시 판정될 수 있습니다). 창을 뒤로
+    // 미는 대신 버리는 이유도 같습니다: 밀어 두면 "3초짜리 창"이 실제로는 몇 분에 걸쳐
+    // 가운데가 비어 있는 창이 됩니다. wait_until_은 멈춘 만큼 밀리고 로드 시점에
+    // vote_window_s < timeout_s를 보장하므로, 새 창은 언제나 채울 시간이 남습니다.
+    // 창을 여는 것은 다음 tick의 pick_branch가 알아서 합니다.
     sign_streak_ = 0;
-    value_streak_ = 0;
-    streak_value_.clear();
+    vote_clear();
 
     paused_ = false;
     RCLCPP_INFO(
@@ -1735,10 +1842,9 @@ private:
     // 갈아끼운 옛 골의 표시도 지웁니다. 그 결과가 아직 날아오는 중일 수 있지만,
     // 위와 같은 이유로 kIdle에서 무시됩니다.
     has_superseded_goal_ = false;
-    // 점프 전에 쌓인 연속 프레임이 새 wait_signal/branch를 즉시 만족시키지 않도록.
+    // 점프 전에 쌓인 연속 프레임과 표가 새 wait_signal/branch를 즉시 만족시키지 않도록.
     sign_streak_ = 0;
-    value_streak_ = 0;
-    streak_value_.clear();
+    vote_clear();
     if (goal_handle_) {
       client_->async_cancel_goal(goal_handle_);
       goal_handle_.reset();
@@ -1913,10 +2019,15 @@ private:
   rclcpp::Time blocked_retry_at_;
   int sign_streak_{0};
   std::string last_sign_;
-  // 같은 값이 연속으로 몇 프레임 나왔는지. branch가 갈래를 고를 때 씁니다(sign_streak_은
-  // "허용 목록 안이었는가"라 어느 값이었는지를 잃습니다).
-  std::string streak_value_;
-  int value_streak_{0};
+  // 분기의 투표. 창이 열려 있는 동안 /perception/sign이 낸 값을 값별로 셉니다.
+  // 왜 연속 프레임이 아닌가: 갈림길 표지는 세 장이 나란히 깜빡이므로 "같은 값이 N프레임
+  // 연속"이 거의 성립하지 않고, 그때마다 판정이 default로 떨어집니다. 대신 일정
+  // 시간(vote_window_s) 동안 모아 다수결로 정합니다.
+  // std::map인 이유는 로그 줄의 값 순서가 실행마다 같아야 하기 때문입니다.
+  std::map<std::string, int> vote_counts_;
+  int vote_total_{0};
+  rclcpp::Time vote_started_;
+  bool vote_open_{false};
   // 지금 실행 중인 drive 스텝에서 신호를 미리 보는 중인지.
   bool prearmed_{false};
 

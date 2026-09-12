@@ -59,9 +59,9 @@ labels:
 # --- 미션 시퀀스 ---
 #
 # step 종류:
-#   drive        경로를 따라 `until` 라벨까지 주행. 한 세그먼트 = FollowPath 골 1개.
+#   drive        경로를 따라 `until` 라벨까지 주행. 한 세그먼트 = follow_path 골 1개.
 #                controller/goal_checker로 nav2 플러그인을 골라 쓸 수 있습니다
-#                (nav2_controller.yaml에 등록된 이름: FollowPath / ReverseFollowPath,
+#                (nav2_controller.yaml에 등록된 이름: MPPI / ReverseFollowPath,
 #                 general_goal_checker / precise_goal_checker).
 #                reverse: true 는 "이 구간은 후진으로 녹화했다"는 표시입니다.
 #                포즈 방향은 CSV의 yaw(= 실제 차체 헤딩)를 그대로 쓰므로 뒤집지 않습니다
@@ -127,7 +127,7 @@ labels:
 #                0 = 끔 -- 그때는 goal_retry_limit(기본 2)이 소진되는 즉시 미션 실패입니다.
 #
 #                경로를 벗어나지 않는 컨트롤러(ForwardFollowPath / ReverseFollowPath)에서만
-#                의미가 있습니다. MPPI(FollowPath)는 애초에 막히면 비켜 가므로 abort 자체가
+#                의미가 있습니다. MPPI는 애초에 막히면 비켜 가므로 abort 자체가
 #                거의 안 납니다.
 #   stop         duration_s 동안 정지. 골을 안 보내면 cmd_vel_to_ackermann의
 #                워치독(input_timeout 0.3s)이 차를 세웁니다.
@@ -171,10 +171,15 @@ labels:
 #                (더 기다린다고 더 나은 답이 나오지 않습니다). 못 고르고 timeout이 지나면
 #                경고를 남기고 default 갈래로 갑니다.
 #
-#                판정은 "같은 값이 debounce_frames 연속"입니다. wait_signal의 "허용 목록
-#                안이기만 하면 됨"과 다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기
-#                때문입니다. 두 표지가 번갈아 보이면 어느 쪽도 확정되지 않고 default로
-#                갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다.
+#                판정은 "vote_window_s(기본 3초) 동안 모은 표의 다수결"입니다. wait_signal의
+#                "허용 목록 안이기만 하면 됨"과 다른데, 분기는 *어느 값이* 나왔는지가 곧 어느
+#                길이기 때문입니다. 연속 프레임을 안 쓰는 이유는 갈림길 표지판 세 장이 나란히
+#                깜빡여서 연속이 계속 끊기기 때문입니다. 어느 case에도 없는 값(none 등)은 세기만
+#                하고 이길 수 없고, 표가 없거나 두 갈래가 동점이면 고르지 않은 채 timeout까지
+#                계속 모읍니다 -- 애매할 때 찍지 않는 쪽이 맞습니다. 고른 순간과 timeout 순간에
+#                표 현황이 로그로 나갑니다("allow_left 14, allow_right 3, none 6").
+#                vote_window_s는 timeout_s보다 작아야 합니다(아니면 로드가 거부됩니다 --
+#                창이 차기 전에 무조건 default로 가는 설정이기 때문입니다).
 #
 #                prearm_distance_m: wait_signal과 같습니다. 0보다 크면 앞 drive 스텝의 골까지
 #                이만큼 남았을 때부터 표지를 미리 보고, 확인되면 서지 않고 그대로 갈래로
@@ -263,15 +268,17 @@ steps:
      cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
   # 9) 차선 안내 표지에 따른 분기
-  # 'allow'와 'ban' 표지가 한 프레임에 같이 보일 때, object_detection이 둘의 좌우
-  # 배치를 보고 신호를 냅니다(object_detection_node.py의 publish_lane_fork_sign):
-  #   allow가 ban보다 왼쪽  -> 'allow_left'  -> sim_left  (left_route)
-  #   allow가 ban보다 오른쪽 -> 'allow_right' -> sim_right (right_route)
-  # 표지를 하나만 보거나 못 보면 어느 case에도 안 맞아, timeout 뒤 default로 갑니다.
+  # 갈림길에는 표지판이 세 장 나란히 서 있고 깜빡입니다. object_detection은 그중 **왼쪽 두
+  # 장**을 읽어 신호를 냅니다(object_detection_node.py의 publish_lane_fork_sign). 한 칸이
+  # 꺼져 있어도(blank) 나머지 한 칸이 allow/ban이면 답이 정해집니다:
+  #   (allow, ban) (allow, blank) (blank, ban)  -> 'allow_left'  -> sim_left  (left_route)
+  #   (ban, allow) (blank, allow) (ban, blank)  -> 'allow_right' -> sim_right (right_route)
+  # 두 칸이 같은 값이면(allow/allow, ban/ban, blank/blank) 신호를 내지 않습니다.
+  # 표지를 못 읽으면 어느 case에도 안 맞아, timeout 뒤 default로 갑니다.
   - type: branch
     default: right_route         # 표지를 못 읽었을 때 갈 곳. 필수입니다.
     timeout_s: 8.0               # 신호등의 120초와 달리 짧게 -- 더 기다려도 답이 안 나옵니다.
-    debounce_frames: 3
+    vote_window_s: 3.0           # 이 시간 동안 모아 다수결. timeout_s보다 작아야 합니다.
     prearm_distance_m: 12.0      # 서지 않고 그대로 갈래로 들어갑니다. 0이면 서서 읽습니다.
     cases:
       - {value: "allow_left",  goto: left_route}

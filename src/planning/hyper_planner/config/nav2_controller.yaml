@@ -27,14 +27,14 @@ controller_server:
     # mission.launch.py의 speed_limit_topic도 같이 바꾸세요.
     #
     # 주의: controller_server는 들어온 제한을 등록된 *모든* 컨트롤러에 겁니다
-    # (FollowPath와 ReverseFollowPath 양쪽). 그래서 mission_manager는 프로파일 구간을
+    # (MPPI와 ReverseFollowPath 양쪽). 그래서 mission_manager는 프로파일 구간을
     # 벗어나는 즉시 0.0(NO_SPEED_LIMIT)을 보내 해제합니다 -- 안 그러면 뒤따르는 후진
     # 주차 스텝에서 RPP가 그 제한 속도로 기어갑니다.
     speed_limit_topic: "speed_limit"
 
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker", "precise_goal_checker", "park_goal_checker"]
-    controller_plugins: ["FollowPath", "ForwardFollowPath", "ReverseFollowPath"]
+    controller_plugins: ["MPPI", "ForwardFollowPath", "ReverseFollowPath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -88,7 +88,7 @@ controller_server:
     # MPPI. RPP(순수 추종기)는 준 경로를 절대 벗어나지 않아 장애물을 못 피하므로,
     # 경로를 "참조"로만 쓰고 로컬 costmap을 보며 궤적을 직접 최적화하는 MPPI로 바꿨습니다.
     # (이전 RPP 설정이 필요하면 git history에서 이 파일의 직전 버전을 보세요)
-    FollowPath:
+    MPPI:
       plugin: "nav2_mppi_controller::MPPIController"
 
       # 예측 구간: 56 * 0.05 = 2.8초. model_dt는 controller_frequency(20 Hz)와 맞춥니다.
@@ -607,7 +607,7 @@ cmd_vel_to_ackermann:
     use_sim_time: true
     wheelbase: 0.72
     max_steering_angle: 0.5061455
-    # MPPI FollowPath.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
+    # MPPI.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
     max_velocity: 3.0
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.

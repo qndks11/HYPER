@@ -20,6 +20,11 @@ from . import theme
 MIN_SCALE = 0.05      # 픽셀당 20 m
 MAX_SCALE = 200.0     # 픽셀당 0.5 cm
 
+# 뷰가 쓰는 sceneRect의 반지름(m). 코스는 100 m대이고 map 프레임은 datum 기준이라
+# 이 안을 벗어나지 않습니다. 자동 sceneRect(itemsBoundingRect)를 쓰지 않는 이유는
+# StudioView.__init__의 setSceneRect 주석에 있습니다.
+SCENE_RADIUS_M = 5000.0
+
 
 class StudioScene(QGraphicsScene):
     """아이템만 담습니다. 격자와 축은 뷰가 배경으로 직접 그립니다."""
@@ -39,6 +44,11 @@ class StudioView(QGraphicsView):
 
     clicked_at = Signal(float, float, int)   # x, y, Qt 버튼
     cursor_moved = Signal(float, float)
+    follow_released = Signal()               # 팬으로 차량 고정이 풀렸습니다
+
+    # 서 있는 차의 odom 잡음으로 화면 전체를 다시 그리지 않기 위한 여유. 뷰포트
+    # 전체 repaint는 배경 이미지가 깔린 코스에서 비쌉니다.
+    FOLLOW_DEADZONE_PX = 1.5
 
     def __init__(self, scene):
         super().__init__(scene)
@@ -49,17 +59,37 @@ class StudioView(QGraphicsView):
         self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
         self.setMouseTracking(True)
         self.setFrameStyle(0)
+        # sceneRect를 넉넉한 고정 사각형으로 못박습니다. 기본값(itemsBoundingRect)은
+        # 두 가지를 망가뜨립니다.
+        #   1. 라벨/핸들이 ItemIgnoresTransformations라 그 경계가 실제 map 범위와
+        #      다릅니다(_frame_all 주석과 같은 이유).
+        #   2. 씬이 뷰포트보다 작은 축에서는 Qt가 정렬(AlignCenter)로 화면을 가운데
+        #      못박고 뷰 변환의 이동을 통째로 무시합니다 -- 차량 고정이 그 축에서만
+        #      조용히 안 먹었습니다. 팬도 코스 경계에서 걸렸습니다.
+        self.setSceneRect(-SCENE_RADIUS_M, -SCENE_RADIUS_M,
+                          2 * SCENE_RADIUS_M, 2 * SCENE_RADIUS_M)
+        # 그 사각형은 늘 뷰포트보다 크므로, 그냥 두면 스크롤바가 영영 떠 있습니다.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         # y-up. 이 한 줄이 이 파일의 거의 모든 주의사항의 원인입니다.
         self.scale(1.0, -1.0)
         self._panning = False
         self._pan_from = None
         self._grid_visible = True
+        self._follow = False
+        self._follow_point = None
 
     # ------------------------------------------------------------------ 줌/팬
     def wheelEvent(self, event):
         factor = 1.2 if event.angleDelta().y() > 0 else 1.0 / 1.2
         current = self.transform().m11()
         if not (MIN_SCALE <= current * factor <= MAX_SCALE):
+            return
+        # 차량 고정 중에는 커서가 아니라 차량을 기준으로 줌합니다 -- 커서 기준으로
+        # 줌하면 차가 화면 밖으로 밀렸다가 다음 pose에서 튕겨 돌아옵니다.
+        if self._follow and self._follow_point is not None:
+            self.scale(factor, factor)
+            self.center_on_point(*self._follow_point)
             return
         # 커서 아래 지점이 제자리에 있도록 줌합니다.
         anchor = self.mapToScene(event.pos())
@@ -69,6 +99,11 @@ class StudioView(QGraphicsView):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MiddleButton:
+            # 팬은 고정을 풉니다. 고정한 채로 팬을 무시하면 화면이 죽은 것처럼
+            # 보이고, 왜 안 움직이는지 알 방법이 없습니다.
+            if self._follow:
+                self._follow = False
+                self.follow_released.emit()
             self._panning = True
             self._pan_from = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
@@ -101,6 +136,41 @@ class StudioView(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    # ------------------------------------------------------------------ 차량 고정
+    def set_follow(self, follow):
+        """차량 고정을 켜고 끕니다. 켤 때 아는 위치가 있으면 바로 맞춥니다.
+
+        위치를 이미 아는지를 돌려줍니다 -- 창이 "아직 차량 위치가 없습니다"를
+        말해 줄 수 있도록.
+        """
+        self._follow = bool(follow)
+        if self._follow and self._follow_point is not None:
+            self.center_on_point(*self._follow_point)
+        return self._follow_point is not None
+
+    def follow_to(self, x, y):
+        """차량의 새 위치. 고정이 꺼져 있어도 기억해 둡니다(켜는 순간 쓰려고)."""
+        self._follow_point = (x, y)
+        if not self._follow:
+            return
+        here = self.mapFromScene(QPointF(x, y))
+        center = self.viewport().rect().center()
+        if (abs(here.x() - center.x()) < self.FOLLOW_DEADZONE_PX
+                and abs(here.y() - center.y()) < self.FOLLOW_DEADZONE_PX):
+            return
+        self.center_on_point(x, y)
+
+    def center_on_point(self, x, y):
+        """씬 좌표 (x, y)를 뷰포트 한가운데로.
+
+        centerOn을 쓰지 않는 이유: 그것은 sceneRect 안으로 잘리는데, sceneRect는
+        itemsBoundingRect에서 자동으로 나오고 라벨/핸들이
+        ItemIgnoresTransformations라 그 경계가 실제 map 범위와 다릅니다. 그래서
+        팬과 같은 방식(뷰 변환을 직접 옮기기)을 씁니다.
+        """
+        center = self.mapToScene(self.viewport().rect().center())
+        self.translate(center.x() - x, center.y() - y)
 
     # ------------------------------------------------------------------ 화면 맞춤
     def frame(self, rect, pad_m=5.0):
