@@ -357,7 +357,7 @@ ros2 launch hyper_launch behavior.launch.py
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
-| `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |
+| `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `ban` / `allow` / `allow_left` / `allow_right` / `none` |
 | `/steering_angle` | `std_msgs/Float64` | → vehicle_controller_node (시뮬레이션) / arduino_interface_node (실차) | 목표 조향각 [rad] (teleop / planner / waypoint_tracker가 발행) |
 | `/velocity` | `std_msgs/Float64` | → vehicle_controller_node (시뮬레이션) / arduino_interface_node (실차) | 목표 속도 [m/s] (teleop / planner / waypoint_tracker가 발행) |
 | `/forward_position_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 앞바퀴 조향각 (Ackermann 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
