@@ -14,7 +14,11 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", ATTRS{seria
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", ATTRS{serial}=="HYPER-GNSS-ROVER", SYMLINK+="tty_ublox_rover", MODE="0666"
 
 # 2) EBIMU-9DOFV5 USB-UART 어댑터 (CP210x). 어댑터를 바꾸면 아래 대체 줄을 쓴다.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="tty_ebimu", MODE="0666"
+#    주의: RPLidar도 같은 CP2102(10c4:ea60)이고, 공장 기본 USB 시리얼이 양쪽 다
+#    "0001"이라 VID:PID로도 시리얼로도 갈리지 않았다. 그래서 두 CP2102의 EEPROM에
+#    각각 "HYPER-EBIMU" / "HYPER-LIDAR"를 써 넣어 이름으로 가른다 (5)번 참고).
+#    읽기/다시 쓰기는 ./udev/cp210x-serial.md 참고. RTK 보드와 같은 방식이다.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="HYPER-EBIMU", SYMLINK+="tty_ebimu", MODE="0666"
 # FTDI FT232R
 #SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="tty_ebimu", MODE="0666"
 # CH340 -- Arduino와 칩이 같아지므로 KERNELS(물리 포트)를 반드시 같이 걸 것
@@ -27,3 +31,19 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="t
 #    video4linux 노드가 여러 개 열리므로 ATTR{index}=="0"(캡처 노드)만 잡는다.
 #    다른 모델로 바꾸면 lsusb로 VID:PID를 확인해 고칠 것.
 SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="08e5", ATTR{index}=="0", SYMLINK+="video_logitech"
+
+# 5) RPLidar (Slamtec) -- 보드에 CP2102가 올라가 있어 /dev/ttyUSB*로 잡힌다.
+#    EBIMU 어댑터와 VID:PID(10c4:ea60)가 완전히 같으므로, 공장에서 들어간 USB
+#    시리얼 문자열을 EEPROM에 다시 써서 가른다. 이 차의 라이다:
+#
+#      model 24 / fw 1.29 / hw 7 (기기 내부 시리얼 72562B46F099E4BCCA9EE1C789FAFCCD)
+#      USB 시리얼 = "HYPER-LIDAR" (공장 기본값 "0001"에서 다시 씀)
+#
+#    기기 내부 시리얼은 udev가 볼 수 없다(USB 디스크립터가 아니라 라이다 펌웨어가
+#    A5 50 GET_INFO에 실어 보내는 값이다). udev가 쓸 수 있는 건 ATTRS{serial}뿐이다.
+#
+#    rplidar_ros 패키지도 /usr/lib/udev/rules.d/60-ros-humble-rplidar-ros.rules에
+#    같은 이름의 규칙을 깔지만, 그건 CP210x면 무조건 /dev/rplidar를 붙여서 EBIMU
+#    어댑터까지 라이다로 잡아 버린다. 그래서 udev/60-ros-humble-rplidar-ros.rules로
+#    덮어 죽이고(같은 파일명이면 /etc가 /usr/lib보다 우선한다) 여기서 다시 잡는다.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="HYPER-LIDAR", SYMLINK+="rplidar", MODE="0666"

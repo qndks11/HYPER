@@ -13,7 +13,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     model_path = os.path.join(
-        get_package_share_directory('hyper_object_detection'), 'models', 'best.pt')
+        get_package_share_directory('hyper_object_detection'), 'models', 'best_track.pt')
 
     # Bird's-eye-view geometry for the real vehicle's camera. lane_detection's built-in defaults
     # describe that same camera as the simulator renders it, so only the intra_process (real

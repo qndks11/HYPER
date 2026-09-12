@@ -98,29 +98,39 @@ source ~/.bashrc
 
 ### USB 시리얼 포트 고정 (udev)
 
-차에는 USB 시리얼 장치가 넷 물려 있습니다: RTK 수신기 2대(moving-base 헤딩용 base+rover), IMU(EBIMU) USB-UART 어댑터, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 네 장치에 고정 이름을 붙입니다:
+차에는 USB 시리얼 장치가 다섯 물려 있습니다: RTK 수신기 2대(moving-base 헤딩용 base+rover), IMU(EBIMU) USB-UART 어댑터, RPLidar, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 다섯 장치에 고정 이름을 붙입니다:
 
 | 심볼릭 링크 | 장치 | 쓰는 곳 |
 |---|---|---|
 | `/dev/tty_ublox_base` | Ardusimple simpleRTK2B (u-blox ZED-F9P), base — 뒤쪽 안테나 | `hyper_rtk/launch/rtk.launch.py` |
 | `/dev/tty_ublox_rover` | Ardusimple simpleRTK2B (u-blox ZED-F9P), rover — 앞쪽 안테나 | `hyper_rtk/launch/rtk.launch.py` |
-| `/dev/tty_ebimu` | EBIMU-9DOFV5 USB-UART 어댑터 | `hyper_ebimu/config/ebimu.yaml` |
+| `/dev/tty_ebimu` | EBIMU-9DOFV5 USB-UART 어댑터 (CP210x, USB 시리얼 `HYPER-EBIMU`) | `hyper_ebimu/config/ebimu.yaml` |
+| `/dev/rplidar` | RPLidar (보드에 CP2102 탑재, USB 시리얼 `HYPER-LIDAR`) | `hyper_lidar/config/rplidar_params.yaml` |
 | `/dev/tty_arduino` | Arduino 제어 보드 (CH340) | `hyper_interface/config/parameters.yaml` |
 
-두 RTK 보드는 idVendor/idProduct까지 완전히 같지만(`1546:01a9`), 이 차의 두 보드에는 USB 시리얼 문자열이 이미 Flash에 기록돼 있어(`HYPER-GNSS-BASE` / `HYPER-GNSS-ROVER`) 규칙이 `ATTRS{serial}`로 바로 갈라냅니다. 물리 USB 포트(`KERNELS`)를 뽑아 채워 넣을 필요가 없고, 어느 포트에 꽂아도 링크 이름이 그대로 붙습니다.
+겹치는 칩이 두 쌍 있어서 VID:PID만으로는 갈리지 않습니다.
+
+- **두 RTK 보드**(`1546:01a9`)는 각 보드 Flash에 USB 시리얼 문자열이 이미 기록돼 있어(`HYPER-GNSS-BASE` / `HYPER-GNSS-ROVER`) 규칙이 `ATTRS{serial}`로 바로 갈라냅니다.
+- **EBIMU 어댑터와 RPLidar**는 둘 다 CP210x(`10c4:ea60`)이고, 공장 기본 USB 시리얼이 **양쪽 다 `0001`** 이라 시리얼로도 갈리지 않았습니다. 그래서 RTK 보드와 같은 방식으로 각 CP2102의 EEPROM에 이름을 써 넣었습니다 — 어댑터는 `HYPER-EBIMU`, 라이다는 `HYPER-LIDAR`. 다시 쓰는 방법은 [`udev/cp210x-serial.md`](udev/cp210x-serial.md)에 있습니다.
+
+어느 쪽이든 물리 USB 포트(`KERNELS`)를 뽑아 채워 넣을 필요가 없고, 어느 포트에 꽂아도 링크 이름이 그대로 붙습니다.
+
+`rplidar_ros` 패키지도 `/usr/lib/udev/rules.d/60-ros-humble-rplidar-ros.rules`를 깔아 두는데, 이 규칙은 **CP210x이기만 하면 무조건** `/dev/rplidar`를 붙입니다 — EBIMU 어댑터까지 라이다로 잡습니다. 그래서 같은 이름의 빈 파일(`udev/60-ros-humble-rplidar-ros.rules`)을 `/etc`에 깔아 원본을 가립니다(udev는 같은 파일명이면 `/etc` 쪽만 읽습니다). **두 파일을 반드시 같이 복사하세요.**
 
 ```bash
 sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
-sudo cp ~/HYPER/udev/99-hyper-serial.rules /etc/udev/rules.d/
+sudo cp ~/HYPER/udev/99-hyper-serial.rules ~/HYPER/udev/60-ros-humble-rplidar-ros.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
-ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/tty_arduino
+ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/rplidar /dev/tty_arduino
 ```
 
-네 링크가 다 보이면 끝입니다. 안 보이면 장치의 실제 칩 ID(또는 시리얼 번호)가 규칙과 다른 것이므로, 지금 꽂혀 있는 장치들의 값을 뽑아서 규칙 파일을 고칩니다:
+다섯 링크가 다 보이면 끝입니다. 안 보이면 장치의 실제 칩 ID(또는 시리얼 번호)가 규칙과 다른 것이므로, 지금 꽂혀 있는 장치들의 값을 뽑아서 규칙 파일을 고칩니다:
 
 ```bash
 ~/HYPER/udev/show-serial-ids.sh
 ```
+
+EBIMU 어댑터를 다른 것으로 바꿨다면 새 어댑터의 USB 시리얼은 공장 기본값(대개 `0001`)이므로 규칙이 안 잡습니다. [`udev/cp210x-serial.md`](udev/cp210x-serial.md)대로 새 어댑터에 `HYPER-EBIMU`를 써 넣으세요. EEPROM이 잠겨 있어서 못 쓰는 경우에만 두 장치를 같이 꽂고 위 스크립트로 `USB port` 열을 확인해 `KERNELS==`로 가릅니다.
 
 ### GPS (RTK) — 듀얼 GNSS moving-base 헤딩
 
@@ -209,7 +219,7 @@ ros2 topic echo /imu --field angular_velocity   # 반시계로 돌릴 때 z > 0
 
 `hyper_lidar`(`src/sensing/hyper_lidar`) 패키지가 실차에 연결된 RPLidar 등 2D LiDAR 드라이버(`rplidar_ros`, rosdep으로 설치됨)를 실행합니다. 시뮬레이션에서는 사용하지 않으며, Gazebo가 `/scan`을 직접 발행합니다.
 
-장치 포트, 보드레이트, 프레임 이름은 `config/rplidar_params.yaml`에서 실제 장비에 맞게 설정합니다 (기본값은 `/dev/rplidar` — 포트가 바뀌어도 흔들리지 않도록 GPS/카메라와 마찬가지로 idVendor/idProduct 기준 udev 심볼릭 링크를 걸어두는 것을 권장합니다).
+장치 포트, 보드레이트, 프레임 이름은 `config/rplidar_params.yaml`에서 실제 장비에 맞게 설정합니다. 포트 기본값 `/dev/rplidar`는 위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)의 udev 규칙이 만듭니다 — 라이다 보드의 CP2102는 EBIMU 어댑터와 VID:PID가 같으므로 `/dev/ttyUSB*` 번호로 잡으면 안 됩니다.
 
 ```bash
 ros2 launch hyper_lidar rplidar.launch.py

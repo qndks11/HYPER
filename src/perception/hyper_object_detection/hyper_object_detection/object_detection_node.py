@@ -71,7 +71,7 @@ class ObjectDetection(Node):
         super().__init__('object_detection')
 
         # -------------------- 파라미터 --------------------
-        self.declare_parameter('model_path', 'best.pt')
+        self.declare_parameter('model_path', 'best_track.pt')
         self.declare_parameter('confidence_threshold', 0.5)
 
         # 카메라 프레임 중 몇 프레임마다 한 번 추론할지
@@ -377,8 +377,8 @@ class ObjectDetection(Node):
         프레임부터 다시 그리므로, 주행 중에 rviz를 켜도 그대로 보입니다.
         (hyper_lane_detection의 디버그 이미지/포인트클라우드도 같은 방식입니다.)
         """
-        if self.annotated_image_publisher.get_subscription_count() == 0:
-            return
+        # if self.annotated_image_publisher.get_subscription_count() == 0:
+        #     return
 
         annotated_msg = self.bridge.cv2_to_imgmsg(
             result.plot(),
