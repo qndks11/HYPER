@@ -3,7 +3,7 @@
 
   ros2 launch hyper_waypoint_studio studio.launch.py
   ros2 launch hyper_waypoint_studio studio.launch.py mode:=drive \
-      mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_sim.yaml
+      mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_track.yaml
 
 주의: 이 머신의 VSCode 통합 터미널에서 GUI 노드를 띄우면 snap이 주입하는 GTK_PATH
 때문에 즉시 죽습니다. 그럴 때는 아래처럼 환경 변수를 걷어내고 실행하세요.
@@ -20,7 +20,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     default_csv = PathJoinSubstitution([
         EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-        'waypoints', 'simulation', 'sim1.csv'])
+        'waypoints', 'track', 'common_1.csv'])
 
     return LaunchDescription([
         DeclareLaunchArgument(

@@ -14,6 +14,7 @@
 
 import math
 import os
+import time
 
 from python_qt_binding.QtCore import Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QKeySequence
@@ -24,7 +25,9 @@ from python_qt_binding.QtWidgets import (
 
 from . import formats, geometry, items, ros_link, theme
 from .course_model import CourseModel
-from .items import CourseItem, HeadingItem, LabelMarker, OverlayItem, VehicleItem, WaypointHandle
+from .items import (
+    CostmapItem, CourseItem, HeadingItem, LabelMarker, OverlayItem, VehicleItem,
+    WaypointHandle)
 from .mission_model import MissionModel
 from .panels.drive_panel import DrivePanel
 from .panels.edit_panel import EditPanel
@@ -38,6 +41,14 @@ WAYPOINT_DIR = os.path.join(HYPER, 'src/planning/hyper_waypoint/waypoints')
 MISSION_DIR = os.path.join(HYPER, 'src/planning/hyper_planner/mission')
 COURSE_MESHES = os.path.join(
     HYPER, 'src/simulator/hyper_gazebo/worlds/models/driving_course/meshes')
+
+# 코스트맵이 이만큼 안 오면 감춥니다. nav2는 서 있어도 2 Hz로 계속 내므로, 끊겼다는
+# 것은 컨트롤러가 내려갔다는 뜻입니다. 옛날 위치에 얼어붙은 격자는 없느니만 못합니다.
+COSTMAP_STALE_S = 3.0
+
+# map <- odom을 이만큼 연달아 못 찾으면 그때 말합니다. 창을 먼저 띄웠을 때의
+# 시작 경합(latched 코스트맵이 /tf보다 빠름)으로 경고가 뜨지 않게 하는 값입니다.
+COSTMAP_WARN_AFTER = 3
 
 MODES = ('view', 'edit', 'record', 'drive')
 MODE_CAPTIONS = {'view': '보기', 'edit': '편집', 'record': '녹화', 'drive': '주행'}
@@ -96,6 +107,8 @@ class StudioWindow(QMainWindow):
         self._color_cursor = 0
         self._recorder_file = ''
         self._previous_points = []
+        self._costmap_seen = 0.0
+        self._costmap_misses = 0
 
         self._scene = StudioScene()
         self._view = StudioView(self._scene)
@@ -103,6 +116,10 @@ class StudioWindow(QMainWindow):
         self._view.clicked_at.connect(self._on_canvas_click)
         self._view.cursor_moved.connect(self._on_cursor_moved)
         self._view.follow_released.connect(self._on_follow_released)
+
+        # nav2가 보는 로컬 코스트맵. 배경 이미지 위, 코스 아래에 깔립니다.
+        self._costmap = CostmapItem()
+        self._scene.addItem(self._costmap)
 
         # 녹화 중인 경로와 미션이 보낸 경로. 코스 레이어와 구분되는 색으로 둡니다.
         self._live_path = CourseItem(theme.COLOR_PATH)
@@ -168,6 +185,7 @@ class StudioWindow(QMainWindow):
         self._overlay_panel.save_alignment.connect(self._save_alignment)
         self._overlay_panel.nudged.connect(self._nudge_overlay)
         self._overlay_panel.alpha_changed.connect(self._set_overlay_alpha)
+        self._overlay_panel.costmap_alpha_changed.connect(self._costmap.setOpacity)
         self._overlay_panel.fit_requested.connect(self._frame_all)
 
         self._edit = EditPanel()
@@ -281,6 +299,13 @@ class StudioWindow(QMainWindow):
         self._headings_action.setChecked(True)
         self._headings_action.toggled.connect(self._refresh_geometry)
         view_menu.addAction(self._headings_action)
+        self._costmap_action = QAction('로컬 코스트맵', self)
+        self._costmap_action.setCheckable(True)
+        self._costmap_action.setChecked(True)
+        self._costmap_action.setStatusTip(
+            f'nav2가 보는 {ros_link.COSTMAP_TOPIC}. controller_server가 active여야 옵니다.')
+        self._costmap_action.toggled.connect(lambda _: self._apply_costmap_visibility())
+        view_menu.addAction(self._costmap_action)
 
     def _build_toolbar(self):
         bar = self.addToolBar('mode')
@@ -306,6 +331,7 @@ class StudioWindow(QMainWindow):
         link.mission_path.connect(self._on_mission_path)
         link.mission_steps.connect(self._drive.set_steps_from_node)
         link.vehicle_pose.connect(self._on_vehicle_pose)
+        link.costmap.connect(self._on_costmap)
         link.call_finished.connect(self._on_call_finished)
         if not link.available:
             self._record.set_disconnected(link.reason)
@@ -402,7 +428,7 @@ class StudioWindow(QMainWindow):
             if not csv:
                 continue
             # 1순위: 미션이 적은 경로가 연 파일의 꼬리와 그대로 맞는 것. 폴더까지 같으므로
-            # 이름만 같은 다른 폴더의 CSV(simulation/sim.csv <-> track/sim.csv)와 헷갈리지
+            # 이름만 같은 다른 폴더의 CSV(school/common_1.csv <-> track/common_1.csv)와 헷갈리지
             # 않습니다.
             tail = csv.lstrip('./')
             if path == csv or path.endswith(os.sep + tail):
@@ -863,15 +889,27 @@ class StudioWindow(QMainWindow):
                 return
         try:
             extent = formats.read_obj_extent(quad)
+            # 쿼드는 이제 용인 트랙에 맞춰 돌아가 있습니다. 크기(그리고 텍스처가
+            # 늘어난 비율)는 ground.obj가, 그 쿼드를 map 어디에 어떤 각도로 놓을지는
+            # course.align.yaml이 들고 있습니다 -- 둘 다 fit_to_track.py가 만듭니다.
+            cx, cy, width_m, rot_deg = formats.load_alignment(texture, [], [])
             data, width, height = formats.load_background(texture)
         except Exception as exc:              # noqa: BLE001
             QMessageBox.warning(self, '배경을 못 읽었습니다', str(exc))
             return
         self._install_overlay(texture, data, width, height)
-        self._overlay_item.set_extent(extent)
-        self._overlay_alignable = False
-        self._overlay_dirty = False
-        self._overlay_panel.set_overlay(texture, alignable=False)
+        x0, x1, y0, y1 = extent
+        quad_w, quad_h = abs(x1 - x0), abs(y1 - y0)
+        # set_extent와 같은 계산입니다: 이미지 종횡비가 아니라 쿼드 종횡비를 따릅니다.
+        sy_ratio = (quad_h / quad_w) / self._overlay_item.aspect
+        # 폭은 사이드카 값을 씁니다. 정렬을 저장했지만 아직 fit_to_track.py
+        # --apply-alignment로 반영하지 않았으면 ground.obj 폭과 다르고, 그때 보여야
+        # 하는 것은 맞춘 자리입니다. 반영한 뒤에는 둘이 같습니다.
+        self._overlay_item.set_alignment(cx, cy, width_m, rot_deg, sy_ratio)
+        # 시뮬 코스도 맞출 수 있습니다 -- 맞춘 값은 월드에 반영해야 시뮬이 따라갑니다.
+        self._overlay_alignable = True
+        self._overlay_dirty = abs(width_m - quad_w) > 1e-3
+        self._push_overlay_readout()
         self._frame_all()
 
     def _browse_overlay(self):
@@ -943,7 +981,10 @@ class StudioWindow(QMainWindow):
             return
         self._overlay_dirty = False
         self._push_overlay_readout()
-        self.statusBar().showMessage(f'{os.path.basename(path)} 저장됨', 5000)
+        message = f'{os.path.basename(path)} 저장됨'
+        if os.path.dirname(os.path.abspath(path)) == os.path.abspath(COURSE_MESHES):
+            message += ' -- 시뮬에 반영하려면 fit_to_track.py --apply-alignment'
+        self.statusBar().showMessage(message, 10000)
 
     # ================================================================== 저장
     def _save_course(self, as_new):
@@ -1164,6 +1205,30 @@ class StudioWindow(QMainWindow):
         self._vehicle.set_stale(False)
         self._view.follow_to(x, y)
 
+    def _on_costmap(self, grid):
+        """None이면 map <- odom을 못 구했다는 뜻입니다(ros_link._on_costmap)."""
+        if grid is None:
+            self._costmap.setVisible(False)
+            # 창을 먼저 띄우면 latched 코스트맵이 /tf보다 먼저 옵니다. 그 한두 장으로
+            # 경고를 띄우면 곧 멀쩡해질 것을 문제처럼 보여 주게 됩니다.
+            self._costmap_misses += 1
+            if self._costmap_misses == COSTMAP_WARN_AFTER:
+                self.statusBar().showMessage(
+                    '코스트맵은 왔지만 map <- odom 변환이 없습니다 -- 놓을 자리를 모릅니다.',
+                    6000)
+            return
+        if self._costmap_misses >= COSTMAP_WARN_AFTER:
+            self.statusBar().clearMessage()
+        self._costmap_misses = 0
+        if not self._costmap.set_grid(**grid):
+            return
+        self._costmap_seen = time.monotonic()
+        self._apply_costmap_visibility()
+
+    def _apply_costmap_visibility(self):
+        fresh = (time.monotonic() - self._costmap_seen) < COSTMAP_STALE_S
+        self._costmap.setVisible(self._costmap_action.isChecked() and fresh)
+
     # ================================================================== 화면 고정
     def _set_follow(self, follow):
         known = self._view.set_follow(follow)
@@ -1185,6 +1250,7 @@ class StudioWindow(QMainWindow):
     def _poll(self):
         if not self._link.available:
             return
+        self._apply_costmap_visibility()
         self._link.drop_stale_calls()
         ready = self._link.service_ready(f'{self._link.manager_ns}/start')
         self._drive.set_services_ready(

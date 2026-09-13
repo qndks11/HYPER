@@ -12,6 +12,9 @@
   <depend>ignition-gazebo6</depend>
 
   <exec_depend>hyper_control</exec_depend>
+  <!-- config/datums.yaml을 읽어 월드의 <spherical_coordinates>와 대조합니다
+       (launch/vehicle.launch.py의 _check_world_datum_matches). -->
+  <exec_depend>hyper_localization</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>joint_state_publisher</exec_depend>

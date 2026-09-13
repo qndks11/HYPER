@@ -37,6 +37,10 @@ class OverlayItem(QGraphicsPixmapItem):
                    녹화한 웨이포인트가 차선 위에 얹힙니다.
       align  모드: 중심 + 가로 폭(m) + 회전. 항공사진처럼 지오레퍼런스가 아예
                    없는 이미지를 손으로 맞춘 값이고 .align.yaml에 있습니다.
+
+    Gazebo 코스 텍스처는 이제 두 가지가 다 필요합니다 -- 쿼드가 용인 트랙에 맞춰
+    69.8도 돌아가 있으면서(align) 텍스처는 여전히 쿼드 종횡비로 늘어나 있어서
+    (extent) sy_ratio를 같이 넘깁니다.
     """
 
     def __init__(self, rgb_bytes, width_px, height_px):
@@ -69,11 +73,17 @@ class OverlayItem(QGraphicsPixmapItem):
         self._sy_ratio = (abs(y1 - y0) / self.width_m) / self.aspect
         self.apply()
 
-    def set_alignment(self, cx, cy, width_m, rot_deg):
+    def set_alignment(self, cx, cy, width_m, rot_deg, sy_ratio=1.0):
+        """중심/가로 폭/회전으로 놓습니다.
+
+        sy_ratio는 세로/가로 축척 비입니다. 항공사진처럼 원본 종횡비를 지켜야 하는
+        이미지는 기본값 1.0이고, 쿼드에 늘려 붙인 텍스처는 set_extent와 같은 식으로
+        구한 값을 넘깁니다.
+        """
         self.cx, self.cy = float(cx), float(cy)
         self.width_m = float(width_m)
         self.rot_deg = float(rot_deg)
-        self._sy_ratio = 1.0
+        self._sy_ratio = float(sy_ratio)
         self.apply()
 
     def apply(self):
@@ -109,9 +119,11 @@ class CostmapItem(QGraphicsPixmapItem):
     격자는 셀당 한 바이트이고 값이 곧 색이므로, Format_Indexed8 + 색표로 올립니다
     -- 400x400짜리를 2 Hz로 받는데 파이썬에서 픽셀을 돌면 창이 멈춥니다.
 
-    배치가 OverlayItem과 같은 이유로 까다롭습니다. 씬은 +y가 위인데 QImage는 0행이
-    맨 위이고, OccupancyGrid는 0행이 origin(제일 아래)입니다. 그래서 픽셀을 뒤집지
-    않고 세로 축척을 음수로 두고, offset으로 origin이 왼쪽 아래에 오게 맞춥니다.
+    배치는 OverlayItem과 반대입니다. OccupancyGrid의 0행은 origin 행(제일 아래)인데
+    QImage의 0행은 맨 위이므로, 이 이미지는 그림으로 보면 뒤집혀 있습니다 -- 그리고
+    그것이 정확히 뷰의 scale(1, -1)이 되돌리는 뒤집기입니다. 그래서 여기서는 세로
+    축척이 양수입니다(사진을 놓는 OverlayItem은 음수여야 합니다). 회전이 섞일 때도
+    이쪽이 맞습니다. 음수 축척은 좌우가 뒤집힌 좌표계를 돌리게 됩니다.
     """
 
     def __init__(self):
@@ -146,10 +158,10 @@ class CostmapItem(QGraphicsPixmapItem):
         image.setColorTable(self._table)
         # fromImage가 복사하므로 buffer를 들고 있을 필요는 없습니다.
         self.setPixmap(QPixmap.fromImage(image))
-        self.setOffset(0.0, -float(height))
+        # offset은 기본값 (0,0) 그대로입니다: 이미지 0행 0열이 곧 격자 origin입니다.
         self.setTransform(
             QTransform().translate(x, y).rotate(math.degrees(yaw))
-            .scale(resolution, -resolution))
+            .scale(resolution, resolution))
         return True
 
 

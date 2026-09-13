@@ -53,24 +53,24 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'world', default_value=default_world_path,
             description='Specify the world file for Gazebo'),
-        DeclareLaunchArgument('x', default_value='41.0866', description='Initial X position'),
-        DeclareLaunchArgument('y', default_value='-45.6842', description='Initial Y position'),
+        DeclareLaunchArgument('x', default_value='35.5508', description='Initial X position'),
+        DeclareLaunchArgument('y', default_value='16.6373', description='Initial Y position'),
         DeclareLaunchArgument('z', default_value='0.36', description='Initial Z position'),
         DeclareLaunchArgument('R', default_value='0.00', description='Initial Roll'),
         DeclareLaunchArgument('P', default_value='0.00', description='Initial Pitch'),
-        DeclareLaunchArgument('Y', default_value='1.64', description='Initial Yaw'),
+        DeclareLaunchArgument('Y', default_value='2.8461', description='Initial Yaw'),
         DeclareLaunchArgument(
             'rosbridge_port', default_value='9090',
             description='TCP port for the rosbridge websocket server'),
         DeclareLaunchArgument(
-            'datum_site', default_value='sim',
+            'datum_site', default_value='track',
             description="GPS origin for navsat_transform, keyed into hyper_localization's "
-                        "config/datums.yaml (e.g. 'sim', 'school', 'track')."),
+                        "config/datums.yaml ('school' or 'track')."),
         DeclareLaunchArgument(
             'waypoint_csv',
             default_value=PathJoinSubstitution([
                 EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-                'waypoints', 'sim.csv']),
+                'waypoints', 'track', 'recorded.csv']),
             description='CSV to write recorded waypoints to (truncated when Record is pressed)'),
         DeclareLaunchArgument(
             'min_spacing_m', default_value='0.5',

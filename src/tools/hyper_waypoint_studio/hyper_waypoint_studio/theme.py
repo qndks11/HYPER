@@ -33,6 +33,8 @@ COURSE_COLORS = (
 #   -1(255)  모름             -> 투명
 # drivable_area_layer가 쓰는 200은 여기서 78-79로 들어옵니다(주황빛 빨강). 라이다
 # lethal(자홍)과 색이 달라서 차선 밖 영역인지 실제 장애물인지 구분이 됩니다.
+
+
 def costmap_color_table():
     """QImage.setColorTable에 넣을 256칸 0xAARRGGBB 목록."""
     table = [0x00000000] * 256

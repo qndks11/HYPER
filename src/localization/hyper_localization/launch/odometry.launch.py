@@ -160,8 +160,9 @@ def generate_launch_description():
             'use_sim_time', default_value='true',
             description='시뮬레이션은 true, 실차는 false'),
         DeclareLaunchArgument(
-            'datum_site', default_value='sim',
-            description="GPS origin to use, keyed into config/datums.yaml (e.g. 'sim', "
-                        "'school', 'track')."),
+            'datum_site', default_value='track',
+            description="GPS origin to use, keyed into config/datums.yaml "
+                        "('school' or 'track'). 시뮬도 track을 씁니다 -- Gazebo "
+                        "월드가 용인 트랙과 같은 map 좌표를 쓰기 때문입니다."),
         OpaqueFunction(function=lambda context: _launch_setup(context, config, datums_yaml)),
     ])

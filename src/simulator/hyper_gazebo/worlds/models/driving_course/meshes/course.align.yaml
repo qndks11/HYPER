@@ -1,0 +1,7 @@
+# waypoint studio의 정렬 모드가 저장한 배경 이미지 위치입니다.
+# image: course.png
+# 이미지 중심의 map 좌표(m), 이미지 가로 폭(m), 반시계 회전각(도).
+center_x: -11.9547
+center_y: -5.0617
+width_m: 92.9319
+rotation_deg: 70.2424

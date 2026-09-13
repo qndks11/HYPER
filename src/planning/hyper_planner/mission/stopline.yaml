@@ -3,14 +3,17 @@ label_snap_tolerance_m: 1.0
 
 courses:
   main:
-    # 아래 라벨 좌표는 이 CSV의 것입니다(stopline_1 = #26, course_end = #55).
-    # 코스를 바꾸면 라벨도 같이 옮겨야 합니다 -- 스냅 허용치를 넘으면 로드가 거부됩니다.
-    csv: school/test.csv
+    # 정지선 거동만 따로 보는 스크래치 미션입니다. 원래 school/test.csv를 가리켰는데
+    # 그 기록이 트리에서 사라져(커밋 2d09347에 들어왔다가 지워짐) 로드 자체가 안 되던
+    # 상태였습니다. 지금은 실차 트랙의 좌측 출발 갈래를 씁니다 -- 라벨도 같이
+    # mission_track.yaml의 stopline_left로 옮겼습니다.
+    # 이 CSV의 0번 행: x:=35.5508 y:=16.6373 Y:=2.8461 (스폰 기본값과 같습니다)
+    csv: track/start_left.csv
 
 labels:
   # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
-  stopline_1: {x: -22.368, y: 26.615}   # wp #26
-  course_end: {x: -37.995, y: 25.370}   # wp #55
+  stopline_1: {x: 3.028, y: 27.858}   # wp #52
+  course_end: last
 
 steps:
   - {type: drive, until: stopline_1, goal_checker: precise_goal_checker,

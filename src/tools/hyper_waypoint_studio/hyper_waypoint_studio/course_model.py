@@ -21,7 +21,7 @@ class CourseModel:
         self.frame_id = frame_id
         self.color = color
         self.visible = True
-        # 미션의 어느 코스인지(main / sim_left / ...). 라벨 스냅 거리는 자기 코스에
+        # 미션의 어느 코스인지(main / start_left / ...). 라벨 스냅 거리는 자기 코스에
         # 대해서만 의미가 있으므로, 묶이지 않은 코스에는 거리를 표시하지 않습니다.
         self.mission_course = None
 

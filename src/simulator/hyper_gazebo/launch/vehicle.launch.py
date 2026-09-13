@@ -8,6 +8,7 @@ from launch import LaunchDescription
 from launch.actions import (
     IncludeLaunchDescription,
     DeclareLaunchArgument,
+    OpaqueFunction,
     RegisterEventHandler,
     ExecuteProcess,
     SetEnvironmentVariable
@@ -33,6 +34,44 @@ def load_robot_description(robot_description_path, vehicle_params_path):
     )
 
     return robot_description.toxml()
+
+
+def _check_world_datum_matches(context, *_args, **_kwargs):
+    """월드의 <spherical_coordinates>가 datums.yaml의 원점과 같은지 확인합니다.
+
+    gz navsat 센서는 월드 좌표에서 위경도를 만들고, navsat_transform은 datum
+    위경도에서 map 원점을 잡습니다. 두 값이 어긋나면 map 프레임이 Gazebo 월드에서
+    통째로 밀리는데, 토픽은 멀쩡히 나오고 TF도 정상으로 보여서 증상이 "웨이포인트를
+    따라가는데 자꾸 옆으로 샌다"로만 나타납니다. 조용히 하루를 태우는 종류의
+    실수라 띄울 때 바로 잡습니다.
+
+    실패해도 launch를 죽이지는 않습니다 -- 직접 만든 월드로 실험하는 경우가 있고,
+    그때 경고만 보고 넘어갈 수 있어야 합니다.
+    """
+    import re
+
+    world_path = LaunchConfiguration('world').perform(context)
+    try:
+        datums_path = os.path.join(
+            get_package_share_directory('hyper_localization'), 'config', 'datums.yaml')
+        with open(datums_path) as handle:
+            datum = yaml.safe_load(handle)['datums']['track']
+        with open(world_path) as handle:
+            world = handle.read()
+        lat = float(re.search(r'<latitude_deg>([^<]+)</latitude_deg>', world).group(1))
+        lon = float(re.search(r'<longitude_deg>([^<]+)</longitude_deg>', world).group(1))
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"[vehicle.launch] datum 대조를 건너뜁니다: {exc}")
+        return []
+
+    # 1e-7도 ~= 1 cm. 이보다 크게 다르면 사람이 한쪽만 고친 것입니다.
+    if (abs(lat - datum['latitude_deg']) > 1e-7
+            or abs(lon - datum['longitude_deg']) > 1e-7):
+        print("\n[vehicle.launch] *** 월드와 datums.yaml의 원점이 다릅니다 ***\n"
+              f"      {os.path.basename(world_path)}: {lat}, {lon}\n"
+              f"      datums.yaml[track]:  {datum['latitude_deg']}, {datum['longitude_deg']}\n"
+              "      map 프레임이 Gazebo 월드에서 밀린 채로 돕니다. 한쪽을 맞추세요.\n")
+    return []
 
 
 def start_vehicle_control():
@@ -166,15 +205,18 @@ def generate_launch_description():
         "'.lower() in ('true', '1') else ''"
     ])
 
+    # 스폰 기본값은 track/start_left.csv의 0번 웨이포인트, 즉 실차가 실제로
+    # 출발선에 섰던 자리입니다. 월드가 용인 트랙과 같은 map 좌표를 쓰게 된
+    # 뒤로는 sim과 실차가 같은 지점에서 같은 미션을 시작합니다.
     x_arg = DeclareLaunchArgument(
         'x',
-        default_value='41.0866',
+        default_value='35.5508',
         description='Initial X position'
     )
 
     y_arg = DeclareLaunchArgument(
         'y',
-        default_value='-45.6842',
+        default_value='16.6373',
         description='Initial Y position'
     )
 
@@ -198,7 +240,7 @@ def generate_launch_description():
 
     yaw_arg = DeclareLaunchArgument(
         'Y',
-        default_value='1.64',
+        default_value='2.8461',
         description='Initial Yaw'
     )
 
@@ -311,6 +353,17 @@ def generate_launch_description():
         output='screen'
     )
 
+    # ekf_global의 절대 방위 관측(imu1 = /imu/heading)은 실차에서 듀얼 GNSS가
+    # 냅니다. sim에는 두 번째 안테나가 없으므로 gz IMU의 ENU yaw를 같은 토픽으로
+    # 중계해 그 자리를 채웁니다 -- 이게 없으면 sim의 map yaw가 0에서 시작해
+    # 월드와 어긋납니다. 자세한 사정은 scripts/sim_heading.py 참고.
+    sim_heading_node = Node(
+        package='hyper_gazebo',
+        executable='sim_heading.py',
+        parameters=[{'use_sim_time': True}],
+        output='screen'
+    )
+
     joint_state, forward_velocity, forward_position = start_vehicle_control()
 
     vehicle_controller_node = Node(
@@ -360,6 +413,7 @@ def generate_launch_description():
         ),
 
         world_arg,
+        OpaqueFunction(function=_check_world_datum_matches),
         headless_arg,
         gazebo_launch,
 
@@ -378,6 +432,7 @@ def generate_launch_description():
         model_service_node,
         teleport_service_node,
         lane_sign_service_node,
+        sim_heading_node,
     ])
 
     return launch_description

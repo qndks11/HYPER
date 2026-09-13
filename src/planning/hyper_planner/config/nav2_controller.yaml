@@ -191,7 +191,7 @@ controller_server:
       #      vx_std = vx_max * 0.21,  wz_std = wz_max * 0.26
       #      gamma  = vx_std^2 * 0.0567   (= 순항속도 7.1 m/s 유지)
       #    2.22로 되돌릴 때: wz_max 1.71, vx_std 0.47, wz_std 0.44, gamma 0.0125.
-      vx_max: 1.0   # 임시 저속 테스트 (원래 2.22)
+      vx_max: 2.22   # 임시 저속 테스트 (원래 2.22)
       vx_min: 0.0
       wz_max: 0.77
       # vx_std/wz_std는 위 gamma 주석의 한 묶음입니다(gamma와 함께만 바꾸세요).

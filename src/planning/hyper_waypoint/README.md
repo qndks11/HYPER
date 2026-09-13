@@ -77,8 +77,8 @@ ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/H
 ```bash
 # 코스를 시뮬 텍스처 위에 올리고 미션 라벨을 찍기
 ros2 run hyper_waypoint_studio waypoint_studio \
-  src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
-  --mission src/planning/hyper_planner/mission/mission_sim.yaml \
+  src/planning/hyper_waypoint/waypoints/track/common_1.csv \
+  --mission src/planning/hyper_planner/mission/mission_track.yaml \
   --overlay gazebo --mode edit
 
 # 실차 코스를 항공사진 위에 (정렬값은 real_course.align.yaml)
@@ -87,7 +87,7 @@ ros2 run hyper_waypoint_studio waypoint_studio \
   --overlay src/simulator/hyper_gazebo/worlds/models/driving_course/meshes/real_course.png
 ```
 
-여러 코스를 한 화면에 겹쳐 볼 수 있으므로, 분기 코스(`sim_left.csv` / `sim_right.csv`)의
+여러 코스를 한 화면에 겹쳐 볼 수 있으므로, 분기 코스(`t_left.csv` / `t_right.csv`)의
 이음매를 눈으로 확인할 수 있습니다. 점을 끌어 고칠 때 후진 녹화 구간의 헤딩이 보존되는
 방식과 라벨 스냅 경고는 스튜디오 README를 보세요.
 
@@ -95,8 +95,9 @@ ros2 run hyper_waypoint_studio waypoint_studio \
 
 ```
 waypoints/
-  simulation/   시뮬 코스 (sim1.csv가 mission_sim.yaml의 짝입니다)
-  track/        실차 트랙 코스 -- 녹화 원본과 손으로 정리한 코스가 함께 있습니다
+  track/        용인 트랙 코스 (mission_track.yaml의 짝). Gazebo 월드가 이 트랙의
+                디지털 트윈이라 **시뮬과 실차가 이 폴더를 같이 씁니다** -- 시뮬 전용
+                코스 폴더는 없습니다. 녹화 원본과 손으로 정리한 코스가 함께 있습니다
                 (스튜디오의 "다른 이름으로 저장" 기본 위치)
   school/       교내 코스
 ```

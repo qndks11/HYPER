@@ -373,7 +373,7 @@ private:
   //
   // (1)은 main이 있는 미션의 편의입니다: 갈래 CSV를 main과 같은 폴더에 두면 파일 이름만
   // 적으면 되고, courses.main.csv 한 줄을 다른 폴더로 바꾸면 갈래도 통째로 따라갑니다
-  // (mission_sim.yaml이 이렇게 씁니다). main이 없는 미션에는 이 후보가 없으므로 코스마다
+  // (simple.yaml이 이렇게 씁니다). main이 없는 미션에는 이 후보가 없으므로 코스마다
   // waypoints_dir 기준 경로를 적습니다.
   std::string resolve_csv_path(const std::string & given) const
   {
@@ -464,7 +464,7 @@ private:
 
     // main은 선택입니다. 있으면 세 가지를 겸합니다: course:를 안 적은 스텝의 기본 코스,
     // 최상위 labels:의 임자, 그리고 나머지 코스의 상대 경로 기준 디렉터리. 코스가 하나뿐인
-    // 미션(simple.yaml)과 갈래만 따로 녹화한 미션(mission_sim.yaml)이 이 모양입니다.
+    // 미션(simple.yaml)과 갈래만 따로 녹화한 미션이 이 모양입니다.
     //
     // 조각을 이어 붙이는 미션(mission_track.yaml)에는 "그 미션이 달리는 코스" 하나가
     // 없습니다. 그런 미션은 main을 두지 않고 코스마다 waypoints_dir 기준 경로를 적으며,

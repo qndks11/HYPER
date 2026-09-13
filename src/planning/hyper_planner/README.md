@@ -11,7 +11,7 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
   `input_timeout`(0.3초) 워치독이 있어 목표가 없으면 차가 섭니다 -- 이것이 `stop` 스텝의 정지 방식입니다.
 - `follow_path_client_node`: 코스 전체를 목표 하나로 보내던 예전 노드입니다. **레거시** -- 아래
   [follow_path_client_node (레거시)](#follow_path_client_node-레거시) 참고.
-- `mission/mission_sim.yaml`: 대회 미션(시뮬). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
+- `mission/mission_track.yaml`: 대회 미션(용인 트랙). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의이며, 미션 포맷의 기준 문서이기도 합니다. Gazebo 월드가 이 트랙의 디지털 트윈이라 시뮬과 실차가 이 파일을 같이 씁니다.
 - `mission/mission_track.yaml`: 대회 미션(실차 트랙). 갈림길이 넷이라 `track/`의 조각 CSV들을
   `courses`/`routes`로 엮습니다. 실행에 `controller_vx_max:=2.22`가 필요합니다 -- 이유는 그
   파일 머리 주석에 있습니다.
@@ -122,7 +122,7 @@ n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 �
 장애물 회피는 스텝이 아닙니다. MPPI가 해당 `drive` 스텝 안에서 로컬 costmap을 보며 알아서 처리합니다.
 
 파일은 "어디서"(`labels`)와 "무엇을"(`steps`)로 나뉩니다. 각 필드의 의미와 튜닝 지침은
-[mission/mission_sim.yaml](mission/mission_sim.yaml)의 주석이 원본입니다 -- 여기서는 구조만 설명합니다.
+[mission/mission_track.yaml](mission/mission_track.yaml)의 주석이 원본입니다 -- 여기서는 구조만 설명합니다.
 
 ### 라벨과 세그먼트
 
@@ -251,7 +251,7 @@ routes:
 **미션이 달릴 코스는 `courses:`가 정합니다.** launch 인자로 넘기는 것이 아니므로, 어느 미션이
 어느 코스로 도는지는 미션 파일만 보면 됩니다. 이름은 자유이고 `main`만 특별합니다:
 
-- **`main`이 있는 미션** -- 코스가 사실상 하나인 미션(`simple.yaml`, `mission_sim.yaml`)이
+- **`main`이 있는 미션** -- 코스가 사실상 하나인 미션(`simple.yaml`, `stopline.yaml`)이
   이 모양입니다. `course:`를 안 적은 `drive` 스텝은 `main`을 달리고, 최상위 `labels:`가
   `main`의 라벨입니다.
 - **`main`이 없는 미션** -- 트랙을 조각으로 녹화해 이어 붙이는 미션(`mission_track.yaml`)에는
@@ -267,8 +267,7 @@ routes:
 (기본 `hyper_waypoint/waypoints`), (3) mission.yaml이 있는 디렉터리, (4) 준 그대로 순으로
 찾습니다. 기본은 (2)입니다 -- 코스마다 `track/common_1.csv`처럼 `waypoints/` 아래 상대 경로를
 적습니다(`mission_track.yaml`). (1)은 `main`이 있는 미션의 편의로, 갈래를 main과 같은 폴더에
-두면 파일 이름만 적어도 되고 코스 폴더를 옮길 때 `main` 한 줄만 고치면 갈래가 전부 따라옵니다
-(`mission_sim.yaml`).
+두면 파일 이름만 적어도 되고 코스 폴더를 옮길 때 `main` 한 줄만 고치면 갈래가 전부 따라옵니다.
 
 **갈래 CSV는 반드시 분기 지점에서 시작해야 합니다.** 첫 점이 분기 라벨에서
 `branch_seam_tolerance_m`(기본 2 m)보다 멀면 로드가 **거부**됩니다. 안 그러면 차가 분기 지점에서
@@ -571,7 +570,7 @@ abort 복구나 off-path 백스톱도 없습니다.
 
 ```bash
 ros2 launch hyper_planner follow_path_client.launch.py \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/sim.csv
+  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/recorded.csv
 ros2 service call /follow_path_client/start std_srvs/srv/Trigger    # CSV 다시 읽어 재전송
 ros2 service call /follow_path_client/cancel std_srvs/srv/Trigger   # 진행 중인 목표 취소
 ```

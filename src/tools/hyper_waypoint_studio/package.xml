@@ -17,6 +17,8 @@
   <depend>std_srvs</depend>
   <depend>nav_msgs</depend>
   <depend>rcl_interfaces</depend>
+  <!-- 코스트맵은 odom 프레임인데 씬은 map 프레임입니다(ros_link._on_costmap). -->
+  <depend>tf2_ros</depend>
 
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-numpy</exec_depend>

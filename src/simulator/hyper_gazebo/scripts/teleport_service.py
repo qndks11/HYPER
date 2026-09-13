@@ -10,9 +10,10 @@ model_service.py와 같은 방식입니다 -- 목적지는 요청 필드가 아�
 콤보 박스가 이 파라미터를 set_parameters로 바꾼 다음 Trigger를 부릅니다.
 
 좌표계: 라벨은 map 프레임인데 set_pose는 gz world 프레임입니다. 이 둘은 sim에서
-일치합니다 -- vehicle.launch.py의 스폰 기본값(41.0866, -45.6842, yaw 1.64)이
-코스 CSV의 웨이포인트 0번과 같은 점이기 때문입니다. 다른 데서 녹화한 코스를
-쓰거나 스폰 위치를 옮기면 이 전제가 깨집니다.
+일치합니다 -- track.world의 <spherical_coordinates>가 datums.yaml의 track 원점과
+같고 heading_deg가 0이라, map 원점과 축이 Gazebo 월드와 정확히 포개지기 때문입니다.
+월드의 위경도나 datum 중 한쪽만 고치면 이 전제가 조용히 깨집니다(vehicle.launch.py가
+띄울 때 둘을 대조해 경고합니다).
 
 EKF: 여기서는 아무것도 리셋하지 않습니다. ekf_local(엔코더+IMU)은 애초에 순간이동을
 못 보므로 odom 프레임은 그대로 이어지고, ekf_global이 점프한 /gps/fix를 물고
@@ -36,7 +37,7 @@ from std_srvs.srv import Trigger
 
 DEFAULT_MISSION_YAML = os.path.join(
     os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_planner',
-    'mission', 'mission_sim.yaml')
+    'mission', 'mission_track.yaml')
 DEFAULT_WAYPOINTS_DIR = os.path.join(
     os.path.expanduser('~'), 'HYPER', 'src', 'planning', 'hyper_waypoint', 'waypoints')
 
@@ -67,34 +68,64 @@ class TeleportService(Node):
 
     # ------------------------------------------------------------------ 데이터
 
-    def _load_labels(self):
+    def _mission(self):
         path = self.get_parameter('mission_yaml').value
         with open(path) as handle:
-            mission = yaml.safe_load(handle) or {}
-        labels = mission.get('labels') or {}
+            return path, (yaml.safe_load(handle) or {})
+
+    def _load_labels(self):
+        """{라벨 이름: (코스 이름, 값)}.
+
+        미션은 두 가지 모양으로 씁니다(mission_loader.hpp와 같은 규칙).
+          - main이 있는 미션(simple.yaml): 최상위 labels: 블록 하나.
+          - 조각을 이어 붙인 미션(mission_track.yaml): main이 없고 라벨이
+            courses.<이름>.labels에 흩어져 있습니다.
+        둘 다 받습니다. 헤딩을 빌려 올 CSV가 코스마다 다르므로 라벨마다 어느
+        코스의 것인지 같이 들고 다녀야 합니다 -- 안 그러면 엉뚱한 코스의 웨이포인트에서
+        방향을 가져옵니다.
+
+        이름이 두 코스에 겹치면 둘 다 '<코스>/<라벨>'로만 부를 수 있게 합니다.
+        """
+        path, mission = self._mission()
+        courses = mission.get('courses') or {}
+
+        found = {}                       # 이름 -> [(코스, 값), ...]
+        for name, value in (mission.get('labels') or {}).items():
+            found.setdefault(name, []).append(('main', value))
+        for course_name, course in courses.items():
+            for name, value in ((course or {}).get('labels') or {}).items():
+                found.setdefault(name, []).append((course_name, value))
+
+        labels = {}
+        for name, entries in found.items():
+            if len(entries) == 1:
+                labels[name] = entries[0]
+            else:
+                # 겹치는 이름은 정규화된 이름으로만 노출합니다(조용히 하나를 고르지 않습니다).
+                for course_name, value in entries:
+                    labels[f'{course_name}/{name}'] = (course_name, value)
         if not labels:
             raise ValueError(f'{path}에 labels가 없습니다')
         return labels
 
-    def _main_csv(self):
-        path = self.get_parameter('mission_yaml').value
-        with open(path) as handle:
-            mission = yaml.safe_load(handle) or {}
-        csv_path = ((mission.get('courses') or {}).get('main') or {}).get('csv')
+    def _csv_for_course(self, course_name):
+        path, mission = self._mission()
+        course = (mission.get('courses') or {}).get(course_name) or {}
+        csv_path = course.get('csv')
         if not csv_path:
-            raise ValueError(f'{path}에 courses.main.csv가 없습니다')
+            raise ValueError(f"{path}에 courses.{course_name}.csv가 없습니다")
         if os.path.isabs(csv_path):
             return csv_path
         return os.path.join(self.get_parameter('waypoints_dir').value, csv_path)
 
-    def _load_waypoints(self):
-        """main 코스의 CSV를 읽습니다.
+    def _load_waypoints(self, course_name):
+        """그 코스의 CSV를 읽습니다.
 
-        코스 이름은 mission.yaml의 courses.main.csv가 정합니다 -- mission_manager와
-        같은 곳을 봐야 라벨의 헤딩을 엉뚱한 코스에서 빌려 오지 않습니다.
-        상대 경로는 mission_loader.hpp와 같은 규칙으로 waypoints_dir 아래에서 찾습니다.
+        mission_manager와 같은 곳을 봐야 라벨의 헤딩을 엉뚱한 코스에서 빌려 오지
+        않습니다. 상대 경로는 mission_loader.hpp와 같은 규칙으로 waypoints_dir
+        아래에서 찾습니다.
         """
-        path = self._main_csv()
+        path = self._csv_for_course(course_name)
         points = []
         with open(path) as handle:
             for row in csv.DictReader(handle):
@@ -112,18 +143,27 @@ class TeleportService(Node):
         라벨에는 x/y만 있고 헤딩이 없습니다(코스를 다시 녹화해도 살아남게 하려고
         좌표만 저장합니다 -- mission.yaml 주석 참고). 그래서 헤딩은 CSV에서 가장
         가까운 웨이포인트의 yaw, 즉 녹화 당시 실제 차체 방향을 씁니다.
+
+        `last` 센티널(코스의 마지막 웨이포인트)도 좌표 대신 올 수 있습니다
+        -- mission_loader.hpp의 snap_labels와 같은 뜻입니다.
         """
         labels = self._load_labels()
         if label not in labels:
             raise ValueError(
                 f"라벨 '{label}'이 없습니다. 가능한 값: {', '.join(sorted(labels))}")
-        target = labels[label]
-        tx, ty = float(target['x']), float(target['y'])
+        course_name, target = labels[label]
+        points = self._load_waypoints(course_name)
 
-        points = self._load_waypoints()
-        nearest = min(
-            range(len(points)),
-            key=lambda i: (points[i][0] - tx) ** 2 + (points[i][1] - ty) ** 2)
+        if isinstance(target, str):
+            if target != 'last':
+                raise ValueError(f"라벨 '{label}'의 값 '{target}'을 모르겠습니다 (좌표 또는 'last')")
+            nearest = len(points) - 1
+            tx, ty = points[nearest][0], points[nearest][1]
+        else:
+            tx, ty = float(target['x']), float(target['y'])
+            nearest = min(
+                range(len(points)),
+                key=lambda i: (points[i][0] - tx) ** 2 + (points[i][1] - ty) ** 2)
 
         offset = float(self.get_parameter('offset_m').value)
         index = self._walk(points, nearest, offset) if offset else nearest

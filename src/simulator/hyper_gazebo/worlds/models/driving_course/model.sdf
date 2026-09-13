@@ -4,7 +4,10 @@
     <static>true</static>
     <link name="base">
 
-      <!-- flat photo ground (roads, markings, crosswalks): 74 x 100.8 m, 3 m lanes -->
+      <!-- flat photo ground (roads, markings, crosswalks): 92.58 x 110.64 m, 2.71 m lanes.
+           메시 좌표에는 fit_to_track.py의 등방 스케일 0.90320이 이미 구워져
+           있습니다(원래 102.5 x 122.5 m, 3 m 차로). 코스를 용인 트랙의 map
+           좌표로 옮기는 회전/평행이동은 track.world의 include <pose>에 있습니다. -->
       <visual name="ground_visual">
         <geometry>
           <mesh><uri>model://driving_course/meshes/ground.obj</uri></mesh>
@@ -12,7 +15,7 @@
       </visual>
       <collision name="ground_collision">
         <geometry>
-          <plane><normal>0 0 1</normal><size>74 100.8</size></plane>
+          <plane><normal>0 0 1</normal><size>92.58 110.64</size></plane>
         </geometry>
         <surface>
           <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>

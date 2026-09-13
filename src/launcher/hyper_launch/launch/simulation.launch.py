@@ -82,18 +82,19 @@ def generate_launch_description():
     return LaunchDescription([
         # 어떤 미션을 실을지. hyper_planner/mission/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
-        DeclareLaunchArgument('mission', default_value='mission_sim'),
-        # 차량 스폰 위치/방위(map 프레임). 기본은 sim.csv 시작점입니다. real.csv처럼
-        # 다른 곳에서 녹화한 경로를 시뮬에서 따라가려면 그 CSV의 0번 행 x/y/yaw로
-        # 스폰시켜야 리드인이 코스 전체를 가로지르는 직선으로 안 잡힙니다.
-        # 예: real.csv 시작점 -> x:=-18.7494 y:=27.8460 Y:=-1.8681
-        DeclareLaunchArgument('x', default_value='41.0866', description='Initial X position'),
-        DeclareLaunchArgument('y', default_value='-45.6842', description='Initial Y position'),
-        DeclareLaunchArgument('Y', default_value='1.64', description='Initial Yaw (rad)'),
+        DeclareLaunchArgument('mission', default_value='mission_track'),
+        # 차량 스폰 위치/방위(map 프레임). 기본은 track/start_left.csv 0번 행,
+        # 즉 실차가 출발선에 섰던 자리입니다. 다른 코스를 시뮬에서 따라가려면 그
+        # CSV의 0번 행 x/y/yaw로 스폰시켜야 리드인이 코스 전체를 가로지르는
+        # 직선으로 안 잡힙니다.
+        DeclareLaunchArgument('x', default_value='35.5508', description='Initial X position'),
+        DeclareLaunchArgument('y', default_value='16.6373', description='Initial Y position'),
+        DeclareLaunchArgument('Y', default_value='2.8461', description='Initial Yaw (rad)'),
         # navsat_transform 원점. hyper_localization/config/datums.yaml의 키
-        # (sim | school | track). 기본값 sim은 track.world의 <spherical_coordinates>와
-        # 맞는 시뮬 원점입니다. datum_site:=track이면 실차 트랙 좌표로 시뮬을 돌립니다.
-        DeclareLaunchArgument('datum_site', default_value='sim'),
+        # (school | track). track.world가 용인 트랙의 map 좌표를 그대로 쓰므로
+        # 시뮬도 실차와 같은 track 원점을 씁니다 -- 월드의
+        # <spherical_coordinates>와 반드시 같은 값이어야 합니다.
+        DeclareLaunchArgument('datum_site', default_value='track'),
         # headless:=true면 Gazebo 3D 창을 띄우지 않습니다. 센서 렌더링은 오프스크린으로
         # 그대로 돌아가므로 카메라/라이다 토픽은 동일하게 나오고, 시각화는 rviz로 하면 됩니다.
         DeclareLaunchArgument(
@@ -142,7 +143,7 @@ def generate_launch_description():
             stage('perception.launch.py', lane_input_backend='ros_raw',
                   drivable_area=LaunchConfiguration('drivable_area'))]),
         # 어느 코스를 달릴지는 mission이 고른 mission/<이름>.yaml의 courses:가
-        # 정합니다(예: mission_sim -> simulation/sim1.csv).
+        # 정합니다(예: mission_track -> track/*.csv).
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             behavior_stage(),
             mission_panel(),

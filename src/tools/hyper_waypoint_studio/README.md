@@ -4,7 +4,7 @@
 예전의 `label_waypoints.py`(라벨링)와 `waypoint_record_gui.py`(녹화 조작판)를 대체합니다.
 
 핵심은 "여러 코스를 한 캔버스에 겹쳐 놓는다"입니다. 탭이 아닙니다. 분기(branch) 코스가
-생긴 뒤로는 `sim1.csv`와 `sim_left.csv`/`sim_right.csv`를 **같이** 봐야 이음매가 보이는데,
+생긴 뒤로는 `common_1.csv`와 `t_left.csv`/`t_right.csv`를 **같이** 봐야 이음매가 보이는데,
 예전 도구는 어느 것도 코스를 두 개 이상 그리지 못했습니다.
 
 ## 실행
@@ -18,13 +18,13 @@ ros2 run hyper_waypoint_studio waypoint_studio
 
 # 코스와 미션을 열고 시뮬 코스 텍스처를 배경으로
 ros2 run hyper_waypoint_studio waypoint_studio \
-  src/planning/hyper_waypoint/waypoints/simulation/sim1.csv \
-  --mission src/planning/hyper_planner/mission/mission_sim.yaml \
+  src/planning/hyper_waypoint/waypoints/track/common_1.csv \
+  --mission src/planning/hyper_planner/mission/mission_track.yaml \
   --overlay gazebo --mode edit
 
 # launch로
 ros2 launch hyper_waypoint_studio studio.launch.py mode:=drive \
-  mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_sim.yaml
+  mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_track.yaml
 ```
 
 > **이 머신의 VSCode 통합 터미널에서는** snap이 주입하는 `GTK_PATH` 때문에 GUI가 즉시
@@ -95,7 +95,7 @@ pose가 들어오는 순간부터 따라갑니다.
   되지 않습니다. 녹화 대상이 지금 열려 있는 코스이고 그 코스에 저장 안 한 편집이 있으면
   녹화 시작을 **거부**합니다.
 - 미션 저장은 `labels:` 블록들만 **바이트 단위로** 갈아끼웁니다(코스마다 하나씩).
-  `mission_sim.yaml`은 300줄 가까운 한국어 튜닝 주석이 본문이라, PyYAML로 다시 쓰면
+  `mission_track.yaml`은 수백 줄짜리 한국어 튜닝 주석이 본문이라, PyYAML로 다시 쓰면
   그게 전부 날아갑니다. 연 뒤에 파일이 밖에서 바뀌었으면 저장을 거부하고 다시 읽을지
   묻습니다.
 - **열지 않은 코스의 라벨은 저장이 건드리지 않습니다.** 좌표는 그대로 다시 쓰이고,
@@ -171,7 +171,7 @@ CSV의 `yaw`는 EKF가 준 실제 **차체 헤딩**이고, `path_loader.hpp`의 
 나열하고 정말 저장할지 묻습니다.
 
 거리는 **그 라벨이 속한 코스**에 대고 재야만 의미가 있으므로, 코스 목록의 `미션 코스` 칸에서
-어느 코스가 미션의 `main` / `sim_left` / `sim_right`인지 묶습니다(파일 이름으로 자동 추정).
+어느 코스가 미션의 `main` / `t_left` / `t_right`인지 묶습니다(파일 이름으로 자동 추정).
 묶이지 않은 코스에는 거리를 표시하지 않습니다 -- 엉뚱한 코스에 대고 잰 거리는 없는 것보다
 나쁩니다.
 
@@ -190,6 +190,50 @@ CSV의 `yaw`는 EKF가 준 실제 **차체 헤딩**이고, `path_loader.hpp`의 
 - **정사영상**: 이미 지오레퍼런스된 이미지 + map 프레임 경계.
 
 정렬 패널에서 맞춘 뒤 **정렬 저장**을 눌러야 사이드카에 남습니다.
+
+### 시뮬 코스를 실차 기록에 맞추기
+
+`--overlay gazebo`로 연 시뮬 코스도 정렬 패널로 옮기고/키우고/돌릴 수 있습니다(쿼드
+종횡비 그대로 -- `course.png`를 이미지 열기로 따로 열면 약 5% 세로로 덜 늘어나 보입니다).
+**정렬 저장**은 `hyper_gazebo`의 `meshes/course.align.yaml`에 쓰지만, 그것만으로는 시뮬이
+바뀌지 않습니다. 월드/메시에 반영하려면:
+
+```bash
+src/simulator/hyper_gazebo/worlds/models/driving_course/fit_to_track.py --apply-alignment
+```
+
+그러면 `track.world`의 코스와 소품 위치, `ground.obj`/`hill.obj`, `model.sdf`가 새 변환으로
+다시 쓰입니다. 저장만 하고 반영하지 않은 동안에는 오버레이의 폭 옆에 `*`가 남습니다.
+
+## 로컬 코스트맵
+
+`보기 ▸ 로컬 코스트맵`(기본 켜짐)이 nav2 컨트롤러가 실제로 보는
+`/local_costmap/costmap`을 캔버스에 깔아 줍니다. 배색은 RViz의 Map 디스플레이 costmap
+배색을 그대로 옮겼으므로 `follow_path.rviz`와 나란히 놓고 봐도 같은 그림입니다.
+
+| 값 | 색 | 뜻 |
+| --- | --- | --- |
+| 0 / -1 | 투명 | 비어 있음 / 모름 |
+| 1-98 | 파랑 → 빨강 | inflation 기울기 |
+| 78-79 | 주황빛 빨강 | `drivable_area_layer`의 200 (차선 밖/오는 차선) |
+| 99 | 하늘 | inscribed (253) |
+| 100 | 자홍 | lethal (254) -- 라이다 장애물 |
+
+불투명도는 **배경** 독의 `코스트맵` 슬라이더입니다(배경 이미지가 없어도 씁니다).
+
+알아 둘 것 세 가지.
+
+- **`controller_server`가 active여야 나옵니다.** 안 보이면
+  `ros2 lifecycle get /controller_server`부터 보세요. 2 Hz로 계속 오는 토픽이라,
+  3초 넘게 끊기면 레이어를 감춥니다 -- 옛날 위치에 얼어붙은 격자는 없느니만 못합니다.
+- **놓는 자리는 TF가 정합니다.** 코스트맵의 `global_frame`은 `odom`(rolling window라
+  origin이 매 주기 움직입니다)인데 씬은 map 프레임입니다. 그래서 매 장 `map <- odom`을
+  찾아 origin을 옮깁니다. 그 변환이 없으면(전역 EKF가 안 떠 있으면) 그리지 않고 상태줄에
+  이유를 씁니다. 단위행렬로 치면 EKF 전역 보정만큼 어긋난 그림이 그럴듯하게 나오기
+  때문입니다.
+- **`always_send_full_costmap: true`에 기댑니다**(`nav2_controller.yaml`). 매번 전체
+  격자가 오므로 `/local_costmap/costmap_updates`는 구독하지 않습니다. 그 파라미터를 끄면
+  첫 장 이후로 화면이 멈춥니다.
 
 ## 주행 모드 -- 미션을 중간부터
 

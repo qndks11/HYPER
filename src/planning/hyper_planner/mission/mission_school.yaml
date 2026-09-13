@@ -1,12 +1,15 @@
-# HYPER 실차 미션 (용인 트랙) -- mission_manager_node가 읽습니다.
+# HYPER 실차 미션 (교내 코스) -- mission_manager_node가 읽습니다.
 #
-# 필드 하나하나의 뜻과 튜닝 지침은 mission/mission_sim.yaml의 주석이 원본입니다.
+# 필드 하나하나의 뜻과 튜닝 지침은 mission/mission_track.yaml의 주석이 원본입니다.
 # 여기서는 이 코스에만 해당하는 것 -- 코스가 어떻게 이어지는지, 어느 라벨이 아직
 # 가짜인지, 왜 컨트롤러가 구간마다 다른지 -- 만 적습니다.
 #
+# 이 미션은 datum_site:=school로 띄워야 합니다(기본값은 track입니다). Gazebo 월드는
+# 용인 트랙의 트윈이라 이 코스는 시뮬에 대응하는 지형이 없습니다 -- 실차 전용입니다.
+#
 # 실행:
 #   ros2 launch hyper_planner nav2_controller.launch.py
-#   ros2 launch hyper_planner mission.launch.py mission:=mission_track controller_vx_max:=2.22
+#   ros2 launch hyper_planner mission.launch.py mission:=mission_school controller_vx_max:=2.22
 #   ros2 service call /mission_manager/start std_srvs/srv/Trigger
 #
 # controller_vx_max:=2.22는 반드시 넘겨야 합니다. 기본값 1.0은 MPPI의 vx_max에 맞춘
@@ -16,11 +19,11 @@
 #
 # 코스 구성
 # ---------
-# 트랙은 한 번에 녹화되지 않았습니다. 갈림길마다 따로 녹화한 조각들이고, 이음매는
-# 전부 2 m 안입니다(측정값 -- 아래 숫자는 "앞 CSV의 끝 -> 뒤 CSV의 첫 점" 거리).
+# 코스는 한 번에 녹화되지 않았습니다. 갈림길마다 따로 녹화한 조각들이고, 이음매는
+# 전부 0.5 m 안입니다(측정값 -- 아래 숫자는 "앞 CSV의 끝 -> 뒤 CSV의 첫 점" 거리).
 #
-#   start_left  --0.65--> common_1 --0.50--> t_left  --0.54--> common_2 --0.41--> p_up   --0.57--> common_3 --1.04--> end_left
-#   start_right --1.79--> common_1 --0.50--> t_right --0.61--> common_2 --0.70--> p_down --1.23--> common_3 --0.64--> end_right
+#   start_left  --0.42--> common_1 --0.05--> t_left  --0.29--> common_2 --0.34--> p_up   --0.43--> common_3 --0.25--> end_left
+#   start_right --0.43--> common_1 --0.05--> t_right --0.21--> common_2 --0.03--> p_down --0.23--> common_3 --0.25--> end_right
 #
 #
 # 주의: studio는 labels: 블록을 **통째로 재작성**합니다. 라벨 옆에 손으로 쓴 설명을
@@ -45,7 +48,7 @@
 
 label_snap_tolerance_m: 1.0
 
-# 실제 최악 이음매는 end_left의 1.04 m입니다(common_3 끝 -> end_left 첫 점).
+# 실제 최악 이음매는 start_right의 0.43 m입니다(start_right 끝 -> common_1 첫 점).
 branch_seam_tolerance_m: 2.0
 
 # 이 미션에는 main 코스가 없습니다 -- 트랙이 조각으로 녹화되어 있어 "이 미션이 달리는

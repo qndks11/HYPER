@@ -158,7 +158,7 @@ def load_mission(path):
     """mission.yaml -> (raw_text, doc, required, positions, sentinels).
 
     raw_text를 들고 다니는 이유가 이 파일의 핵심입니다. 저장할 때 PyYAML로 다시
-    쓰면 mission_sim.yaml의 300줄짜리 튜닝 주석이 전부 날아가므로, labels 블록만
+    쓰면 mission_track.yaml의 수백 줄짜리 튜닝 주석이 전부 날아가므로, labels 블록만
     바이트 단위로 갈아끼웁니다(splice_labels).
 
     required / positions / sentinels는 전부 **코스 이름으로 묶인** dict입니다.

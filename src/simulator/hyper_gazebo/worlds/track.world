@@ -21,7 +21,7 @@
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
-      <pose>0 0 50 0 0 0</pose>
+      <pose>-12.1547 -6.0617 50.0000 0 0 1.21898</pose>
       <diffuse>1 1 1 1</diffuse>
       <specular>0.4 0.4 0.4 1</specular>
       <direction>-0.3 0.2 -0.9</direction>
@@ -30,202 +30,137 @@
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_1</name> 
-      <pose>-20.50 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>4.4252 -31.8717 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_2</name> 
-      <pose>-20.10 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>4.5497 -31.5325 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_3</name> 
-      <pose>-19.70 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>4.6742 -31.1934 0.0000 0.0 0.0 1.21898</pose>
     </include>
     
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_4</name> 
-      <pose>-19.30 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>4.7987 -30.8542 0.0000 0.0 0.0 1.21898</pose>
     </include>
     
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_5</name> 
-      <pose>-18.90 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>4.9232 -30.5151 0.0000 0.0 0.0 1.21898</pose>
     </include>
     
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_15</name> 
-      <pose>-18.50 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>5.0477 -30.1759 0.0000 0.0 0.0 1.21898</pose>
     </include>
     
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_16</name> 
-      <pose>-18.10 -27.08 0.0 0.0 0.0 0.0</pose>
+      <pose>5.1722 -29.8368 0.0000 0.0 0.0 1.21898</pose>
     </include>
-
-    <model name="yellow_cube_1">
-      <pose>-17.40 -27.08 0.5 0.0 0.0 0.0</pose>
-      <static>false</static> <link name="box_link">
-        <inertial>
-          <mass>1.0</mass>
-          <inertia>
-            <ixx>0.166667</ixx>
-            <iyy>0.166667</iyy>
-            <izz>0.166667</izz>
-            <ixy>0.0</ixy>
-            <ixz>0.0</ixz>
-            <iyz>0.0</iyz>
-          </inertia>
-        </inertial>
-
-        <collision name="box_collision">
-          <geometry>
-            <box>
-              <size>0.7 1.0 0.7</size> </box>
-          </geometry>
-        </collision>
-
-        <visual name="box_visual">
-          <geometry>
-            <box>
-              <size>0.7 1.0 0.7</size> </box>
-          </geometry>
-          <material>
-            <ambient>1.0 1.0 0.0 1.0</ambient>  <diffuse>1.0 1.0 0.0 1.0</diffuse>  
-            <specular>0.5 0.5 0.5 1.0</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_6</name> 
-      <pose>7.99 -45.20 0.0 0.0 0.0 0.0</pose>
+      <pose>28.6561 -13.3555 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_7</name> 
-      <pose>7.99 -44.70 0.0 0.0 0.0 0.0</pose>
+      <pose>28.2321 -13.1999 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_8</name> 
-      <pose>7.99 -44.20 0.0 0.0 0.0 0.0</pose>
+      <pose>27.8082 -13.0443 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_9</name> 
-      <pose>7.99 -43.70 0.0 0.0 0.0 0.0</pose>
+      <pose>27.3843 -12.8886 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_10</name> 
-      <pose>7.99 -43.20 0.0 0.0 0.0 0.0</pose>
+      <pose>26.9603 -12.7330 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_11</name> 
-      <pose>7.99 -42.70 0.0 0.0 0.0 0.0</pose>
+      <pose>26.5364 -12.5774 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_12</name> 
-      <pose>7.99 -42.20 0.0 0.0 0.0 0.0</pose>
+      <pose>26.1124 -12.4218 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_13</name> 
-      <pose>7.99 -41.70 0.0 0.0 0.0 0.0</pose>
+      <pose>25.6885 -12.2661 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
       <name>construction_cone_14</name> 
-      <pose>7.99 -41.20 0.0 0.0 0.0 0.0</pose>
+      <pose>25.2646 -12.1105 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
-    <model name="yellow_cube_2">
-      <pose>7.99 -40.00 0.5 0.0 0.0 0.0</pose>
-      <static>true</static> <link name="box_link">
-        <inertial>
-          <mass>1.0</mass>
-          <inertia>
-            <ixx>0.166667</ixx>
-            <iyy>0.166667</iyy>
-            <izz>0.166667</izz>
-            <ixy>0.0</ixy>
-            <ixz>0.0</ixz>
-            <iyz>0.0</iyz>
-          </inertia>
-        </inertial>
-
-        <collision name="box_collision">
-          <geometry>
-            <box>
-              <size>1.0 0.7 0.7</size> </box>
-          </geometry>
-        </collision>
-
-        <visual name="box_visual">
-          <geometry>
-            <box>
-              <size>1.0 0.7 0.7</size> </box>
-          </geometry>
-          <material>
-            <ambient>1.0 1.0 0.0 1.0</ambient>  <diffuse>1.0 1.0 0.0 1.0</diffuse>  
-            <specular>0.5 0.5 0.5 1.0</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-
+    <!-- 코스 전체를 용인 트랙의 map 좌표로 옮기는 자리/방향입니다.
+         fit_to_track.py가 구한 닮음변환의 회전+평행이동이고, 등방 스케일
+         0.90320은 메시(ground.obj, hill.obj) 좌표에 이미 구워 넣었습니다
+         (SDF <mesh><scale>을 쓰면 충돌 메시 쪽이 불안정해서입니다.) -->
     <include>
       <uri>model://driving_course</uri>
+      <pose>-12.1547 -6.0617 0 0 0 1.218980</pose>
     </include>
 
     <!-- Acceleration path obstacles.
-         Path runs from accel_start (-36.231, 41.459) to accel_end (-39.314, -34.026)
-         (see hyper_planner/mission/mission_sim.yaml); heading along the path is -1.6116 rad. -->
+         Path runs from accel_start (-53.250, -26.930) to accel_end (2.155, -49.931)
+         (see hyper_planner/mission/mission_track.yaml); heading along the path is -0.3934 rad. -->
 
     <!-- Pedestrian at the midpoint of the acceleration path, facing oncoming traffic. -->
     <include>
       <uri>model://person_standing</uri>
       <name>accel_pedestrian</name>
       <static>true</static>
-      <pose>-37.77 3.72 0.0 0.0 0.0 1.5708</pose>
+      <pose>-27.0644 -36.9281 0.0000 0.0 0.0 2.78978</pose>
     </include>
 
     <!-- Two parked vehicles along the acceleration path (positions to be tuned). -->
     <include>
       <uri>model://hatchback</uri>
       <name>accel_car_1</name>
-      <pose>-13.0460 18.0295 0.0 0.0 0.0 -2.5471</pose>
+      <pose>-31.5019 -11.5115 0.0000 0.0 0.0 -1.32812</pose>
     </include>
 
     <include>
       <uri>model://suv</uri>
       <name>accel_car_2</name>
-      <pose>-14.8779 30.8502 0.0 0.0 0.0 -0.3970</pose>
+      <pose>-42.9424 -9.0744 0.0000 0.0 0.0 0.82198</pose>
     </include>
 
     <include>
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_1</name>
-      <pose>-9.34 -4.57 0 0 0 0</pose>
+      <pose>-11.1869 -15.4033 0.0000 0 0 1.21898</pose>
       <plugin filename="libTrafficLightPlugin.so" name="hyper_gazebo::TrafficLightPlugin">
         <phase duration="6.0" color="red"/>
         <phase duration="4.0" color="red"/>
@@ -239,7 +174,7 @@
     <include>
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_2</name>
-      <pose>-6.49 -17.45 0 0 0 1.5707</pose>
+      <pose>0.6208 -16.9957 0.0000 0 0 2.78968</pose>
       <plugin filename="libTrafficLightPlugin.so" name="hyper_gazebo::TrafficLightPlugin">
         <phase duration="6.0" color="red"/>
         <phase duration="4.0" color="red"/>
@@ -253,7 +188,7 @@
     <include>
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_3</name>
-      <pose>11.56 -16.96 0 0 0 3.1416</pose>
+      <pose>5.8233 -1.5390 0.0000 0 0 4.36058</pose>
       <plugin filename="libTrafficLightPlugin.so" name="hyper_gazebo::TrafficLightPlugin">
         <phase duration="6.0" color="right_turn"/>
         <phase duration="4.0" color="yellow"/>
@@ -267,7 +202,7 @@
     <include>
       <uri>model://cantilevered_light</uri>
       <name>cantilevered_light_4</name>
-      <pose>7.37 3.58 0 0 0 4.71238</pose>
+      <pose>-12.8962 1.3013 0.0000 0 0 5.93136</pose>
       <plugin filename="libTrafficLightPlugin.so" name="hyper_gazebo::TrafficLightPlugin">
         <phase duration="1.0" color="yellow"/>
       </plugin>
@@ -278,20 +213,25 @@
     <include>
       <uri>model://lane_sign_arrow</uri>
       <name>lane_sign_arrow_1</name>
-      <pose>22.0435 -39.3746 3.2269 0 0 1.5211</pose>
+      <pose>28.0909 0.3732 3.2269 0 0 2.74008</pose>
     </include>
 
     <include>
       <uri>model://lane_sign_x</uri>
       <name>lane_sign_x_1</name>
-      <pose>18.7546 -39.2717 3.1832 0 0 1.5211</pose>
+      <pose>26.9800 -2.3833 3.1832 0 0 2.74008</pose>
     </include>
 
+    <!-- 이 값은 hyper_localization/config/datums.yaml의 `track` 항목과 **반드시**
+         같아야 합니다. gz navsat 센서는 월드 좌표에서 위경도를 만들고
+         navsat_transform은 datum 위경도에서 map 원점을 잡으므로, 둘이 어긋나면
+         map != Gazebo 월드가 되어 웨이포인트/미션 좌표가 통째로 밀립니다.
+         heading_deg는 0으로 둡니다: map X=East, Y=North (datums.yaml 참고). -->
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
       <world_frame_orientation>ENU</world_frame_orientation>
-      <latitude_deg>37.5665</latitude_deg>
-      <longitude_deg>126.9780</longitude_deg>
+      <latitude_deg>37.2887947</latitude_deg>
+      <longitude_deg>127.1072418</longitude_deg>
       <elevation>0</elevation>
       <heading_deg>0</heading_deg>
     </spherical_coordinates>

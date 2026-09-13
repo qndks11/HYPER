@@ -18,7 +18,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('nav2_params_file', default_value=default_nav2_params),
         DeclareLaunchArgument(
-            'mission', default_value='mission_sim',
+            'mission', default_value='mission_track',
             description='mission/<이름>.yaml 중 실행할 미션. 예: mission:=simple (한 바퀴)'),
         DeclareLaunchArgument('mission_yaml', default_value=default_mission_yaml),
         # mission_manager_node의 '~/start'는 여전히 사람이 직접 호출해야 합니다

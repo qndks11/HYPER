@@ -18,13 +18,23 @@ Run from this directory: python3 build_hill.py
 """
 import numpy as np
 
+# ---------- sim -> real track similarity scale ----------
+# 코스가 용인 트랙보다 10.7% 크게 그려져 있어서 fit_to_track.py가 구한 등방
+# 스케일을 메시 좌표에 구워 넣습니다. **입력 치수에** 곱하는 것이 중요합니다 --
+# 출력 정점의 XY만 나중에 줄이면 높이는 그대로라 경사가 1/s배로 가팔라지고
+# 법선이 틀어집니다. 여기서 줄이면 생성기가 알아서 맞는 법선을 계산합니다.
+# 마루 높이(PEAK_H)는 실물 경사로의 높이이므로 스케일하지 않습니다.
+SCALE = 0.90320
+
 # ---------- ground quad extents (must match meshes/ground.obj) ----------
-Xh, Yh = 51.25, 61.25  # world half-extents (m)
+Xh, Yh = 51.25 * SCALE, 61.25 * SCALE  # world half-extents (m)
 
 # ---------- hill footprint, derived from elevation.png red/blue boxes ----------
 # (see conversation / git history for the pixel->world derivation)
-RED = dict(xmin=37.243, xmax=45.626, ymin=1.200, ymax=25.007)
-BLUE = dict(xmin=37.712, xmax=46.095, ymin=-16.472, ymax=1.309)
+RED = dict(xmin=37.243 * SCALE, xmax=45.626 * SCALE,
+           ymin=1.200 * SCALE, ymax=25.007 * SCALE)
+BLUE = dict(xmin=37.712 * SCALE, xmax=46.095 * SCALE,
+            ymin=-16.472 * SCALE, ymax=1.309 * SCALE)
 
 X_MIN = min(RED['xmin'], BLUE['xmin'])
 X_MAX = max(RED['xmax'], BLUE['xmax'])

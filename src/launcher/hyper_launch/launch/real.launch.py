@@ -99,10 +99,10 @@ def generate_launch_description():
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
         #
         # 실차에서는 mission:=mission_track을 반드시 주세요. 미션 파일이 자기가 달릴
-        # 코스를 정하므로(courses:), 기본값 mission_sim으로 띄우면 실차에
-        # 시뮬레이션 코스(simulation/sim1.csv)가 그대로 실립니다:
+        # 코스를 정하므로(courses:), 엉뚱한 미션으로 띄우면 그 미션의 코스가
+        # 그대로 실립니다:
         #   ros2 launch hyper_launch real.launch.py mission:=mission_track
-        DeclareLaunchArgument('mission', default_value='mission_sim'),
+        DeclareLaunchArgument('mission', default_value='mission_track'),
         # navsat_transform의 GPS 원점. hyper_localization/config/datums.yaml의 키입니다.
         # 스테이지 기본값은 시뮬레이션 원점(sim)이라 실차 진입점에서는 여기서 덮어써야
         # 합니다 -- 대회장이 아닌 곳에서 돌릴 때는 datum_site:=school 처럼 바꾸세요.

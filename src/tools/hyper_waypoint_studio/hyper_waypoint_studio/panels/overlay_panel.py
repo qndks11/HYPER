@@ -34,6 +34,7 @@ class OverlayPanel(QWidget):
     save_alignment = Signal()
     nudged = Signal(float, float, float, float)   # dx, dy, scale, rot
     alpha_changed = Signal(float)
+    costmap_alpha_changed = Signal(float)
     fit_requested = Signal()
 
     def __init__(self):
@@ -68,6 +69,20 @@ class OverlayPanel(QWidget):
             lambda value: self.alpha_changed.emit(value / 100.0))
         alpha_row.addWidget(self._alpha, stretch=1)
         root.addLayout(alpha_row)
+
+        # 코스트맵은 배경 이미지가 아니지만 겹쳐 보는 대상이 같아서 여기 둡니다.
+        # 배경이 없어도 쓸 수 있어야 하므로 정렬 그룹과 달리 늘 켜져 있습니다.
+        costmap_row = QHBoxLayout()
+        costmap_row.addWidget(QLabel('코스트맵'))
+        self._costmap_alpha = QSlider(Qt.Horizontal)
+        self._costmap_alpha.setRange(10, 100)
+        self._costmap_alpha.setValue(60)
+        self._costmap_alpha.setToolTip(
+            '로컬 코스트맵 불투명도. 표시 여부는 보기 ▸ 로컬 코스트맵입니다.')
+        self._costmap_alpha.valueChanged.connect(
+            lambda value: self.costmap_alpha_changed.emit(value / 100.0))
+        costmap_row.addWidget(self._costmap_alpha, stretch=1)
+        root.addLayout(costmap_row)
 
         self._align_box = QGroupBox('정렬')
         self._align_box.setToolTip(
