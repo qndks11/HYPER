@@ -4,10 +4,12 @@
     <static>true</static>
     <link name="base">
 
-      <!-- flat photo ground (roads, markings, crosswalks): 92.58 x 110.64 m, 2.71 m lanes.
-           메시 좌표에는 fit_to_track.py의 등방 스케일 0.90320이 이미 구워져
-           있습니다(원래 102.5 x 122.5 m, 3 m 차로). 코스를 용인 트랙의 map
-           좌표로 옮기는 회전/평행이동은 track.world의 include <pose>에 있습니다. -->
+      <!-- flat aerial-photo ground (roads, markings, crosswalks): 121.2454 x 100.8239 m.
+           Textured directly with meshes/real_course.png, a true-scale aerial photo of
+           the track that's already registered to the map frame (see
+           meshes/real_course.align.yaml, produced by the waypoint studio's align tool).
+           No similarity transform is baked into this mesh - the include <pose> in
+           track.world places it straight from that alignment (rotation 0). -->
       <visual name="ground_visual">
         <geometry>
           <mesh><uri>model://driving_course/meshes/ground.obj</uri></mesh>
@@ -15,24 +17,7 @@
       </visual>
       <collision name="ground_collision">
         <geometry>
-          <plane><normal>0 0 1</normal><size>92.58 110.64</size></plane>
-        </geometry>
-        <surface>
-          <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
-        </surface>
-      </collision>
-
-      <!-- smooth hill over the blue(up)/red(down) rectangles marked in meshes/elevation.png:
-           peak 1.5 m at the blue/red seam, tangent-flat at both ends, steep (vertical)
-           side walls at the road edges. See build_hill.py for the generator. -->
-      <visual name="hill_visual">
-        <geometry>
-          <mesh><uri>model://driving_course/meshes/hill.obj</uri></mesh>
-        </geometry>
-      </visual>
-      <collision name="hill_collision">
-        <geometry>
-          <mesh><uri>model://driving_course/meshes/hill.obj</uri></mesh>
+          <plane><normal>0 0 1</normal><size>121.2454 100.8239</size></plane>
         </geometry>
         <surface>
           <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>

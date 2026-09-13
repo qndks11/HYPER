@@ -123,13 +123,13 @@
       <pose>25.2646 -12.1105 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
-    <!-- 코스 전체를 용인 트랙의 map 좌표로 옮기는 자리/방향입니다.
-         fit_to_track.py가 구한 닮음변환의 회전+평행이동이고, 등방 스케일
-         0.90320은 메시(ground.obj, hill.obj) 좌표에 이미 구워 넣었습니다
-         (SDF <mesh><scale>을 쓰면 충돌 메시 쪽이 불안정해서입니다.) -->
+    <!-- 코스 전체를 용인 트랙의 map 좌표로 옮기는 자리입니다. real_course.png는
+         실제 항공사진이라 회전/스케일 보정이 필요 없고, 이 자리는 waypoint
+         studio의 align 도구로 구한 meshes/real_course.align.yaml의 값을 그대로
+         씁니다 (center_x, center_y, rotation_deg 0). -->
     <include>
       <uri>model://driving_course</uri>
-      <pose>-12.1547 -6.0617 0 0 0 1.218980</pose>
+      <pose>-5.1645 -5.2907 0 0 0 0</pose>
     </include>
 
     <!-- Acceleration path obstacles.

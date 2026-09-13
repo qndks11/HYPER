@@ -1,14 +1,3 @@
-# nav2 controller_server 설정 (follow_path 액션 서버).
-#
-# 차량 제원
-#   전장 1.33 m / 전폭 0.77 m (실측, body_link가 중심) -> footprint
-#   wheelbase 0.72 m (실측), max_steering_angle 0.5061455 rad (29도, 실측)
-#   -> 최소 회전 반경 R = wheelbase / tan(29도) = 1.30 m
-#
-# 프레임: map(ekf_global) -> odom(ekf_local) -> body_link
-# 출력: /cmd_vel (geometry_msgs/Twist). 차량은 /velocity + /steering_angle을 먹으므로
-#       cmd_vel_to_ackermann_node가 변환합니다.
-
 controller_server:
   ros__parameters:
     use_sim_time: true
@@ -156,7 +145,7 @@ controller_server:
       # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
       visualize: false
 
-      vx_max: 1.3   # 임시 저속 테스트 (원래 2.22)
+      vx_max: 1.3  
       vx_min: 0.0
       wz_max: 0.77
       # vx_std/wz_std는 위 gamma 주석의 한 묶음입니다(gamma와 함께만 바꾸세요).
@@ -469,8 +458,8 @@ local_costmap:
       global_frame: odom
       robot_base_frame: body_link
       rolling_window: true
-      width: 20
-      height: 20
+      width: 30
+      height: 30
       resolution: 0.05
       # body_link 중심 기준 전장 1.33 / 전폭 0.77 직사각형 (실측)
       footprint: "[[0.665, 0.385], [0.665, -0.385], [-0.665, -0.385], [-0.665, 0.385]]"
@@ -492,13 +481,6 @@ local_costmap:
         min_obstacle_height: -1.0
         observation_sources: scan
         # 전방 180도만 옵니다(vehicle.xacro: min/max_angle -pi/2..+pi/2, 360 samples).
-        # 따라서 아래 raytrace_max_range 20.0이 지우는 것도 앞쪽 절반뿐입니다.
-        #
-        # 후방 카메라를 걷어낸 뒤로 이것이 obstacle_layer의 유일한 관측 소스입니다. 차 뒤를
-        # 보는 센서가 없으므로, 후진 구간에서 local costmap의 뒤쪽은 "전진하며 마킹해 둔 것"과
-        # 빈 칸뿐입니다 -- 그리고 그 셀들을 지워 줄 빔도 없습니다(obstacle_layer에는 decay가
-        # 없고, rolling window 20 m 밖으로 밀려나야 사라집니다). 후진 주차에서 유령 셀이
-        # 문제가 되면 라이다를 360도로 되돌리는 쪽이 카메라를 되살리는 것보다 쌉니다.
         scan:
           topic: /scan
           data_type: "LaserScan"
