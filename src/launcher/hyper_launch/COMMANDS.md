@@ -35,9 +35,9 @@ Terminal 5: GPS Monitor (optional)
 ros2 run hyper_localization gps_accuracy_gui.py      # 절대 위치(base): hAcc/vAcc, fix/RTK, x/y
 ```
 
-Terminal 6: Mission panel (optional)
+Terminal 6: rviz2 visualization
 ```bash
-ros2 run hyper_rqt hyper_panel 
+rviz2 -d ~/HYPER/src/planning/hyper_planner/config/follow_path.rviz
 ```
 
 Terminal 7: Waypoint View & Recorder (Optional)

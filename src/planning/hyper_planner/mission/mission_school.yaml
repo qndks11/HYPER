@@ -58,9 +58,9 @@ courses:
   start_left:
     csv: school/start_left.csv
     # stopline_left: PLACEHOLDER -- 좌측 출발 정지선으로 옮길 것.
-    # start_left_end가 last가 아닌 이유: 마지막 점(#121)의 yaw가 2.564로, 이웃
-    # (#117~120: -0.886 -> -0.684)과 약 173도 어긋난 녹화 오류입니다. 골 포즈가 뒤집힌
-    # 헤딩을 물고 가지 않도록 한 점 앞(#120)에서 끊습니다. CSV를 고치면 last로 되돌리세요.
+    # start_left_end는 이 CSV의 마지막 점(#71)입니다 -- 좌표로 적혀 있을 뿐 last와 같습니다.
+    # (예전에 마지막 점 yaw가 이웃과 173도 어긋나 한 점 앞에서 끊었다는 주석이 있었는데,
+    #  그건 122점짜리 track/start_left.csv 이야기였고 school 녹화본에는 해당되지 않습니다.)
     labels:
       # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       stopline_left: {x: -20.167, y: 27.818}   # wp #24
@@ -184,36 +184,51 @@ steps:
   # 둘 다 "라벨에서 선다"는 뜻이라 handoff와 같이 쓸 수 없습니다.
   - {type: drive, course: common_1, until: s_curve_start, controller: ForwardFollowPath, handoff_m: 6.0}
   - {type: drive, course: common_1, until: s_curve_end, controller: MPPI, handoff_m: 6.0}
-  # cone_2는 T주차 안내 표지를 읽는 지점입니다(판정은 아직 미구현 - - 아래 [7] 참고).
-  # 라벨만 두고 그대로 통과합니다 -- ~/goto_step으로 이 구간부터 다시 달릴 때 씁니다.
-  - {type: drive, course: common_1, until: cone_2, controller: ForwardFollowPath, handoff_m: 6.0}
 
   - {type: drive, course: common_1, until: light_2, controller: ForwardFollowPath,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
   - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
      prearm_distance_m: 12.0}
+  # cone_2는 T주차 안내 표지를 읽는 지점입니다(판정은 아직 미구현 - - 아래 [7] 참고).
+  # 라벨만 두고 그대로 통과합니다 -- ~/goto_step으로 이 구간부터 다시 달릴 때 씁니다.
+  - {type: drive, course: common_1, until: cone_2, controller: ForwardFollowPath, handoff_m: 6.0}
   # [6] T자 주차 갈림길까지. common_1은 여기서 끝납니다(park_t_entry = last).
   - {type: drive, course: common_1, until: park_t_entry, controller: ForwardFollowPath,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
-  # [7] T자 주차 갈래.
-  # !! 판정 조건이 아직 없습니다. 지금은 표지값을 그냥 기다리다 timeout 뒤 default로
-  #    갑니다. 조건이 정해지면 cases의 value를 실제 표지값으로 바꾸거나(그러면 여기가
-  #    그대로 동작합니다), 위치로 정해지는 것이면 [0]처럼 select_by: position을 쓰세요.
-  #    timeout을 3초로 짧게 둔 것은 어차피 답이 안 나오기 때문입니다.
+  # [7] T자 주차 갈래. 두 칸 중 하나의 입구에 콘이 서 있고, 비어 있는 칸으로 들어갑니다.
+  #
+  # !! cone 좌표가 아직 PLACEHOLDER입니다. 트랙에서 콘을 놓을 자리를 재서 채우세요 --
+  #    waypoint studio로 그 자리에 커서를 두고 좌표를 읽거나, 차를 분기 지점에 세운 뒤
+  #    ros2 param set /mission_manager probe_points "[x1, y1, x2, y2]" +
+  #    ros2 service call /mission_manager/probe_costmap std_srvs/srv/Trigger 로
+  #    "정말 여기에 셀이 잡히는가"를 확인하는 쪽이 확실합니다.
+  #    콘 좌표가 없으면 미션이 로드 자체를 거부합니다(좌표 없는 갈래는 늘 비어 보이므로).
+  #
+  # 판정: 갈래마다 cone 자리 반지름(cone_radius_m, 기본 0.5 m) 안의 lethal 셀을 세고,
+  # **정확히 한 갈래만** 비어 있으면 그리로 갑니다. 둘 다 비었거나 둘 다 막혔으면 아무
+  # 것도 고르지 않고 timeout 뒤 default로 갑니다 -- 애매할 때 찍지 않는 쪽입니다.
+  #
+  # cases의 value는 그대로 둡니다. 콘 판정이 우선이지만, /perception/sign으로 값을 밀어
+  # 넣어 갈래를 손수 강제할 통로가 남습니다([0]의 select_by: position과 같은 이유).
+  #
   # prearm_distance_m가 0인 것도 의도된 것입니다 -- 두 갈래 모두 후진으로 시작하므로
-  # 골을 하나로 합칠 수 없어(방향 전환) 어차피 prearm이 꺼집니다.
+  # 골을 하나로 합칠 수 없어(방향 전환) 어차피 prearm이 꺼집니다. 콘 판정 자체도 분기
+  # 지점에 서야 의미가 있어(멀리서는 창 밖이거나 라이다에 안 잡힙니다) prearm을 안 씁니다.
   - type: branch
+    select_by: clearance
     default: t_right_route
-    timeout_s: 3.0
-    # timeout_s가 3초로 짧으므로 창도 짧게 잡습니다(창은 timeout_s보다 작아야 합니다).
-    # 이 값들은 표지로 나오지 않고 운영자가 손으로 밀어 넣는 용도라, 10 Hz면 1초에
-    # 열 표쯤 모여 충분합니다.
-    vote_window_s: 1.0
+    # 3.0 -> 6.0. 코스트맵이 2 Hz라 3초면 여섯 장뿐이고, 그중 앞 몇 장은 차가 막 선
+    # 직후라 콘이 덜 쌓여 있습니다.
+    timeout_s: 6.0
+    # 콘을 관측해 모으는 창. 표지 분기의 투표 창과 같은 필드를 씁니다(timeout_s보다
+    # 작아야 합니다). 2 Hz x 2초 = 네 장이고, 갈래별로 그중 **최대** 셀 수를 씁니다 --
+    # 한 장에서 못 본 콘이 다음 장에서 보이는 일이 있기 때문입니다.
+    vote_window_s: 2.0
     prearm_distance_m: 0.0
     cases:
-      - {value: "t_left",  goto: t_left_route}
-      - {value: "t_right", goto: t_right_route}
+      - {value: "t_left",  goto: t_left_route,  cone: {x: -3, y: 21.02}}   # PLACEHOLDER
+      - {value: "t_right", goto: t_right_route, cone: {x: -5, y: 22.05}}   # PLACEHOLDER
 
   # [8~9] 합류(common_2) 뒤 두 번째 신호등
   # [10~11] 가속 구간. 여기는 원래부터 RPP여야 하는 곳입니다 -- 장애물 앞에서 비켜 가지
@@ -233,15 +248,22 @@ steps:
   - {type: drive, course: common_2, until: park_p_entry, controller: ForwardFollowPath,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
-  # [13] 평행 주차 갈래. [7]과 같이 판정 조건이 아직 없습니다.
+  # [13] 평행 주차 갈래. [7]과 같이 콘이 막지 않은 칸으로 들어갑니다 -- 규칙도 주의할
+  # 점도 [7]의 주석과 같습니다. cone 좌표는 여기도 PLACEHOLDER입니다.
+  #
+  # 다만 이쪽은 두 칸이 코스트맵 x 방향으로 6 m쯤 떨어져 있습니다(p_up_spot과
+  # p_down_spot의 거리). 분기 지점에서 먼 쪽 콘이 20 x 20 m 창 안에는 들어오지만,
+  # 반지름이 창 경계에 걸리면 노드가 WARN을 냅니다 -- 그 줄이 보이면 콘이 잘려서
+  # "비어 보이는" 것이므로 그대로 믿으면 안 됩니다.
   - type: branch
+    select_by: clearance
     default: p_down_route
-    timeout_s: 3.0
-    vote_window_s: 1.0          # 위 T자 주차와 같은 이유로 짧게.
+    timeout_s: 6.0
+    vote_window_s: 2.0
     prearm_distance_m: 0.0
     cases:
-      - {value: "p_up",   goto: p_up_route}
-      - {value: "p_down", goto: p_down_route}
+      - {value: "p_up",   goto: p_up_route,   cone: {x: -15.24, y: 23.03}}   # PLACEHOLDER
+      - {value: "p_down", goto: p_down_route, cone: {x: -20, y: 24.46}}   # PLACEHOLDER
 
   # [14] 합류(common_3) -- 마지막 차선 갈림길까지.
   - {type: drive, course: common_3, until: common_3_end, controller: ForwardFollowPath,

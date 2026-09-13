@@ -20,6 +20,7 @@ from . import theme
 
 # z 순서. 코스는 항상 배경 위에, 차량은 항상 맨 위에.
 Z_OVERLAY = 0
+Z_COSTMAP = 0.5
 Z_COURSE = 1
 Z_LIVE_PATH = 1.5
 Z_HANDLE = 2
@@ -100,6 +101,56 @@ class OverlayItem(QGraphicsPixmapItem):
         local = QRectF(-self.width_px / 2.0, -self.height_px / 2.0,
                        self.width_px, self.height_px)
         return self.transform().mapRect(local)
+
+
+class CostmapItem(QGraphicsPixmapItem):
+    """nav2 local costmap 한 장. RViz의 Map 디스플레이와 같은 그림입니다.
+
+    격자는 셀당 한 바이트이고 값이 곧 색이므로, Format_Indexed8 + 색표로 올립니다
+    -- 400x400짜리를 2 Hz로 받는데 파이썬에서 픽셀을 돌면 창이 멈춥니다.
+
+    배치가 OverlayItem과 같은 이유로 까다롭습니다. 씬은 +y가 위인데 QImage는 0행이
+    맨 위이고, OccupancyGrid는 0행이 origin(제일 아래)입니다. 그래서 픽셀을 뒤집지
+    않고 세로 축척을 음수로 두고, offset으로 origin이 왼쪽 아래에 오게 맞춥니다.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setZValue(Z_COSTMAP)
+        # 셀이 또렷해야 inflation 기울기와 lethal 띠가 구분됩니다.
+        self.setTransformationMode(Qt.FastTransformation)
+        self.setOpacity(0.6)
+        self._table = theme.costmap_color_table()
+        self.setVisible(False)
+
+    def set_grid(self, width, height, resolution, x, y, yaw, data):
+        """data는 OccupancyGrid.data 그대로(int8). -1은 255가 되어 '모름'이 됩니다."""
+        import math
+
+        import numpy as np
+
+        if width <= 0 or height <= 0 or resolution <= 0.0:
+            return False
+        cells = np.frombuffer(data, dtype=np.uint8)
+        if cells.size < width * height:
+            return False
+        cells = cells[:width * height].reshape(height, width)
+        # QImage는 행이 4바이트 경계에서 시작해야 합니다. 지금 설정은 400셀이라
+        # 남는 것이 없지만 resolution/width는 yaml에서 바뀔 수 있습니다.
+        stride = (width + 3) & ~3
+        if stride != width:
+            cells = np.pad(cells, ((0, 0), (0, stride - width)),
+                           constant_values=255)
+        buffer = cells.tobytes()
+        image = QImage(buffer, width, height, stride, QImage.Format_Indexed8)
+        image.setColorTable(self._table)
+        # fromImage가 복사하므로 buffer를 들고 있을 필요는 없습니다.
+        self.setPixmap(QPixmap.fromImage(image))
+        self.setOffset(0.0, -float(height))
+        self.setTransform(
+            QTransform().translate(x, y).rotate(math.degrees(yaw))
+            .scale(resolution, -resolution))
+        return True
 
 
 class CourseItem(QGraphicsPathItem):
@@ -307,7 +358,7 @@ class VehicleItem(QGraphicsObject):
     yaw를 뷰의 y-flip에 맞춰 화면 각도로 바꿔 직접 그립니다.
     """
 
-    SIZE_PX = 9.0
+    SIZE_PX = 15.0
 
     def __init__(self):
         super().__init__()

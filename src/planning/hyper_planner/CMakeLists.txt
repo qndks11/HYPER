@@ -14,6 +14,7 @@ find_package(rclcpp_action REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -29,7 +30,8 @@ generate_parameter_library(mission_manager_parameters
 
 add_executable(mission_manager_node src/mission_manager_node.cpp)
 ament_target_dependencies(mission_manager_node
-  rclcpp rclcpp_action geometry_msgs nav_msgs nav2_msgs std_msgs std_srvs tf2 tf2_ros)
+  rclcpp rclcpp_action geometry_msgs nav_msgs nav2_msgs std_msgs std_srvs tf2
+  tf2_geometry_msgs tf2_ros)
 target_link_libraries(mission_manager_node mission_manager_parameters yaml-cpp)
 
 add_executable(cmd_vel_to_ackermann_node src/cmd_vel_to_ackermann_node.cpp)

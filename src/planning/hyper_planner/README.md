@@ -42,6 +42,7 @@ source install/setup.bash
 | `/mission_manager/skip` | 현재 스텝을 포기하고 다음으로 |
 | `/mission_manager/restart` | 스텝 0으로 되돌림 (`start`로 다시 시작) |
 | `/mission_manager/goto_step` | 임의의 스텝 앞으로 점프하고 대기 (`start`로 시작) |
+| `/mission_manager/probe_costmap` | 좌표를 주면 그 자리의 로컬 코스트맵을 세어 준다 (`probe_points` 파라미터) |
 
 ### `~/pause` / `~/resume` -- 스텝 안에서 멈추기
 
@@ -67,7 +68,11 @@ ros2 service call /mission_manager/resume std_srvs/srv/Trigger   # 이어서 간
   `wait_signal` 스텝에서 2분 쉬었다 재개하는 순간 `timeout_s`가 이미 지나 있어 곧바로
   실패(분기라면 엉뚱한 default 갈래)로 갑니다.
 - **신호 debounce는 세지 않고, 재개할 때 0부터 다시 셉니다.** 서 있는 동안 초록불이
-  채워져 재개하자마자 튀어나가는 일을 막습니다.
+  채워져 재개하자마자 튀어나가는 일을 막습니다. 분기의 투표와 `select_by: clearance`의
+  셀 수도 같이 버립니다 -- 창을 뒤로 밀어 두면 멈춰 있던 시간이 창 안에 들어와 "이미 다
+  찼다"가 되어, 재개 직후 한 장으로 길이 정해집니다. 콘 쪽은 이유가 하나 더 있습니다:
+  멈춘 사이에 누가 콘을 옮겼을 수 있고(멈추는 이유가 바로 그것일 때가 많습니다), 모아 둔
+  최대값은 옮기기 전의 주장입니다.
 
 멈춘 동안 `~/start`와 `~/skip`은 거절합니다(`~/resume`을 쓰라고 알려 줍니다). `~/cancel`,
 `~/restart`, `~/goto_step`은 일시정지보다 세서, 부르면 멈춘 상태를 풀고 `idle`로 갑니다.
@@ -319,6 +324,67 @@ routes:
 
 `cases`는 그대로 두는 편이 좋습니다. 위치 판정이 우선이지만, `/perception/sign`으로 값을 밀어 넣어
 갈래를 손수 강제할 수 있는 통로가 남습니다.
+
+**`select_by: clearance`** -- 갈래마다 정해 둔 **콘 자리의 로컬 코스트맵**을 보고 막히지 않은 쪽으로
+갑니다. 주차 칸 둘 중 하나의 입구에 콘이 서 있는 분기용입니다(`mission_school.yaml`의 T자 주차와
+평행 주차가 이렇게 고릅니다).
+
+콘 자리를 미리 아는 것이 핵심입니다. 그래서 이것은 인식 문제가 아니라 "A 주변과 B 주변에 lethal
+코스트맵이 얼마나 있는가"라는 국소적인 질문이 되고, 라이다가 이미 콘을 코스트맵에 찍어 두었으므로
+새로 볼 것이 없습니다.
+
+```yaml
+- type: branch
+  select_by: clearance
+  default: t_right_route      # 판정이 안 서면 갈 곳. 여전히 필수입니다.
+  timeout_s: 6.0
+  vote_window_s: 2.0          # 이 시간 동안 셀 수를 모읍니다(갈래별 최대값).
+  prearm_distance_m: 0.0      # 켤 수 없습니다 -- 아래 참고.
+  cases:
+    - {value: "t_left",  goto: t_left_route,  cone: {x: -2.4, y: 22.6}}
+    - {value: "t_right", goto: t_right_route, cone: {x: -4.7, y: 23.3}}
+```
+
+**판정 규칙은 "막히지 않은 갈래가 정확히 하나"입니다.** 갈래마다 `cone` 자리 반지름
+(`cone_radius_m`, 기본 0.5 m) 안에서 `lethal_cost`(기본 254) 이상인 셀을 세고, `cone_min_cells`
+(기본 3) 미만인 갈래가 **하나뿐일 때만** 그리로 갑니다. 둘 다 비었거나 둘 다 막혔으면 아무것도
+고르지 않고 `timeout_s` 뒤 `default`로 갑니다 -- 애매할 때 찍지 않는 쪽입니다. 갈래가 둘일 때
+이 규칙은 "막힌 갈래가 정확히 하나"와 같은 말이고, 셋 이상이면 이쪽이 맞는 일반화입니다.
+
+**콘 좌표는 라벨이 아니라 생좌표입니다.** 라벨은 최근접 웨이포인트로 스냅되고
+`label_snap_tolerance_m`를 넘으면 미션이 거부되는데, 콘은 녹화 경로 위가 아니라 그 옆(칸 입구)에
+서 있기 때문입니다. 좌표는 코스 프레임(보통 `map`)이고, 노드가 코스트맵 프레임(`odom`)으로 옮겨
+읽습니다. `select_by: clearance`인데 `cone`이 없는 `case`가 하나라도 있으면 **로드가 거부됩니다**
+-- 좌표 없는 갈래는 늘 0셀, 즉 "비어 있음"으로 보여 말없이 그쪽으로만 가기 때문입니다.
+
+**254만 셉니다.** `InflationLayer`는 253 이하만 쓰므로 팽창 후광이 저절로 빠지고,
+`DrivableAreaLayer`의 차선 코스트(200)도 안 걸립니다. 다만 그 레이어의 `cost_value`도 254이므로,
+`drivable_area:=true`로 돌릴 때 노면이 아닌 지면이 콘으로 보이면 거기가 첫 번째 확인 지점입니다.
+
+**창 밖은 "비어 있음"이 아닙니다.** 반지름이 20 x 20 m 코스트맵 밖으로 잘리면 그 갈래는 0셀로
+보이지만, 노드는 그것을 "모름"으로 처리해 **고르지 않고** WARN을 남깁니다(`... is partly outside
+the 400x400 cell costmap window`). 그 줄이 보이면 콘 좌표가 멀거나 분기 지점이 잘못된 것입니다.
+
+`prearm_distance_m`는 켤 수 없습니다 -- 멀리서는 콘이 창 밖이거나 라이다에 안 잡히고, 이 분기가
+쓰이는 주차 갈래는 두 갈래 모두 후진으로 시작해 골을 하나로 잇지도 못합니다(켜 두면 경고를 남기고
+끕니다). `cases`의 `value`는 `position`과 같은 이유로 그대로 두세요 -- `/perception/sign`으로
+갈래를 손수 강제할 통로가 남습니다.
+
+### `~/probe_costmap` -- 콘 자리가 정말 거기인지 확인하기
+
+콘 좌표를 미션 파일에 적기 전에, 그 자리에 실제로 셀이 잡히는지 물어볼 수 있습니다. 좌표는
+`goto_step`의 `step_label`과 같은 방식으로 파라미터에 넣고 인자 없는 `Trigger`를 부릅니다.
+
+```bash
+ros2 param set /mission_manager probe_points "[-2.4, 22.6, -4.7, 23.3]"
+ros2 service call /mission_manager/probe_costmap std_srvs/srv/Trigger
+#  -> "(-2.40, 22.60): 31 cells   (-4.70, 23.30): 0 cells
+#      ->  (-4.700, 23.300) is clearest (r=0.50 m, cost >= 254, frame 'map')"
+```
+
+점은 두 개 이상 몇 개든 됩니다(x1, y1, x2, y2, ...). 미션 상태는 건드리지 않으므로 주행 중에
+불러도 안전합니다. 창 밖으로 잘린 점은 `(outside the window -- unknown, not clear)`로 표시되고
+"가장 비었다"의 후보에서 빠집니다 -- 분기가 쓰는 규칙과 같습니다.
 
 ### 후진 세그먼트 (`reverse: true`)
 

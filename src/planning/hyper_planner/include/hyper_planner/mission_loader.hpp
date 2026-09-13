@@ -66,6 +66,14 @@ struct Course
   std::unordered_map<std::string, std::size_t> label_index;
 };
 
+// branch 스텝이 무엇을 보고 갈래를 고르는가 (mission.yaml의 `select_by`).
+enum class BranchSelect
+{
+  kSign,        // 기본. 차선 안내 표지를 vote_window_s 동안 모아 다수결.
+  kPosition,    // 차의 현재 위치에서 가장 가까운 갈래.
+  kClearance,   // 갈래마다 정해 둔 콘 자리의 local costmap을 보고, 막히지 않은 쪽.
+};
+
 // branch 스텝의 갈래 하나. vote_window_s 동안 모은 표에서 accepted가 가장 많은 표를
 // 받으면 target 스텝으로 갑니다.
 struct BranchCase
@@ -73,6 +81,19 @@ struct BranchCase
   std::vector<std::string> accepted;
   std::string route;                    // mission.yaml의 `goto`
   std::size_t target{kEndOfMission};    // 그 route의 첫 스텝 (resolve_routes가 채웁니다)
+
+  // `select_by: clearance`에서 이 갈래를 막는 콘의 자리(mission.yaml의 `cone: {x, y}`).
+  // 코스 프레임(보통 map) 좌표이고, 여기 lethal 셀이 쌓이면 이 갈래는 탈락합니다.
+  //
+  // 라벨이 아니라 생좌표인 이유: 라벨은 최근접 웨이포인트로 스냅되고
+  // label_snap_tolerance_m를 넘으면 미션이 거부되는데, 콘은 녹화 경로 위가 아니라
+  // 그 옆(칸 입구)에 서 있습니다.
+  bool has_cone{false};
+  double cone_x{0.0};
+  double cone_y{0.0};
+  // 0이면 노드의 cone_radius_m 파라미터를 씁니다. 칸 입구가 좁아 옆 갈래의 콘까지
+  // 들어오는 자리에서만 개별로 줄이세요.
+  double cone_radius_m{0.0};
 };
 
 struct Step
@@ -143,11 +164,18 @@ struct Step
   std::vector<BranchCase> cases;
   std::string default_route;
   std::size_t default_target{kEndOfMission};
-  // `select_by: position`이면 표지가 아니라 차의 현재 위치로 갈래를 고릅니다 -- 갈래마다
-  // 그 CSV의 첫 점(check_branch_seams가 재는 그 점)까지의 거리를 비교해 가까운 쪽입니다.
-  // 출발 위치가 곧 어느 코스인지를 정하는 스타트 분기용입니다. tf를 못 읽으면 아무 일도
-  // 일어나지 않고 timeout 뒤 default로 갑니다(신호 분기와 같은 실패 방식).
-  bool select_by_position{false};
+  // 무엇을 보고 갈래를 고르는가.
+  //
+  //   kPosition  -- 표지가 아니라 차의 현재 위치. 갈래마다 그 CSV의 첫 점
+  //                 (check_branch_seams가 재는 그 점)까지의 거리를 비교해 가까운 쪽입니다.
+  //                 출발 위치가 곧 어느 코스인지를 정하는 스타트 분기용입니다.
+  //   kClearance -- 갈래마다 적어 둔 콘 자리(BranchCase::cone_x/y)의 local costmap을 보고,
+  //                 정확히 한 갈래만 비어 있으면 그리로 갑니다. 주차 칸 입구를 콘이
+  //                 막고 있는 분기용입니다.
+  //
+  // 둘 다 판정을 못 하면(tf를 못 읽음 / 코스트맵이 없음 / 애매함) 아무 일도 일어나지 않고
+  // timeout 뒤 default로 갑니다 -- 신호 분기와 같은 실패 방식입니다.
+  BranchSelect select{BranchSelect::kSign};
 
   // branch 전용. 이 시간 동안 들어온 신호를 모아 다수결로 갈래를 고릅니다. 갈림길 표지는
   // 세 장이 나란히 깜빡여서 "같은 값이 N프레임 연속"이 거의 성립하지 않기 때문입니다.
@@ -779,18 +807,21 @@ private:
         index, node["debounce_frames"].as<int>(), step.vote_window_s);
     }
 
-    // 무엇을 보고 고르는가. 기본은 표지("sign")이고, "position"이면 차의 현재 위치에서
-    // 가장 가까운 갈래로 갑니다. 오타를 기본값으로 조용히 흘려보내면 스타트 분기가
-    // 말없이 default로만 가므로 여기서 거부합니다.
+    // 무엇을 보고 고르는가. 기본은 표지("sign"), "position"이면 차의 현재 위치에서 가장
+    // 가까운 갈래, "clearance"면 갈래마다 적어 둔 콘 자리의 코스트맵을 보고 비어 있는
+    // 쪽입니다. 오타를 기본값으로 조용히 흘려보내면 분기가 말없이 default로만 가므로
+    // 여기서 거부합니다.
     if (node["select_by"]) {
       const auto select_by = node["select_by"].as<std::string>();
       if (select_by == "position") {
-        step.select_by_position = true;
+        step.select = BranchSelect::kPosition;
+      } else if (select_by == "clearance") {
+        step.select = BranchSelect::kClearance;
       } else if (select_by != "sign") {
         RCLCPP_ERROR(
           logger_,
-          "Step %zu (branch): select_by '%s' is not understood (expected 'sign' or 'position').",
-          index, select_by.c_str());
+          "Step %zu (branch): select_by '%s' is not understood (expected 'sign', 'position' or "
+          "'clearance').", index, select_by.c_str());
         return false;
       }
     }
@@ -823,6 +854,24 @@ private:
       BranchCase branch_case;
       branch_case.accepted = split_values(entry["value"].as<std::string>());
       branch_case.route = entry["goto"].as<std::string>();
+      if (entry["cone"]) {
+        const YAML::Node & cone = entry["cone"];
+        if (!cone["x"] || !cone["y"]) {
+          RCLCPP_ERROR(
+            logger_, "Step %zu (branch), case %zu: 'cone' needs both 'x' and 'y'.", index, c);
+          return false;
+        }
+        branch_case.has_cone = true;
+        branch_case.cone_x = cone["x"].as<double>();
+        branch_case.cone_y = cone["y"].as<double>();
+        branch_case.cone_radius_m = cone["radius"] ? cone["radius"].as<double>() : 0.0;
+        if (branch_case.cone_radius_m < 0.0) {
+          RCLCPP_ERROR(
+            logger_, "Step %zu (branch), case %zu: cone radius must be >= 0 (got %.2f).",
+            index, c, branch_case.cone_radius_m);
+          return false;
+        }
+      }
       if (branch_case.accepted.empty()) {
         RCLCPP_ERROR(
           logger_, "Step %zu (branch), case %zu has an empty 'value'.", index, c);
@@ -841,11 +890,29 @@ private:
       step.cases.push_back(std::move(branch_case));
     }
 
-    // 위치로 고르는 분기는 신호를 아예 안 보므로 투표 창도 안 봅니다. 거기까지 검사하면
-    // 쓰지도 않는 값 때문에 스타트 분기가 거부됩니다.
-    if (!step.select_by_position) {
+    // clearance 분기는 갈래마다 콘 자리가 있어야 합니다. 하나라도 빠지면 그 갈래는 늘
+    // "비어 있음"으로 보여 -- 셀 수가 0이므로 -- 말없이 그쪽으로만 가게 됩니다. 라벨
+    // 스냅이나 이음매 검사와 같은 이유로 주행 전에 거부합니다.
+    if (step.select == BranchSelect::kClearance) {
+      for (std::size_t c = 0; c < step.cases.size(); ++c) {
+        if (!step.cases[c].has_cone) {
+          RCLCPP_ERROR(
+            logger_,
+            "Step %zu (branch) selects by clearance, but case %zu ('%s') has no 'cone: {x, y}'. "
+            "Every case needs the cone position that disqualifies it -- without one that route "
+            "always looks clear.", index, c, step.cases[c].route.c_str());
+          return false;
+        }
+      }
+    }
+
+    // 위치로 고르는 분기는 관측을 모을 것이 없습니다(tf 한 번이면 끝). 거기까지 검사하면
+    // 쓰지도 않는 값 때문에 스타트 분기가 거부됩니다. 표지 분기는 표를, clearance 분기는
+    // 셀 수를 이 창 동안 모읍니다.
+    if (step.select != BranchSelect::kPosition) {
       if (step.vote_window_s <= 0.0) {
-        // 0이면 표 한 장으로 정해집니다. 그건 이 투표가 없애려던 바로 그 동작입니다.
+        // 0이면 표 한 장(또는 코스트맵 한 장)으로 정해집니다. 그건 이 창이 없애려던
+        // 바로 그 동작입니다.
         RCLCPP_ERROR(
           logger_, "Step %zu (branch): vote_window_s must be > 0 (got %.2f).",
           index, step.vote_window_s);
@@ -855,8 +922,8 @@ private:
         RCLCPP_ERROR(
           logger_,
           "Step %zu (branch): vote_window_s (%.1f s) is not shorter than timeout_s (%.1f s), so "
-          "the vote can never finish before the branch gives up -- this branch would always take "
-          "the default route '%s'. Make vote_window_s smaller (or timeout_s larger).",
+          "the decision can never finish before the branch gives up -- this branch would always "
+          "take the default route '%s'. Make vote_window_s smaller (or timeout_s larger).",
           index, step.vote_window_s, step.timeout_s, step.default_route.c_str());
         return false;
       }
@@ -1080,10 +1147,15 @@ private:
     const std::vector<std::size_t> targets = branch_targets(branch);
 
     const char * reason = nullptr;
-    if (branch.select_by_position) {
+    if (branch.select == BranchSelect::kPosition) {
       // 위치로 고르는 분기는 볼 표지가 없습니다. prearm의 preemption은 "확인되면 서지 않고
       // 간다"인데, 위치 판정은 분기 지점에 도착해서야 의미가 있으므로 이어 줄 것이 없습니다.
       reason = "the branch selects by position, so there is no sign to watch ahead of time";
+    } else if (branch.select == BranchSelect::kClearance) {
+      // 콘 판정도 마찬가지입니다. 멀리서는 콘이 코스트맵 창 밖이거나 라이다에 안 잡히고,
+      // 애초에 이 분기가 쓰이는 주차 갈래는 둘 다 후진으로 시작해 골을 하나로 못 잇습니다.
+      reason = "the branch selects by clearance, which is only meaningful once the vehicle is "
+        "standing at the branch point";
     } else if (drive.reverse) {
       reason = "the drive step before the branch is a reverse segment";
     } else {

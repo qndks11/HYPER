@@ -82,14 +82,17 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav2_msgs/action/follow_path.hpp>
+#include <nav2_msgs/msg/costmap.hpp>
 #include <nav2_msgs/msg/speed_limit.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -97,11 +100,13 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2/time.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
 #include "hyper_planner/mission_manager_parameters.hpp"
 #include "hyper_planner/common.hpp"
+#include "hyper_planner/costmap_query.hpp"
 #include "hyper_planner/mission_loader.hpp"
 #include "hyper_planner/path_loader.hpp"
 #include "hyper_planner/path_progress.hpp"
@@ -114,6 +119,7 @@ using GoalHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
 
 // 스텝의 정의와 mission.yaml 로드는 mission_loader.hpp에 있습니다.
 using hyper_planner::BranchCase;
+using hyper_planner::BranchSelect;
 using hyper_planner::Step;
 using hyper_planner::StepType;
 using hyper_planner::join_values;
@@ -217,6 +223,16 @@ public:
       params_.sign_topic, rclcpp::QoS(10),
       [this](const std_msgs::msg::String::SharedPtr msg) {on_sign(msg->data);});
 
+    // 로컬 코스트맵. 콜백은 최신 한 장을 들고만 있습니다 -- 실제로 세는 일은 clearance
+    // 분기가 판정 중일 때와 ~/probe_costmap을 부를 때만 일어납니다. 2 Hz에 400x400이므로
+    // 들고 있는 값이 싸고(약 160 KB), controller_server는 우리가 듣든 말든 발행합니다.
+    costmap_sub_ = create_subscription<nav2_msgs::msg::Costmap>(
+      params_.costmap_topic, rclcpp::QoS(1),
+      [this](const nav2_msgs::msg::Costmap::SharedPtr msg) {
+        costmap_ = msg;
+        costmap_stamp_ = now();
+      });
+
     client_ = rclcpp_action::create_client<FollowPath>(this, params_.action_name);
 
     start_srv_ = create_service<std_srvs::srv::Trigger>(
@@ -267,6 +283,13 @@ public:
         const std_srvs::srv::Trigger::Request::SharedPtr,
         std_srvs::srv::Trigger::Response::SharedPtr response) {
         handle_goto_step(response);
+      });
+    probe_costmap_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/probe_costmap",
+      [this](
+        const std_srvs::srv::Trigger::Request::SharedPtr,
+        std_srvs::srv::Trigger::Response::SharedPtr response) {
+        handle_probe_costmap(response);
       });
 
     if (!load_mission()) {
@@ -563,19 +586,32 @@ private:
         // 내내 열려만 있던 빈 창을 그대로 물려받아 "경과 >= vote_window_s"가 이미 참인 채로
         // 시작하고, 그러면 여기서부터는 사실상 창이 없는 것과 같습니다. 버리는 표가 없으니
         // 손해도 없고, timeout_s > vote_window_s는 로드 시점에 보장됩니다.
-        if (!vote_open_ || vote_total_ == 0) {
+        if (step.select == BranchSelect::kClearance) {
+          // 콘 판정은 prearm이 없으므로 이어받을 창이 없습니다. 늘 여기서 새로 엽니다.
+          clearance_open_now();
+        } else if (!vote_open_ || vote_total_ == 0) {
           vote_open_now();
         }
-        if (step.select_by_position) {
-          RCLCPP_INFO(
-            get_logger(), "%s branching on position (%s; timeout %.0f s -> '%s').",
-            progress().c_str(), branch_values(step).c_str(), step.timeout_s,
-            step.default_route.c_str());
-        } else {
-          RCLCPP_INFO(
-            get_logger(), "%s branching on %s (%s; vote over %.1f s, timeout %.0f s -> '%s').",
-            progress().c_str(), params_.sign_topic.c_str(), branch_values(step).c_str(),
-            step.vote_window_s, step.timeout_s, step.default_route.c_str());
+        switch (step.select) {
+          case BranchSelect::kPosition:
+            RCLCPP_INFO(
+              get_logger(), "%s branching on position (%s; timeout %.0f s -> '%s').",
+              progress().c_str(), branch_values(step).c_str(), step.timeout_s,
+              step.default_route.c_str());
+            break;
+          case BranchSelect::kClearance:
+            RCLCPP_INFO(
+              get_logger(),
+              "%s branching on costmap clearance (%s; watching %.1f s, timeout %.0f s -> '%s').",
+              progress().c_str(), clearance_points(step).c_str(), step.vote_window_s,
+              step.timeout_s, step.default_route.c_str());
+            break;
+          case BranchSelect::kSign:
+            RCLCPP_INFO(
+              get_logger(), "%s branching on %s (%s; vote over %.1f s, timeout %.0f s -> '%s').",
+              progress().c_str(), params_.sign_topic.c_str(), branch_values(step).c_str(),
+              step.vote_window_s, step.timeout_s, step.default_route.c_str());
+            break;
         }
         break;
     }
@@ -754,7 +790,7 @@ private:
     const Step & step = steps_[step_index_];
     std::size_t target = 0;
     std::string matched;
-    if (step.select_by_position) {
+    if (step.select == BranchSelect::kPosition) {
       if (pick_branch_by_position(step, target)) {
         RCLCPP_INFO(
           get_logger(), "%s branch: taking route '%s' (nearest start point).",
@@ -763,6 +799,15 @@ private:
         return;
       }
       // tf를 아직 못 읽었습니다. 아래 timeout이 default로 받아 줍니다.
+    } else if (step.select == BranchSelect::kClearance) {
+      if (pick_branch_by_clearance(step, target)) {
+        RCLCPP_INFO(
+          get_logger(), "%s branch: taking route '%s' (the only clear one; %s).",
+          progress().c_str(), route_name(step, target).c_str(), clearance_tally(step).c_str());
+        goto_step(target);
+        return;
+      }
+      // 코스트맵이 없거나, 창이 안 찼거나, 애매합니다. timeout이 default로 받아 줍니다.
     } else if (pick_branch(step, target, matched)) {
       RCLCPP_INFO(
         get_logger(), "%s branch: '%s' confirmed; taking route '%s'.",
@@ -771,12 +816,23 @@ private:
       return;
     }
     if (now() >= wait_until_) {
-      if (step.select_by_position) {
+      if (step.select == BranchSelect::kPosition) {
         RCLCPP_WARN(
           get_logger(),
           "%s branch: could not read the vehicle pose within %.0f s. Taking the default route "
           "'%s' -- check that odometry is running.",
           progress().c_str(), step.timeout_s, step.default_route.c_str());
+      } else if (step.select == BranchSelect::kClearance) {
+        // 셀 수를 통째로 찍습니다. 여기서 갈리는 실패가 셋인데 한 줄로는 구별이 안 됩니다:
+        // "no costmap"이면 토픽 이름이 틀렸거나 controller_server가 안 떠 있는 것이고,
+        // 전부 0이면 라이다가 콘을 못 봤거나(또는 콘이 없거나) 좌표가 틀린 것이며,
+        // 둘 다 큰 값이면 콘이 둘 다 서 있거나 반지름이 너무 커서 서로를 먹은 것입니다.
+        RCLCPP_WARN(
+          get_logger(),
+          "%s branch: costmap did not single out one clear route within %.0f s (%s; need exactly "
+          "one below %ld cells). Taking the default route '%s'.",
+          progress().c_str(), step.timeout_s, clearance_tally(step).c_str(),
+          static_cast<long>(params_.cone_min_cells), step.default_route.c_str());
       } else {
         // 표 현황을 통째로 찍습니다. 여기서 갈리는 실패가 셋인데 last_sign_ 하나로는
         // 구별이 안 됩니다: "nothing / 0 sample(s)"이면 검출기가 죽었거나 토픽 이름이
@@ -841,6 +897,267 @@ private:
     }
     RCLCPP_INFO(get_logger(), "%s branch by position: %s.", progress().c_str(), report.c_str());
     return true;
+  }
+
+  // -------------------------------------------------------- 콘 자리로 갈래 고르기
+  //
+  // 주차 칸 둘 중 하나의 입구에 콘이 서 있고, 두 콘 자리는 미리 알고 있습니다. 그래서 이
+  // 판정은 인식 문제가 아니라 "A 주변과 B 주변에 lethal 코스트맵이 얼마나 있는가"라는
+  // 국소적인 질문입니다 -- 라이다가 이미 콘을 코스트맵에 찍어 두었습니다.
+  //
+  // 규칙: 갈래마다 콘 자리 반지름 안의 lethal 셀을 세고, **정확히 한 갈래만** 비어 있으면
+  // 그리로 갑니다. 둘 다 비었거나, 둘 다 막혔거나, 코스트맵이 없으면 아무 일도 하지 않고
+  // timeout이 default로 받습니다 -- 표지를 못 본 분기와 같은 실패 방식입니다(애매할 때
+  // 찍지 않는 쪽).
+
+  // 모은 셀 수를 버리고 창을 닫습니다. 다음 pick_branch_by_clearance가 새로 엽니다
+  // -- vote_clear()와 같은 구조입니다.
+  void clearance_clear()
+  {
+    clearance_cells_.clear();
+    clearance_clipped_.clear();
+    clearance_open_ = false;
+  }
+
+  void clearance_open_now()
+  {
+    clearance_clear();
+    clearance_started_ = now();
+    clearance_open_ = true;
+  }
+
+  // 이 분기가 보고 있는 자리를 "t_left (-2.40, 22.58), t_right (-4.67, 23.35)"로.
+  std::string clearance_points(const Step & branch) const
+  {
+    std::string text;
+    for (const BranchCase & branch_case : branch.cases) {
+      if (!text.empty()) {
+        text += ", ";
+      }
+      char buffer[64];
+      std::snprintf(
+        buffer, sizeof(buffer), " (%.2f, %.2f)", branch_case.cone_x, branch_case.cone_y);
+      text += branch_case.route + buffer;
+    }
+    return text.empty() ? std::string("nothing") : text;
+  }
+
+  // 창 동안 모은 셀 수를 "t_left 31 cells, t_right 2 cells"로. 코스트맵을 한 번도 못 봤으면
+  // 그렇게 말합니다 -- "전부 0"과 "아예 없음"은 전혀 다른 고장입니다.
+  std::string clearance_tally(const Step & branch) const
+  {
+    if (clearance_cells_.empty()) {
+      return costmap_ ? std::string("no cells counted yet") : std::string("no costmap received");
+    }
+    std::string text;
+    for (const BranchCase & branch_case : branch.cases) {
+      const auto found = clearance_cells_.find(branch_case.target);
+      if (!text.empty()) {
+        text += ", ";
+      }
+      text += branch_case.route + " " +
+        std::to_string(found == clearance_cells_.end() ? 0 : found->second) + " cells";
+      if (clearance_clipped_.count(branch_case.target) != 0) {
+        text += " (outside the window)";
+      }
+    }
+    return text;
+  }
+
+  // 최신 코스트맵이 쓸 만한가. 오래된 것을 그대로 쓰면 이미 치운 콘이 계속 보입니다.
+  bool costmap_fresh() const
+  {
+    return costmap_ != nullptr &&
+           (now() - costmap_stamp_).seconds() <= params_.costmap_timeout_sec;
+  }
+
+  // 코스 프레임(보통 map)의 점을 지금 들고 있는 코스트맵의 프레임(rolling이면 odom)으로.
+  bool to_costmap_frame(
+    double x, double y, const std::string & source_frame,
+    geometry_msgs::msg::PointStamped & out)
+  {
+    geometry_msgs::msg::PointStamped in;
+    in.header.frame_id = source_frame;
+    in.point.x = x;
+    in.point.y = y;
+    try {
+      // stamp를 비워 두면 "가장 최근"입니다. 코스트맵이 rolling이라 원점이 매 주기
+      // 달라지므로, 프레임도 원점도 지금 처리 중인 메시지의 것을 써야 합니다.
+      tf_buffer_->transform(
+        in, out, costmap_->header.frame_id, tf2::durationFromSec(params_.tf_timeout_sec));
+      return true;
+    } catch (const tf2::TransformException & ex) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "No '%s' -> '%s' transform for the cone position: %s.",
+        source_frame.c_str(), costmap_->header.frame_id.c_str(), ex.what());
+      return false;
+    }
+  }
+
+  // 한 자리의 lethal 셀 수를 셉니다.
+  //
+  // 잘림(clipped)을 호출자에게 그대로 넘기는 것이 중요합니다. 코스트맵 창 밖은 0개로
+  // 보이는데 0은 "비어 있음"으로 읽히므로, 잘린 자리를 그냥 세면 "안 보인다"가 "깨끗하다"가
+  // 됩니다 -- 콘이 서 있는 칸으로 들어갈 수 있는 유일한 경로입니다.
+  bool count_cone_cells(
+    double x, double y, double radius_m, const std::string & source_frame,
+    hyper_planner::ClearanceCount & count)
+  {
+    geometry_msgs::msg::PointStamped point;
+    if (!to_costmap_frame(x, y, source_frame, point)) {
+      return false;
+    }
+    count = hyper_planner::count_lethal_near(
+      *costmap_, point.point.x, point.point.y, radius_m,
+      static_cast<std::uint8_t>(params_.lethal_cost));
+    if (count.clipped) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "(%.2f, %.2f) is partly outside the %ux%u cell costmap window, so it can only look "
+        "clear -- not treating it as clear. Is the vehicle close enough to it?",
+        x, y, costmap_->metadata.size_x, costmap_->metadata.size_y);
+    }
+    return true;
+  }
+
+  bool pick_branch_by_clearance(const Step & branch, std::size_t & target)
+  {
+    if (!clearance_open_) {
+      // begin_step이 정상 경로지만, 그 길을 안 거치고 들어와도(resume 직후 등) 스스로
+      // 낫게 합니다. pick_branch가 투표 창에 하는 것과 같습니다.
+      clearance_open_now();
+      return false;
+    }
+    if (!costmap_fresh()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "%s branch selects by clearance, but no costmap on '%s' in the last %.1f s. Is "
+        "controller_server up?",
+        progress().c_str(), params_.costmap_topic.c_str(), params_.costmap_timeout_sec);
+      return false;
+    }
+
+    const std::string & frame = courses_.front().waypoints.frame_id;
+    clearance_clipped_.clear();
+    for (const BranchCase & branch_case : branch.cases) {
+      const double radius = branch_case.cone_radius_m > 0.0
+        ? branch_case.cone_radius_m : params_.cone_radius_m;
+      hyper_planner::ClearanceCount count;
+      if (!count_cone_cells(branch_case.cone_x, branch_case.cone_y, radius, frame, count)) {
+        return false;
+      }
+      // 최대값만 남깁니다 -- 위 clearance_cells_ 주석 참고.
+      auto & best = clearance_cells_[branch_case.target];
+      best = std::max(best, count.lethal);
+      // 잘림은 누적하지 않고 매번 새로 봅니다. 차가 움직이면 창도 같이 움직이므로,
+      // 지금 잘렸는지가 지금의 판정에 쓸 값입니다.
+      if (count.clipped) {
+        clearance_clipped_.insert(branch_case.target);
+      }
+    }
+
+    // 창이 다 차야 정합니다. 한 장으로 정하면 콘이 잠깐 안 잡힌 프레임이 그대로 길이 됩니다.
+    if ((now() - clearance_started_).seconds() < branch.vote_window_s) {
+      return false;
+    }
+
+    // "막히지 않은 갈래가 정확히 하나". 갈래가 둘일 때 이것은 "막힌 갈래가 정확히
+    // 하나"와 같은 말이고, 셋 이상이면 이쪽이 맞는 일반화입니다 -- 하나만 막혔다고
+    // 나머지 둘 중 어디로 갈지가 정해지지는 않으니까요.
+    const auto min_cells = static_cast<std::size_t>(params_.cone_min_cells);
+    std::size_t clear_count = 0;
+    for (const BranchCase & branch_case : branch.cases) {
+      // 창 밖으로 잘린 갈래는 "비어 있다"고 말할 수 없습니다. 세어 본 것이 그 자리의
+      // 일부뿐이라 콘이 안 보이는 쪽에 서 있을 수 있습니다. 모르는 것은 고르지 않습니다.
+      if (clearance_clipped_.count(branch_case.target) != 0) {
+        continue;
+      }
+      if (clearance_cells_[branch_case.target] < min_cells) {
+        ++clear_count;
+        target = branch_case.target;
+      }
+    }
+    if (clear_count != 1) {
+      return false;
+    }
+    return true;
+  }
+
+  // ~/probe_costmap -- 아무 좌표나 넣고 코스트맵이 뭐라고 하는지 물어봅니다.
+  //
+  // 좌표를 요청 필드가 아니라 파라미터(probe_points)로 받는 것은 goto_step의 step_label,
+  // teleport_service의 label과 같은 방식입니다. 덕분에 인자 없는 Trigger 하나로 끝나고,
+  // 이것 하나 때문에 msgs 패키지를 새로 만들지 않아도 됩니다.
+  //
+  // 미션 상태는 건드리지 않습니다 -- 주행 중에 불러도 안전합니다.
+  void handle_probe_costmap(std_srvs::srv::Trigger::Response::SharedPtr response)
+  {
+    const std::vector<double> & points = params_.probe_points;
+    if (points.size() < 2 || points.size() % 2 != 0) {
+      response->success = false;
+      response->message =
+        "probe_points needs an even number of values (x1, y1, x2, y2, ...); got " +
+        std::to_string(points.size()) + ". Try: ros2 param set " + std::string(get_name()) +
+        " probe_points \"[-2.4, 22.6, -4.7, 23.3]\"";
+      return;
+    }
+    if (!costmap_fresh()) {
+      response->success = false;
+      response->message = "no costmap on '" + params_.costmap_topic + "' in the last " +
+        std::to_string(params_.costmap_timeout_sec) + " s.";
+      return;
+    }
+    if (courses_.empty()) {
+      response->success = false;
+      response->message = "no mission loaded, so there is no frame to read the points in.";
+      return;
+    }
+
+    const std::string & frame = courses_.front().waypoints.frame_id;
+    std::string report;
+    std::size_t fewest = std::numeric_limits<std::size_t>::max();
+    std::string clearest;
+    bool tied = false;
+    for (std::size_t i = 0; i + 1 < points.size(); i += 2) {
+      hyper_planner::ClearanceCount count;
+      if (!count_cone_cells(points[i], points[i + 1], params_.cone_radius_m, frame, count)) {
+        response->success = false;
+        response->message = "could not transform '" + frame + "' -> '" +
+          costmap_->header.frame_id + "'.";
+        return;
+      }
+      char buffer[128];
+      std::snprintf(
+        buffer, sizeof(buffer), "%s(%.2f, %.2f): %zu cells%s",
+        report.empty() ? "" : "   ", points[i], points[i + 1], count.lethal,
+        count.clipped ? " (outside the window -- unknown, not clear)" : "");
+      report += buffer;
+      // 잘린 점은 "가장 비었다"의 후보가 아닙니다. 0으로 보이는 이유가 비어서가 아니라
+      // 안 보여서일 수 있고, 이 서비스를 부르는 이유가 바로 그 구별이기 때문입니다.
+      if (count.clipped) {
+        continue;
+      }
+      if (count.lethal < fewest) {
+        fewest = count.lethal;
+        clearest = "(" + std::to_string(points[i]).substr(0, 6) + ", " +
+          std::to_string(points[i + 1]).substr(0, 6) + ")";
+        tied = false;
+      } else if (count.lethal == fewest) {
+        tied = true;
+      }
+    }
+
+    char tail[192];
+    const std::string verdict = clearest.empty()
+      ? std::string("no point could be called clear")
+      : (tied ? std::string("tied, nothing to choose") : clearest + " is clearest");
+    std::snprintf(
+      tail, sizeof(tail), "  ->  %s (r=%.2f m, cost >= %ld, frame '%s')", verdict.c_str(),
+      params_.cone_radius_m, static_cast<long>(params_.lethal_cost),
+      costmap_->header.frame_id.c_str());
+    response->success = true;
+    response->message = report + tail;
   }
 
   // ------------------------------------------------------------------ 막힘 처리
@@ -1764,6 +2081,11 @@ private:
     // 창을 여는 것은 다음 tick의 pick_branch가 알아서 합니다.
     sign_streak_ = 0;
     vote_clear();
+    // 콘 판정도 같은 이유로 버립니다. 창을 밀어 두면 멈춰 있던 시간이 창 안에 들어와
+    // "이미 다 찼다"가 되어, 재개 직후 코스트맵 한 장으로 길이 정해집니다. 게다가 멈춘
+    // 사이에 누가 콘을 옮겼을 수 있는데 -- 멈추는 이유가 바로 그것일 때가 많습니다 --
+    // 모아 둔 최대값은 옮기기 전의 주장입니다. 재개가 그것을 이어받을 이유가 없습니다.
+    clearance_clear();
 
     paused_ = false;
     RCLCPP_INFO(
@@ -2028,6 +2350,21 @@ private:
   int vote_total_{0};
   rclcpp::Time vote_started_;
   bool vote_open_{false};
+
+  // 최신 로컬 코스트맵 한 장. 콜백이 넣기만 하고, 세는 일은 clearance 분기와
+  // ~/probe_costmap에서만 합니다.
+  nav2_msgs::msg::Costmap::SharedPtr costmap_;
+  rclcpp::Time costmap_stamp_;
+
+  // clearance 분기가 창 동안 모은 갈래별 **최대** lethal 셀 수(키는 target 스텝 인덱스).
+  // 최대인 이유: 한 장에서 못 본 콘은 다음 장에서 보이고(라이다 각도, 다른 콘의 그림자),
+  // "한 번이라도 확실히 보였다"가 "지금 안 보인다"보다 강한 증거이기 때문입니다.
+  std::map<std::size_t, std::size_t> clearance_cells_;
+  // 이번 판정에서 반지름이 코스트맵 창 밖으로 잘린 갈래들. 잘린 갈래는 셀이 0으로 보여도
+  // "비어 있음"으로 치지 않습니다(count_cone_cells 참고).
+  std::set<std::size_t> clearance_clipped_;
+  rclcpp::Time clearance_started_;
+  bool clearance_open_{false};
   // 지금 실행 중인 drive 스텝에서 신호를 미리 보는 중인지.
   bool prearmed_{false};
 
@@ -2054,6 +2391,8 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr skip_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr restart_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr goto_step_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr probe_costmap_srv_;
+  rclcpp::Subscription<nav2_msgs::msg::Costmap>::SharedPtr costmap_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;

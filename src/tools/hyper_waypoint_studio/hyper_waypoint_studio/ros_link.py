@@ -19,6 +19,19 @@ from python_qt_binding.QtCore import QObject, Signal
 # 서비스 future가 이만큼 지나도 안 오면 포기합니다(hyper_rqt의 CALL_TIMEOUT_SEC).
 CALL_TIMEOUT_SEC = 5.0
 
+# nav2 controller_server가 띄우는 로컬 코스트맵. 노드 이름이 local_costmap이라
+# 네임스페이스가 그대로 토픽이 됩니다(nav2_controller.yaml의 local_costmap 블록).
+COSTMAP_TOPIC = '/local_costmap/costmap'
+
+# 씬 좌표계. 코스 CSV도 map 프레임이라 이 값이 곧 캔버스의 기준입니다.
+SCENE_FRAME = 'map'
+
+
+def quaternion_yaw(q):
+    import math
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
 
 def parse_status(text):
     """`key=value` 공백 구분 한 줄 -> dict.
@@ -50,6 +63,7 @@ class NullRosLink(QObject):
     mission_path = Signal(object)
     mission_steps = Signal(object)
     vehicle_pose = Signal(float, float, float)
+    costmap = Signal(object)
     call_finished = Signal(str, bool, str)
 
     available = False
@@ -86,19 +100,22 @@ class RosLink(QObject):
     mission_path = Signal(object)           # [(x, y)]
     mission_steps = Signal(object)          # [(index, type, label, course, route)]
     vehicle_pose = Signal(float, float, float)
+    costmap = Signal(object)                # {width,height,resolution,x,y,yaw,data} | None
     call_finished = Signal(str, bool, str)  # 서비스 이름, 성공, 메시지
 
     available = True
     reason = ''
 
     def __init__(self, recorder='/waypoint_recorder', manager='/mission_manager',
-                 teleport='/teleport_service', pose_topic='/odometry/filtered_map'):
+                 teleport='/teleport_service', pose_topic='/odometry/filtered_map',
+                 costmap_topic=COSTMAP_TOPIC, scene_frame=SCENE_FRAME):
         super().__init__()
         import rclpy
         from rclpy.node import Node
         from rclpy.executors import SingleThreadedExecutor
-        from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
-        from nav_msgs.msg import Odometry, Path
+        from rclpy.qos import (
+            DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy)
+        from nav_msgs.msg import OccupancyGrid, Odometry, Path
         from std_msgs.msg import String
         from std_srvs.srv import Trigger
         from rcl_interfaces.srv import SetParameters
@@ -110,6 +127,7 @@ class RosLink(QObject):
         self.recorder_ns = recorder.rstrip('/')
         self.manager_ns = manager.rstrip('/')
         self.teleport_ns = teleport.rstrip('/')
+        self.scene_frame = scene_frame
 
         self._node = Node('waypoint_studio')
 
@@ -134,6 +152,23 @@ class RosLink(QObject):
         # 차량 위치. 레코더의 status에도 x/y가 있지만 주행 모드에는 레코더가 안 떠
         # 있으므로 여기서 직접 구독합니다.
         self._node.create_subscription(Odometry, pose_topic, self._on_odom, 10)
+
+        # 로컬 코스트맵. nav2의 Costmap2DPublisher가 transient_local + reliable로
+        # 내므로 같은 프로필이어야 합니다(follow_path.rviz와 같은 설정). volatile로
+        # 잡으면 메시지가 아예 안 옵니다.
+        costmap_qos = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
+                                 reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._node.create_subscription(
+            OccupancyGrid, costmap_topic, self._on_costmap, costmap_qos)
+
+        # 코스트맵은 odom 프레임인데 씬은 map 프레임입니다. 둘 사이가 EKF의 전역
+        # 보정만큼 벌어지므로 TF 없이는 못 놓습니다.
+        import tf2_ros
+        self._tf2_ros = tf2_ros
+        self._tf_buffer = tf2_ros.Buffer()
+        # spin_thread를 안 쓰는 이유: 이 노드의 executor가 이미 돌고 있습니다.
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self._node)
 
         self._clients = {}
         for name in (f'{self.recorder_ns}/start', f'{self.recorder_ns}/stop',
@@ -204,11 +239,53 @@ class RosLink(QObject):
         self.mission_steps.emit(steps)
 
     def _on_odom(self, msg):
-        import math
-        q = msg.pose.pose.orientation
-        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
-                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        yaw = quaternion_yaw(msg.pose.pose.orientation)
         self.vehicle_pose.emit(msg.pose.pose.position.x, msg.pose.pose.position.y, yaw)
+
+    def _on_costmap(self, msg):
+        """OccupancyGrid -> 씬(map 프레임)에 놓을 수 있는 평범한 값들.
+
+        코스트맵은 rolling window라 origin이 매 주기 움직이고, 그 origin은 odom
+        프레임입니다. map <- odom을 못 구하면 그리지 않고 None을 냅니다 -- 변환을
+        단위행렬로 치면 EKF 전역 보정만큼 어긋난 그림이 그럴듯하게 나옵니다.
+        """
+        import math
+
+        info = msg.info
+        if info.width <= 0 or info.height <= 0 or info.resolution <= 0.0:
+            return
+        x = info.origin.position.x
+        y = info.origin.position.y
+        yaw = quaternion_yaw(info.origin.orientation)
+
+        frame = msg.header.frame_id.lstrip('/')
+        if frame and frame != self.scene_frame:
+            from rclpy.time import Time
+            try:
+                # 메시지 스탬프가 아니라 최신값으로 찾습니다. 시뮬은 sim time으로
+                # 스탬프를 찍는데 이 노드는 시스템 시계라 스탬프로 찾으면 늘 빕니다.
+                tf = self._tf_buffer.lookup_transform(
+                    self.scene_frame, frame, Time())
+            except self._tf2_ros.TransformException:
+                self.costmap.emit(None)
+                return
+            translation = tf.transform.translation
+            base = quaternion_yaw(tf.transform.rotation)
+            cos, sin = math.cos(base), math.sin(base)
+            x, y = (translation.x + cos * x - sin * y,
+                    translation.y + sin * x + cos * y)
+            yaw += base
+
+        self.costmap.emit({
+            'width': info.width,
+            'height': info.height,
+            'resolution': info.resolution,
+            'x': x,
+            'y': y,
+            'yaw': yaw,
+            # bytes()가 사본을 뜹니다 -- 콜백이 끝나면 msg는 사라집니다.
+            'data': bytes(msg.data),
+        })
 
     # ------------------------------------------------------------------ 서비스
     def service_ready(self, name):
