@@ -366,8 +366,11 @@ class LabelMarker(QGraphicsObject):
 class VehicleItem(QGraphicsObject):
     """차량의 현재 위치와 헤딩.
 
-    삼각형은 화면 고정 크기(변환 무시)지만 방향은 map 프레임 yaw를 따라야 하므로,
-    yaw를 뷰의 y-flip에 맞춰 화면 각도로 바꿔 직접 그립니다.
+    삼각형은 화면 고정 크기(변환 무시)라 뷰가 회전해도 이 아이템 자체는 따라
+    돌지 않으므로, 방향은 직접 그려야 합니다. 차량 화면 고정(heading-up)이 꺼져
+    있으면 뷰가 북쪽 위 고정이라 map 프레임 yaw를 뷰의 y-flip에 맞춰 화면 각도로
+    바꿔 그리고, 켜져 있으면 뷰 자체가 이미 차량 헤딩이 위를 향하도록 회전해
+    있으므로 삼각형은 그냥 화면 위쪽을 향하도록 고정해 그립니다.
     """
 
     SIZE_PX = 15.0
@@ -378,6 +381,7 @@ class VehicleItem(QGraphicsObject):
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
         self._yaw = 0.0
         self._stale = False
+        self._heading_up = False
         self.setVisible(False)
 
     def set_pose(self, x, y, yaw):
@@ -388,6 +392,10 @@ class VehicleItem(QGraphicsObject):
 
     def set_stale(self, stale):
         self._stale = bool(stale)
+        self.update()
+
+    def set_heading_up(self, heading_up):
+        self._heading_up = bool(heading_up)
         self.update()
 
     def boundingRect(self):
@@ -402,8 +410,9 @@ class VehicleItem(QGraphicsObject):
         painter.setBrush(QBrush(color))
         s = self.SIZE_PX
         # 아이템은 변환을 무시하므로 좌표계가 화면(y 아래로 증가)입니다.
-        # map yaw를 화면 각도로 쓰려면 y를 뒤집습니다.
-        a = -self._yaw
+        # heading-up 중에는 뷰 회전이 이미 헤딩을 위로 돌려놨으므로 늘 위(-90도)를
+        # 향하게 그리고, 아니면 map yaw를 화면 각도로 쓰려고 y를 뒤집습니다.
+        a = -math.pi / 2 if self._heading_up else -self._yaw
         nose = QPointF(s * math.cos(a), s * math.sin(a))
         left = QPointF(0.6 * s * math.cos(a + 2.4), 0.6 * s * math.sin(a + 2.4))
         right = QPointF(0.6 * s * math.cos(a - 2.4), 0.6 * s * math.sin(a - 2.4))

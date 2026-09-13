@@ -1203,7 +1203,7 @@ class StudioWindow(QMainWindow):
     def _on_vehicle_pose(self, x, y, yaw):
         self._vehicle.set_pose(x, y, yaw)
         self._vehicle.set_stale(False)
-        self._view.follow_to(x, y)
+        self._view.follow_to(x, y, yaw)
 
     def _on_costmap(self, grid):
         """None이면 map <- odom을 못 구했다는 뜻입니다(ros_link._on_costmap)."""
@@ -1232,6 +1232,7 @@ class StudioWindow(QMainWindow):
     # ================================================================== 화면 고정
     def _set_follow(self, follow):
         known = self._view.set_follow(follow)
+        self._vehicle.set_heading_up(follow)
         if follow and not known:
             self.statusBar().showMessage(
                 '차량 위치가 아직 없습니다 -- odometry가 들어오면 화면이 따라갑니다.', 4000)
@@ -1239,6 +1240,7 @@ class StudioWindow(QMainWindow):
     def _on_follow_released(self):
         # 뷰가 이미 고정을 풀었습니다. 버튼도 같이 풀어야 왜 안 따라가는지 보입니다.
         self._follow_action.setChecked(False)
+        self._vehicle.set_heading_up(False)
         self.statusBar().showMessage('팬 -- 차량 화면 고정이 풀렸습니다.', 2000)
 
     def _on_call_finished(self, name, ok, message):

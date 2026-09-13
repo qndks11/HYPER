@@ -6,12 +6,17 @@ HYPER 자율주행 스택을 단계별 또는 한 번에 실행하기 위한 lau
 
 단계별 실행 (실차):
 
-Terminal 1: TF tree
+Terminal 1: Arduino
+```bash
+ros2 launch hyper_launch interface.launch.py 
+```
+
+Terminal 2: TF tree
 ```bash
 ros2 launch hyper_control robot_state_publisher.launch.py
 ```
 
-Terminal 2: Sensors
+Terminal 3: Sensors
 ```bash
 ros2 launch hyper_launch sensors.launch.py
 ```
@@ -20,14 +25,9 @@ EBIMU(`/imu`), RPLidar(`/scan`)와 함께 `hyper_rtk`(u-blox ZED-F9P 2대)를 �
 NTRIP 보정으로 절대 위치를 `/gps/fix`에, rover는 moving-base RTK 헤딩을 `/imu/heading`에
 냅니다.
 
-Terminal 3: Localization
+Terminal 4: Localization
 ```bash
 ros2 launch hyper_launch odometry.launch.py datum_site:=school use_sim_time:=false
-```
-
-Terminal 4: Arduino
-```bash
-ros2 launch hyper_launch interface.launch.py 
 ```
 
 Terminal 5: GPS Monitor (optional)
@@ -39,7 +39,7 @@ ros2 run hyper_localization gps_accuracy_gui.py      # 절대 위치(base): hAcc
 ros2 run hyper_waypoint_studio waypoint_studio
 ```
 
-Terminal 7: Waypoint View & Recorder (Optional)
+Terminal 6: Waypoint View & Recorder (Optional)
 ```bash
 ros2 launch hyper_waypoint record.launch.py \
   waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track.csv \

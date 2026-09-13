@@ -10,7 +10,7 @@
 import math
 
 from python_qt_binding.QtCore import QPointF, QRectF, Qt, Signal
-from python_qt_binding.QtGui import QColor, QPainter, QPen
+from python_qt_binding.QtGui import QColor, QPainter, QPen, QTransform
 from python_qt_binding.QtWidgets import QGraphicsScene, QGraphicsView
 
 from . import theme
@@ -49,6 +49,7 @@ class StudioView(QGraphicsView):
     # 서 있는 차의 odom 잡음으로 화면 전체를 다시 그리지 않기 위한 여유. 뷰포트
     # 전체 repaint는 배경 이미지가 깔린 코스에서 비쌉니다.
     FOLLOW_DEADZONE_PX = 1.5
+    FOLLOW_DEADZONE_RAD = math.radians(1.0)
 
     def __init__(self, scene):
         super().__init__(scene)
@@ -78,18 +79,21 @@ class StudioView(QGraphicsView):
         self._grid_visible = True
         self._follow = False
         self._follow_point = None
+        self._follow_yaw = 0.0
+        self._applied_yaw = 0.0
 
     # ------------------------------------------------------------------ 줌/팬
     def wheelEvent(self, event):
         factor = 1.2 if event.angleDelta().y() > 0 else 1.0 / 1.2
-        current = self.transform().m11()
+        current = self._current_scale()
         if not (MIN_SCALE <= current * factor <= MAX_SCALE):
             return
         # 차량 고정 중에는 커서가 아니라 차량을 기준으로 줌합니다 -- 커서 기준으로
         # 줌하면 차가 화면 밖으로 밀렸다가 다음 pose에서 튕겨 돌아옵니다.
         if self._follow and self._follow_point is not None:
-            self.scale(factor, factor)
-            self.center_on_point(*self._follow_point)
+            self._applied_yaw = self._follow_yaw
+            self._apply_view_transform(current * factor, self._follow_yaw - math.pi / 2,
+                                       *self._follow_point)
             return
         # 커서 아래 지점이 제자리에 있도록 줌합니다.
         anchor = self.mapToScene(event.pos())
@@ -103,6 +107,7 @@ class StudioView(QGraphicsView):
             # 보이고, 왜 안 움직이는지 알 방법이 없습니다.
             if self._follow:
                 self._follow = False
+                self._derotate()
                 self.follow_released.emit()
             self._panning = True
             self._pan_from = event.pos()
@@ -141,36 +146,75 @@ class StudioView(QGraphicsView):
     def set_follow(self, follow):
         """차량 고정을 켜고 끕니다. 켤 때 아는 위치가 있으면 바로 맞춥니다.
 
+        고정 중에는 차량 헤딩이 늘 위를 향하도록 뷰 자체를 회전시킵니다(heading-up).
+        끌 때는 지금 화면 가운데 있는 지점을 그대로 둔 채 회전만 북쪽 위로 되돌립니다
+        -- 그래야 이후 팬 계산(mouseMoveEvent, 회전 없는 축 정렬 가정)이 맞습니다.
+
         위치를 이미 아는지를 돌려줍니다 -- 창이 "아직 차량 위치가 없습니다"를
         말해 줄 수 있도록.
         """
         self._follow = bool(follow)
         if self._follow and self._follow_point is not None:
-            self.center_on_point(*self._follow_point)
+            self._applied_yaw = self._follow_yaw
+            self._apply_view_transform(self._current_scale(), self._follow_yaw - math.pi / 2,
+                                       *self._follow_point)
+        else:
+            self._derotate()
         return self._follow_point is not None
 
-    def follow_to(self, x, y):
-        """차량의 새 위치. 고정이 꺼져 있어도 기억해 둡니다(켜는 순간 쓰려고)."""
+    def follow_to(self, x, y, yaw):
+        """차량의 새 위치/헤딩. 고정이 꺼져 있어도 기억해 둡니다(켜는 순간 쓰려고)."""
         self._follow_point = (x, y)
+        self._follow_yaw = yaw
         if not self._follow:
             return
         here = self.mapFromScene(QPointF(x, y))
         center = self.viewport().rect().center()
+        dyaw = math.atan2(math.sin(yaw - self._applied_yaw), math.cos(yaw - self._applied_yaw))
         if (abs(here.x() - center.x()) < self.FOLLOW_DEADZONE_PX
-                and abs(here.y() - center.y()) < self.FOLLOW_DEADZONE_PX):
+                and abs(here.y() - center.y()) < self.FOLLOW_DEADZONE_PX
+                and abs(dyaw) < self.FOLLOW_DEADZONE_RAD):
             return
-        self.center_on_point(x, y)
+        self._applied_yaw = yaw
+        self._apply_view_transform(self._current_scale(), yaw - math.pi / 2, x, y)
 
     def center_on_point(self, x, y):
-        """씬 좌표 (x, y)를 뷰포트 한가운데로.
+        """씬 좌표 (x, y)를 뷰포트 한가운데로, 회전 없이(북쪽 위).
 
         centerOn을 쓰지 않는 이유: 그것은 sceneRect 안으로 잘리는데, sceneRect는
         itemsBoundingRect에서 자동으로 나오고 라벨/핸들이
         ItemIgnoresTransformations라 그 경계가 실제 map 범위와 다릅니다. 그래서
-        팬과 같은 방식(뷰 변환을 직접 옮기기)을 씁니다.
+        뷰 변환을 직접 세우는 방식을 씁니다.
         """
+        self._apply_view_transform(self._current_scale(), 0.0, x, y)
+
+    def _derotate(self):
+        """지금 화면 가운데인 씬 좌표를 그대로 둔 채 회전만 0으로(북쪽 위)."""
+        self._applied_yaw = 0.0
         center = self.mapToScene(self.viewport().rect().center())
-        self.translate(center.x() - x, center.y() - y)
+        self.center_on_point(center.x(), center.y())
+
+    def _current_scale(self):
+        """씬 1 m당 픽셀 수. 회전이 걸려 있어도 유효합니다(전단 없는 강체 변환이므로)."""
+        t = self.transform()
+        return math.hypot(t.m11(), t.m12())
+
+    def _apply_view_transform(self, scale, delta, cx, cy):
+        """씬 좌표 (cx, cy)가 뷰포트 한가운데에 오도록, delta(rad)만큼 회전시켜
+        뷰 변환을 통째로 새로 세웁니다.
+
+        기존 y-up 뒤집기(scale(1,-1))에 델타 회전을 얹은 것과 같습니다. 매번
+        translate/rotate를 이어붙이면 누적 순서 때문에 부호가 헷갈리기 쉬워서,
+        최종 아핀 계수를 직접 계산해 setTransform으로 한 번에 박습니다.
+        delta == 0.0이면 지금까지의 순수 북쪽 위 변환과 정확히 같습니다.
+        """
+        c, s = math.cos(delta), math.sin(delta)
+        m11, m12 = scale * c, scale * s
+        m21, m22 = scale * s, -scale * c
+        center = self.viewport().rect().center()
+        dx = center.x() - m11 * cx - m21 * cy
+        dy = center.y() - m12 * cx - m22 * cy
+        self.setTransform(QTransform(m11, m12, m21, m22, dx, dy))
 
     # ------------------------------------------------------------------ 화면 맞춤
     def frame(self, rect, pad_m=5.0):
@@ -190,7 +234,7 @@ class StudioView(QGraphicsView):
             self.scale(MAX_SCALE / current, MAX_SCALE / current)
 
     def meters_per_pixel(self):
-        scale = abs(self.transform().m11())
+        scale = self._current_scale()
         return 1.0 / scale if scale else 0.0
 
     def set_grid_visible(self, visible):

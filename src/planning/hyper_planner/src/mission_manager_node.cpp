@@ -1162,7 +1162,7 @@ private:
 
   // ------------------------------------------------------------------ 막힘 처리
   //
-  // 경로를 벗어나지 않는 컨트롤러(ForwardFollowPath/ReverseFollowPath = RPP)는 앞이
+  // 경로를 벗어나지 않는 컨트롤러(FRPP/RRPP = RPP)는 앞이
   // 막히면 회피하지 않고 제어를 포기합니다. controller_server는 그동안 0 속도를 내보내다
   // failure_tolerance가 지나면 액션을 abort 합니다. 그 abort는 "설정이 틀렸다"가 아니라
   // "지금 못 간다"이므로, goal_retry_limit을 태워 미션을 죽일 이유가 없습니다.

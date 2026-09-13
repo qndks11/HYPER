@@ -52,6 +52,6 @@ steps:
   # (mission_manager_node.cpp의 check_cancel_on_arrival).
   #
   # To do MPPI, Use the second one. To do RPP, Use the first one.
-  - {type: drive, until: course_end, controller: ForwardFollowPath,
+  - {type: drive, until: course_end, controller: FRPP,
      cancel_on_arrival_m: 0.4}
   # - {type: drive, until: course_end, cancel_on_arrival_m: 0.4}

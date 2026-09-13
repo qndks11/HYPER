@@ -388,7 +388,7 @@ ros2 service call /mission_manager/probe_costmap std_srvs/srv/Trigger
 ### 후진 세그먼트 (`reverse: true`)
 
 주차는 후진으로 녹화한 구간을 되짚어 갑니다. 이 구간은 MPPI가 아니라 RPP를 씁니다
-(`controller: ReverseFollowPath`). MPPI는 `vx_min`으로 후진을 허용할 뿐이고 `PreferForwardCritic`이
+(`controller: RRPP`). MPPI는 `vx_min`으로 후진을 허용할 뿐이고 `PreferForwardCritic`이
 후진에 벌점을 주므로 주차칸까지 밀어 넣는 기동을 안정적으로 못 냅니다.
 
 `reverse: true`가 실제로 하는 일은 세 가지뿐입니다.
@@ -544,7 +544,7 @@ best-effort로 맞춰 두었습니다(발행 측이 SensorDataQoS라 Reliable로
 정지선보다 12 m 더 뻗어 있는 것이 정상입니다.
 
 `/received_global_plan`과 `/lookahead_point`은 RPP 전용 토픽입니다. 기본 주행 컨트롤러가
-MPPI로 바뀐 뒤로는 `ReverseFollowPath`(후진 주차) 세그먼트가 돌 때만 나옵니다. 평상시
+MPPI로 바뀐 뒤로는 `RRPP`(후진 주차) 세그먼트가 돌 때만 나옵니다. 평상시
 주행 중에 컨트롤러가 무엇을 보고 있는지는 `/transformed_global_plan`으로 확인하세요.
 
 MPPI 쪽 두 토픽은 `nav2_controller.yaml`의 `MPPI.visualize: true`일 때만 나갑니다.

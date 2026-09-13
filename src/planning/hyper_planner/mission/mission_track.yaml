@@ -52,7 +52,7 @@
 #
 # 컨트롤러
 # --------
-# 이 코스는 RPP(ForwardFollowPath)가 기본이고, s자 구간에서만 MPPI로
+# 이 코스는 RPP(FRPP)가 기본이고, s자 구간에서만 MPPI로
 # 바꿉니다. MPPI는 장애물을 만나면 비켜 가고 RPP는 경로를 지키다 포기하는데, 연속
 # 회피가 필요한 곳은 s자뿐이기 때문입니다.
 #
@@ -110,7 +110,7 @@ courses:
 
   # 2) T자 주차 갈래. 두 CSV 모두 common_1의 끝(park_t_entry)에서 *후진으로* 시작합니다
   #    -- 녹화가 그렇게 되어 있습니다(t_left #0~23, t_right #0~24가 후진 구간). 그래서
-  #    갈래의 첫 스텝이 ReverseFollowPath이고, 칸 안의 방향 전환점이 *_spot 라벨입니다.
+  #    갈래의 첫 스텝이 RRPP이고, 칸 안의 방향 전환점이 *_spot 라벨입니다.
   t_left:
     csv: track/t_left.csv
     # t_left_spot은 후진 끝(방향 전환점)입니다 -- wp #23.
@@ -185,7 +185,7 @@ courses:
 # step 종류:
 #   drive        경로를 따라 `until` 라벨까지 주행. 한 세그먼트 = follow_path 골 1개.
 #                controller/goal_checker로 nav2 플러그인을 골라 쓸 수 있습니다
-#                (nav2_controller.yaml에 등록된 이름: MPPI / ReverseFollowPath,
+#                (nav2_controller.yaml에 등록된 이름: MPPI / RRPP,
 #                 general_goal_checker / precise_goal_checker).
 #                reverse: true 는 "이 구간은 후진으로 녹화했다"는 표시입니다.
 #                포즈 방향은 CSV의 yaw(= 실제 차체 헤딩)를 그대로 쓰므로 뒤집지 않습니다
@@ -250,7 +250,7 @@ courses:
 #                막혀 있으면 그때는 실패로 끝냅니다(영영 서 있는 것보다 낫습니다).
 #                0 = 끔 -- 그때는 goal_retry_limit(기본 2)이 소진되는 즉시 미션 실패입니다.
 #
-#                경로를 벗어나지 않는 컨트롤러(ForwardFollowPath / ReverseFollowPath)에서만
+#                경로를 벗어나지 않는 컨트롤러(FRPP / RRPP)에서만
 #                의미가 있습니다. MPPI는 애초에 막히면 비켜 가므로 abort 자체가
 #                거의 안 납니다.
 #   stop         duration_s 동안 정지. 골을 안 보내면 cmd_vel_to_ackermann의
@@ -338,7 +338,7 @@ steps:
       - {value: "start_right", goto: start_right_route}
 
   # [1~2] 합류 뒤 첫 신호등.
-  - {type: drive, course: common_1, until: light_1, controller: ForwardFollowPath,
+  - {type: drive, course: common_1, until: light_1, controller: FRPP,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
   - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
      prearm_distance_m: 12.0}
@@ -347,14 +347,14 @@ steps:
   # 앞뒤 경계에서 서지 않도록 handoff_m으로 골을 갈아끼웁니다(컨트롤러 전환).
   # 이 세 스텝에 decel_profile_a / cancel_on_arrival_m이 없는 것은 실수가 아닙니다:
   # 둘 다 "라벨에서 선다"는 뜻이라 handoff와 같이 쓸 수 없습니다.
-  - {type: drive, course: common_1, until: s_curve_start, controller: ForwardFollowPath, handoff_m: 6.0}
+  - {type: drive, course: common_1, until: s_curve_start, controller: FRPP, handoff_m: 6.0}
   - {type: drive, course: common_1, until: s_curve_end, controller: MPPI, handoff_m: 6.0}
   # cone_2는 T주차 안내 표지를 읽는 지점입니다(판정은 아직 미구현 -- 아래 [7] 참고).
   # 라벨만 두고 그대로 통과합니다 -- ~/goto_step으로 이 구간부터 다시 달릴 때 씁니다.
-  - {type: drive, course: common_1, until: cone_2, controller: ForwardFollowPath, handoff_m: 6.0}
+  - {type: drive, course: common_1, until: cone_2, controller: FRPP, handoff_m: 6.0}
 
   # [6] T자 주차 갈림길까지. common_1은 여기서 끝납니다(park_t_entry = last).
-  - {type: drive, course: common_1, until: park_t_entry, controller: ForwardFollowPath,
+  - {type: drive, course: common_1, until: park_t_entry, controller: FRPP,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
   # [7] T자 주차 갈래.
@@ -377,7 +377,7 @@ steps:
       - {value: "t_right", goto: t_right_route}
 
   # [8~9] 합류(common_2) 뒤 두 번째 신호등.
-  - {type: drive, course: common_2, until: light_3, controller: ForwardFollowPath,
+  - {type: drive, course: common_2, until: light_3, controller: FRPP,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
   - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
      prearm_distance_m: 12.0}
@@ -385,14 +385,14 @@ steps:
   # [10~11] 가속 구간. 여기는 원래부터 RPP여야 하는 곳입니다 -- 장애물 앞에서 비켜 가지
   # 않고 반드시 서야 합니다. obstacle_hold_s가 그 정지를 미션 실패가 아니라 대기로
   # 다룹니다(1초마다 같은 골을 다시 보내고, 30초 넘게 막혀 있으면 그때 실패).
-  - {type: drive, course: common_2, until: accel_start, controller: ForwardFollowPath,
+  - {type: drive, course: common_2, until: accel_start, controller: FRPP,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
-  - {type: drive, course: common_2, until: accel_end, controller: ForwardFollowPath,
+  - {type: drive, course: common_2, until: accel_end, controller: FRPP,
      goal_checker: precise_goal_checker, obstacle_hold_s: 30.0,
      cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
   # [12] 평행 주차 갈림길까지. common_2는 여기서 끝납니다(park_p_entry = last).
-  - {type: drive, course: common_2, until: park_p_entry, controller: ForwardFollowPath,
+  - {type: drive, course: common_2, until: park_p_entry, controller: FRPP,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
   # [13] 평행 주차 갈래. [7]과 같이 판정 조건이 아직 없습니다.
@@ -406,7 +406,7 @@ steps:
       - {value: "p_down", goto: p_down_route}
 
   # [14] 합류(common_3) -- 마지막 차선 갈림길까지.
-  - {type: drive, course: common_3, until: common_3_end, controller: ForwardFollowPath,
+  - {type: drive, course: common_3, until: common_3_end, controller: FRPP,
      goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
 
   # [15] 마지막 차선 갈래. 나란히 선 표지판 세 장 중 **왼쪽 두 장**을 object_detection이
@@ -427,50 +427,50 @@ steps:
 routes:
   # 출발 갈래: 정지선에서 5초 정차한 뒤 코스 끝까지. 끝나면 [1]로 합류합니다.
   start_left_route:
-    - {type: drive, course: start_left, until: stopline_left, controller: ForwardFollowPath,
+    - {type: drive, course: start_left, until: stopline_left, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
     - {type: stop, duration_s: 5.0}
-    - {type: drive, course: start_left, until: start_left_end, controller: ForwardFollowPath}
+    - {type: drive, course: start_left, until: start_left_end, controller: FRPP}
   start_right_route:
-    - {type: drive, course: start_right, until: stopline_right, controller: ForwardFollowPath,
+    - {type: drive, course: start_right, until: stopline_right, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
     - {type: stop, duration_s: 5.0}
-    - {type: drive, course: start_right, until: start_right_end, controller: ForwardFollowPath}
+    - {type: drive, course: start_right, until: start_right_end, controller: FRPP}
 
   # T자 주차: 분기 지점에서 곧바로 후진 입고 -> 정차 -> 전진 출차. 출차가 별도 갈래
   # 스텝인 이유는 RPP가 한 경로 안의 방향 전환을 처리하지 못하기 때문입니다.
   # 후진 스텝에는 cancel_on_arrival_m을 켜지 마세요 -- 짧게 서면 칸에 덜 들어갑니다.
   t_left_route:
-    - {type: drive, course: t_left, until: t_left_spot, controller: ReverseFollowPath,
+    - {type: drive, course: t_left, until: t_left_spot, controller: RRPP,
        reverse: true, goal_checker: park_goal_checker}
     - {type: stop, duration_s: 3.0}
-    - {type: drive, course: t_left, until: t_left_end, controller: ForwardFollowPath}
+    - {type: drive, course: t_left, until: t_left_end, controller: FRPP}
   t_right_route:
-    - {type: drive, course: t_right, until: t_right_spot, controller: ReverseFollowPath,
+    - {type: drive, course: t_right, until: t_right_spot, controller: RRPP,
        reverse: true, goal_checker: park_goal_checker}
     - {type: stop, duration_s: 3.0}
-    - {type: drive, course: t_right, until: t_right_end, controller: ForwardFollowPath}
+    - {type: drive, course: t_right, until: t_right_end, controller: FRPP}
 
   # 평행 주차. p_up만 진입 스텝이 하나 더 있습니다(녹화가 전진 -> 후진 -> 전진).
   # 진입 스텝의 cancel_on_arrival_m는 정지선(0.4)보다 작게 잡습니다: 진입에서 덜 간
   # 거리가 그대로 칸 안 정지 오차에 더해집니다.
   p_up_route:
-    - {type: drive, course: p_up, until: p_up_entry, controller: ForwardFollowPath,
+    - {type: drive, course: p_up, until: p_up_entry, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.15, decel_profile_a: 1.5}
-    - {type: drive, course: p_up, until: p_up_spot, controller: ReverseFollowPath,
+    - {type: drive, course: p_up, until: p_up_spot, controller: RRPP,
        reverse: true, goal_checker: park_goal_checker}
     - {type: stop, duration_s: 3.0}
-    - {type: drive, course: p_up, until: p_up_end, controller: ForwardFollowPath}
+    - {type: drive, course: p_up, until: p_up_end, controller: FRPP}
   p_down_route:
-    - {type: drive, course: p_down, until: p_down_spot, controller: ReverseFollowPath,
+    - {type: drive, course: p_down, until: p_down_spot, controller: RRPP,
        reverse: true, goal_checker: park_goal_checker}
     - {type: stop, duration_s: 3.0}
-    - {type: drive, course: p_down, until: p_down_end, controller: ForwardFollowPath}
+    - {type: drive, course: p_down, until: p_down_end, controller: FRPP}
 
   # 마지막 차선. 여기서 끝나면 미션 종료입니다([15]가 main의 마지막 스텝입니다).
   end_left_route:
-    - {type: drive, course: end_left, until: end_left_end, controller: ForwardFollowPath,
+    - {type: drive, course: end_left, until: end_left_end, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
   end_right_route:
-    - {type: drive, course: end_right, until: end_right_end, controller: ForwardFollowPath,
+    - {type: drive, course: end_right, until: end_right_end, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}

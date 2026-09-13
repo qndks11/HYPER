@@ -27,14 +27,14 @@ controller_server:
     # mission.launch.py의 speed_limit_topic도 같이 바꾸세요.
     #
     # 주의: controller_server는 들어온 제한을 등록된 *모든* 컨트롤러에 겁니다
-    # (MPPI와 ReverseFollowPath 양쪽). 그래서 mission_manager는 프로파일 구간을
+    # (MPPI와 RRPP 양쪽). 그래서 mission_manager는 프로파일 구간을
     # 벗어나는 즉시 0.0(NO_SPEED_LIMIT)을 보내 해제합니다 -- 안 그러면 뒤따르는 후진
     # 주차 스텝에서 RPP가 그 제한 속도로 기어갑니다.
     speed_limit_topic: "speed_limit"
 
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker", "precise_goal_checker", "park_goal_checker"]
-    controller_plugins: ["MPPI", "ForwardFollowPath", "ReverseFollowPath"]
+    controller_plugins: ["MPPI", "FRPP", "RRPP", "FRPP_NC"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -66,7 +66,7 @@ controller_server:
       xy_goal_tolerance: 0.25
       yaw_goal_tolerance: 3.15
 
-    # 후진 주차(ReverseFollowPath) 전용 goal checker.
+    # 후진 주차(RRPP) 전용 goal checker.
     #
     # RPP의 곡률은 2*y_carrot / L^2 (L = carrot까지의 실제 거리)입니다. 남은 경로가
     # lookahead_dist보다 짧아지면(주차 골 직전) carrot이 경로 끝점으로 고정되고 L이
@@ -156,7 +156,7 @@ controller_server:
       # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
       visualize: false
 
-      vx_max: 0.85   # 임시 저속 테스트 (원래 2.22)
+      vx_max: 1.3   # 임시 저속 테스트 (원래 2.22)
       vx_min: 0.0
       wz_max: 0.77
       # vx_std/wz_std는 위 gamma 주석의 한 묶음입니다(gamma와 함께만 바꾸세요).
@@ -319,7 +319,7 @@ controller_server:
         # PreferForwardCritic이 담당합니다.
         forward_preference: false
 
-    # 전진 RPP(mission.yaml에서 controller: ForwardFollowPath).
+    # 전진 RPP(mission.yaml에서 controller: FRPP).
     #
     # 쓰는 이유: MPPI는 장애물을 만나면 *비켜서* 지나갑니다. 가속 구간처럼 장애물 앞에서
     # 반드시 서야 하는 세그먼트에서는 그 회피가 곧 실격입니다. RPP는 준 경로를 벗어나지
@@ -338,10 +338,10 @@ controller_server:
     # 이 구간의 감속은 전적으로 mission_manager의 decel 프로파일(/speed_limit)이 냅니다.
     # RPP 자신의 approach 감속은 경로 끝(라벨보다 12 m 뒤) 기준이라 라벨에서는 안 걸립니다.
     # 따라서 이 컨트롤러를 쓰는 스텝에는 decel_profile_a + cancel_on_arrival_m가 필수입니다.
-    ForwardFollowPath:
+    FRPP:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # MPPI vx_max와 같은 순항 속도. 실제 상한은 /speed_limit이 더 낮게 깎습니다.
-      desired_linear_vel: 0.85
+      desired_linear_vel: 1.30
       # 속도 비례 lookahead (2.22 m/s에서 1.0초 = 2.22 m, min 1.0 / max 6.0 사이).
       use_velocity_scaled_lookahead_dist: true
       lookahead_time: 1.0
@@ -376,7 +376,7 @@ controller_server:
       allow_reversing: false
       max_robot_pose_search_dist: 10.0
 
-    # 후진 주차 전용 컨트롤러(mission.yaml에서 controller: ReverseFollowPath).
+    # 후진 주차 전용 컨트롤러(mission.yaml에서 controller: RRPP).
     #
     # MPPI가 아니라 RPP인 이유: MPPI는 vx_min으로 후진을 "허용"할 뿐이고 후진을 벌점화하는
     # PreferForwardCritic이 켜져 있어, 주차칸으로 끝까지 밀어 넣는 기동을 안정적으로 못 냅니다.
@@ -389,9 +389,9 @@ controller_server:
     #        mission.yaml에서 반드시 세그먼트를 쪼개야 합니다.
     # 주의 3: 이 컨트롤러는 준 경로를 벗어나지 않습니다. 주차 구간에 장애물이 있으면
     #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
-    ReverseFollowPath:
+    RRPP:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.85
+      desired_linear_vel: 1.30
       lookahead_dist: 1.0
       min_lookahead_dist: 0.6
       max_lookahead_dist: 1.2
@@ -420,6 +420,41 @@ controller_server:
       rotate_to_heading_min_angle: 0.785
       max_angular_accel: 3.2
       allow_reversing: true
+      max_robot_pose_search_dist: 10.0
+
+    # 전진 RPP, costmap 무시판(mission.yaml에서 controller: FRPP_NC).
+    #
+    # FRPP와 파라미터는 동일하되 use_collision_detection을 껐습니다. 이 스위치가 꺼지면
+    # computeVelocityCommands가 매 주기 costmap/footprint 조회를 아예 하지 않으므로(위
+    # FRPP 주석 참고) 이 컨트롤러는 라이다/drivable_area가 뭘 보든 준 경로를 그대로
+    # 따라갑니다 -- 장애물 앞에서 서는 대신 뚫고 지나갑니다. 경로가 실제로 비어 있다고
+    # 확신할 수 있는 구간에서만 쓰세요(호출하는 쪽이 안전 책임을 집니다).
+    FRPP_NC:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 1.30
+      use_velocity_scaled_lookahead_dist: true
+      lookahead_time: 1.0
+      lookahead_dist: 2.0
+      min_lookahead_dist: 1.0
+      max_lookahead_dist: 6.0
+      use_interpolation: true
+      transform_tolerance: 0.2
+      min_approach_linear_velocity: 0.15
+      approach_velocity_scaling_dist: 1.0
+      # costmap을 아예 안 보므로 충돌 검사 자체가 꺼집니다.
+      use_collision_detection: false
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 1.30
+      regulated_linear_scaling_min_speed: 0.25
+      use_cost_regulated_linear_velocity_scaling: false
+      cost_scaling_dist: 0.3
+      cost_scaling_gain: 1.0
+      inflation_cost_scaling_factor: 3.0
+      use_rotate_to_heading: false
+      rotate_to_heading_angular_vel: 0.8
+      rotate_to_heading_min_angle: 0.785
+      max_angular_accel: 3.2
+      allow_reversing: false
       max_robot_pose_search_dist: 10.0
 
 
@@ -583,7 +618,7 @@ cmd_vel_to_ackermann:
     max_steering_angle: 0.5061455
     # MPPI.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
-    max_velocity: 0.85
+    max_velocity: 1.30
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.
