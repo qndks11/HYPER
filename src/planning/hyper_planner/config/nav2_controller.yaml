@@ -156,42 +156,7 @@ controller_server:
       # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
       visualize: false
 
-      # vx_min = 0 = 후진 금지. MPPI가 후진 궤적을 아예 샘플링하지 않습니다.
-      # (후진이 필요한 주차 구간은 별도의 ReverseFollowPath(RPP)가 담당합니다.)
-      # wz_max는 반드시 vx_max / min_turning_r로 두세요. 지금은 1.0 / 1.30 = 0.77입니다.
-      #
-      # 1.6 -> 0.77. 1.6은 vx_max 2.22 시절 값이라 지금은 물리적으로 불가능한 샘플을
-      # 만들었습니다: vx 1.0에 wz 1.6이면 회전반경 0.63 m로, 최소 회전반경(1.30 m)의
-      # 절반입니다. 이런 샘플은 급커브에서 "제자리에서 홱 돈다"는 이유로 PathAlign/
-      # PathAngle 점수를 잘 받는데, 실제로는 못 하는 기동입니다. nav2가 아커만 제약을
-      # 거는 곳은 두 군데뿐이고 둘 다 이걸 못 막습니다:
-      #   - AckermannMotionModel::applyConstraints()는 1000개 샘플이 아니라
-      #     *최종 평균 제어 시퀀스 하나*에만 걸리고, |vx|/|wz| < min_turning_r이면
-      #     wz를 vx/min_turning_r로 깎습니다 -- vx를 올려 주지는 않습니다.
-      #   - ConstraintCritic이 max(min_turning_r - |vx|/|wz|, 0)을 벌하지만
-      #     weight 4.0 x min_turning_r x 지평선시간으로 상한이 있어 약합니다.
-      # 결국 "느리게 + 많이 꺾는" 샘플이 이기고, 그 평균에 applyConstraints가 걸려
-      # 속도는 낮은 채 조향만 깎인 상태가 됩니다 -- 급커브에서 0에 가깝게 기어가는 증상.
-      # 애초에 그런 샘플을 못 뽑게 하는 게 이 값입니다.
-      #
-      # 이렇게 두면 /speed_limit(setSpeedLimit)이 vx_max와 wz에 같은 ratio를 곱해도
-      # 최소 회전반경이 그대로 보존된다는 이점도 있습니다(감속 프로파일 구간에서 조향
-      # 여력만 따로 줄어들지 않습니다).
-      #
-      # 6.0 -> 2.5 -> 2.22(= 8 km/h 상한). 6 m/s(= 21.6 km/h)에서는 obstacle_max_range(6.0 m)가 1.0초치 시야밖에
-      # 안 됐고, 거기서 센서/costmap/컨트롤러 지연 약 0.3초를 빼면 실제 반응 거리가 4 m
-      # 남짓이었습니다. 2.22 m/s면 같은 6 m가 2.7초가 되어 회피 기동을 짤 여유가 생깁니다.
-      # 언덕(hill) 때문에 obstacle_max_range를 못 올리는 동안의 대응입니다.
-      #
-      # 이 값을 바꾸면 mission_manager의 controller_vx_max도 반드시 같이 바꾸세요
-      # (launch/mission.launch.py, src/mission_manager_parameters.yaml). 다르면
-      # setSpeedLimit의 ratio가 1을 넘어 vx_max를 오히려 올려 버립니다.
-      # !! vx_max를 바꾸면 아래 네 값을 반드시 같이 바꾸세요 !!
-      #      wz_max = vx_max / 1.30
-      #      vx_std = vx_max * 0.21,  wz_std = wz_max * 0.26
-      #      gamma  = vx_std^2 * 0.0567   (= 순항속도 7.1 m/s 유지)
-      #    2.22로 되돌릴 때: wz_max 1.71, vx_std 0.47, wz_std 0.44, gamma 0.0125.
-      vx_max: 2.22   # 임시 저속 테스트 (원래 2.22)
+      vx_max: 0.85   # 임시 저속 테스트 (원래 2.22)
       vx_min: 0.0
       wz_max: 0.77
       # vx_std/wz_std는 위 gamma 주석의 한 묶음입니다(gamma와 함께만 바꾸세요).
@@ -376,7 +341,7 @@ controller_server:
     ForwardFollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # MPPI vx_max와 같은 순항 속도. 실제 상한은 /speed_limit이 더 낮게 깎습니다.
-      desired_linear_vel: 2.22
+      desired_linear_vel: 0.85
       # 속도 비례 lookahead (2.22 m/s에서 1.0초 = 2.22 m, min 1.0 / max 6.0 사이).
       use_velocity_scaled_lookahead_dist: true
       lookahead_time: 1.0
@@ -426,7 +391,7 @@ controller_server:
     #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
     ReverseFollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 2.22
+      desired_linear_vel: 0.85
       lookahead_dist: 1.0
       min_lookahead_dist: 0.6
       max_lookahead_dist: 1.2
@@ -486,6 +451,10 @@ local_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
+        # 아래 scan.min_obstacle_height와 별개로 레이어에도 하한이 있습니다(기본 0.0). 소스 쪽은
+        # 버퍼에 넣을 때, 이쪽은 마킹할 때 거르므로 둘 다 낮춰야 합니다 -- 소스만 낮추면 경고
+        # 한 줄 없이 costmap이 계속 0으로 비어 있습니다. 이유는 scan 블록 주석 참고.
+        min_obstacle_height: -1.0
         observation_sources: scan
         # 전방 180도만 옵니다(vehicle.xacro: min/max_angle -pi/2..+pi/2, 360 samples).
         # 따라서 아래 raytrace_max_range 20.0이 지우는 것도 앞쪽 절반뿐입니다.
@@ -511,6 +480,11 @@ local_costmap:
           # 여전히 버려지므로, 실차에서는 `ros2 topic echo /scan`으로 확인하세요.
           inf_is_valid: true
           max_obstacle_height: 2.0
+          # 기본값 0.0이면 odom에서 z < 0인 점을 전부 버립니다. EKF가 2D라 body_link는 z=0이고,
+          # 실측 라이다 높이(vehicle.xacro)로는 lidar_link가 body_link보다 3 cm 아래라 스캔
+          # 평면이 z=-0.03이 됩니다 -- 그대로 두면 costmap이 통째로 0으로 비었습니다.
+          # LaserScan은 한 평면이라 바닥을 낮춰도 지면 반사가 더 들어오지 않습니다.
+          min_obstacle_height: -1.0
           # 15.0 -> 6.0. 언덕(hill) 대책 stopgap입니다. 수평 라이다(지면 위 약 0.8 m)는
           # 노면이 오목하게 휘는 구간(오르막 아랫부분/내리막 아랫부분)에서 노면 자체를
           # 때리는데, 그 지점이 대략 7~8 m 앞입니다. tf에 피치가 없어(ekf_local two_d_mode)
@@ -609,7 +583,7 @@ cmd_vel_to_ackermann:
     max_steering_angle: 0.5061455
     # MPPI.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
-    max_velocity: 3.0
+    max_velocity: 0.85
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.

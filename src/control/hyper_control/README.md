@@ -46,4 +46,9 @@ ros2 launch hyper_control joystick.launch.py
 ros2 launch hyper_control estop.launch.py launch_joy_node:=true   # 정지/재개 버튼만
 ```
 
+`joystick.launch.py`는 nav2 로컬 코스트맵(`/local_costmap/costmap`)도 같이 띄웁니다
+(`hyper_planner`의 `nav2_controller.launch.py`를 `use_cmd_vel_to_ackermann:=false`로 포함 --
+`/velocity`를 내는 노드는 여전히 `joystick_controller_node` 하나뿐입니다). 끄려면
+`use_costmap:=false`. 코스트맵이 채워지려면 odometry TF와 `/scan`이 떠 있어야 합니다.
+
 Gazebo 시뮬레이션은 이 패키지의 모델과 컨트롤러를 사용하며, 실행은 `hyper_gazebo` 또는 `hyper_launch`에서 담당합니다.

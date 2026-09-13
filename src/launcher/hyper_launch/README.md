@@ -53,6 +53,10 @@ Terminal 7: Joystick
 ros2 launch hyper_control joystick.launch.py joystick_publish_period:=0.0
 ```
 
+로컬 코스트맵(`/local_costmap/costmap`)도 같이 뜹니다 -- 미션 없이 웨이포인트 스튜디오나
+RViz에서 볼 수 있습니다. 끄려면 `use_costmap:=false`. Terminal 2(`/scan`)와
+Terminal 3(odometry TF)이 떠 있어야 코스트맵이 채워집니다(TF가 나올 때까지 기다립니다).
+
 ### Real car Mission
 
 Terminal 7: Perception (optional)

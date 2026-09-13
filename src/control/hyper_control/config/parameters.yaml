@@ -3,8 +3,10 @@
     # Body params (헤네스 브룬 T8 Sport 실측 제원 기반)
     body_length: 1.33 # 차량 실제 전장 (실측) [m]
     body_width: 0.77 # 차량 실제 전폭 (실측) [m]
-    body_height: 0.40 # 차량 전고 기준 섀시/프레임 근사 높이 [m]
+    body_height: 0.28 # 차량 전고 기준 섀시/프레임 근사 높이 [m]
     body_density: 150.0 # 차체가 플라스틱(ABS) 내부 프레임 위주이므로, 실중량(약 30~35kg)에 맞춰 밀도 대폭 하향 [kg/m^3]
+    car_body_lowest_point_from_ground: 0.17
+    car_body_origin_point_from_ground: 0.31
 
     # 전/후 차축 간 거리 (실측). body_length와 별개 값이므로 명시적으로 지정해야
     # 시뮬레이터 Ackermann 기구학이 실차와 일치한다. nav2_controller.yaml / hyper_interface와 동일.
@@ -19,7 +21,7 @@
     max_steering_angle: 0.5061455 # 최대 조향각 29도 (실측) [rad]
     max_steering_angular_velocity: 2.0 # 고성능 조향 모터/서보 반영으로 상향 [rad/s]
     max_steering_effort: 15.0 # 대형 차체를 돌리기 위한 조향 토크 상향 [Nm]
-    max_velocity: 3.0 # 저속 테스트용으로 하향 (원래 T8 Sport 순정 최고 속도는 약 16km/h=10.0) [m/s]
+    max_velocity: 0.85 # 저속 테스트용으로 하향 (원래 T8 Sport 순정 최고 속도는 약 16km/h=10.0) [m/s]
     max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
 
     # Camera and image params (Logitech C920, 일반 70도 hfov 렌즈, 전방)
@@ -40,3 +42,10 @@
     # 시뮬레이터가 다른 종횡비로 렌더링하면 실차와 다른 BEV가 나옵니다.
     image_width: 640 # 센서 1280x720의 1/2, 16:9 유지 [pixels]
     image_height: 360 # 센서 1280x720의 1/2, 16:9 유지 [pixels]
+
+    antenna_height_from_ground: 1.283
+    rover_gps_offset_from_front_bumper: -0.61
+    gps_offset_from_front_bumper: -1.20
+
+    lidar_offset_from_front_bumper: 0.08
+    lidar_height_from_ground: 0.28

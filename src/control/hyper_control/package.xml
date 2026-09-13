@@ -23,6 +23,8 @@
   <exec_depend>libopencv-dev</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>rosbridge_suite</exec_depend>
+  <!-- joystick.launch.py가 로컬 코스트맵용 nav2_controller.launch.py를 포함합니다 -->
+  <exec_depend>hyper_planner</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

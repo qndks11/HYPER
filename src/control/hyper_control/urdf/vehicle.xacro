@@ -66,6 +66,13 @@
   <xacro:property name="wheel_inertia_z" value="${1.0/2.0 * wheel_mass * wheel_radius * wheel_radius}"/>
   <xacro:property name="max_wheel_angular_velocity" value="${max_velocity / wheel_radius}"/>
 
+  <xacro:property name="antenna_height_from_ground" value="$(arg antenna_height_from_ground)"/>
+  <xacro:property name="car_body_origin_point_from_ground" value="$(arg car_body_origin_point_from_ground)"/>
+  <xacro:property name="lidar_height_from_ground" value="$(arg lidar_height_from_ground)"/>
+  <xacro:property name="rover_gps_offset_from_front_bumper" value="$(arg rover_gps_offset_from_front_bumper)"/>
+  <xacro:property name="gps_offset_from_front_bumper" value="$(arg gps_offset_from_front_bumper)"/>
+  <xacro:property name="lidar_offset_from_front_bumper" value="$(arg lidar_offset_from_front_bumper)" />
+  
   <!-- Links -->
 
   <!-- Body Link -->
@@ -328,7 +335,7 @@
        GPS 위치를 차량 중심 기준으로 옮깁니다. 즉 여기 xyz를 바꾸면 글로벌 EKF가
        내는 위치가 그만큼 통째로 움직입니다 — 실측 없이 건드리지 마세요. -->
   <joint name="gps_joint" type="fixed">
-    <origin xyz="-0.23 0 0.947" rpy="0 0 0"/>
+    <origin xyz="${body_length/2 + gps_offset_from_front_bumper} 0 ${antenna_height_from_ground - car_body_origin_point_from_ground}" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="gps_link"/>
   </joint>
@@ -379,24 +386,14 @@
        Sensor"), 시뮬레이션은 듀얼 안테나 헤딩을 흉내내지 않는다. 그래서 여기에는
        대응하는 <gazebo> 센서 블록을 일부러 두지 않는다. -->
   <joint name="gps_rover_joint" type="fixed">
-    <origin xyz="0.37 0 0.947" rpy="0 0 0"/>
+    <origin xyz="${body_length/2 + rover_gps_offset_from_front_bumper} 0 ${antenna_height_from_ground - car_body_origin_point_from_ground}" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="gps_rover_link"/>
   </joint>
 
-<!-- LiDAR Fixed Joint -->
-  <!-- 스캔 평면 높이 = wheel_radius*1.5 + body_height/2 + 이 오프셋
-       = 0.30 + 0.20 + 0.15 = 지면 위 0.65 m (parameters.yaml 기준값).
-       0.25 -> 0.15으로 10 cm 낮췄습니다. 이유:
-         - 이전 높이(0.75 m)는 hatchback 장애물 지붕(0.778 m)의 위쪽 2.8 cm를 스치기만 해서,
-           피치에 따라 반사가 들어왔다 말았다 했습니다(= local costmap이 비어 MPPI가 직진).
-           0.65 m면 지붕보다 12.8 cm 아래라 차체를 확실히 때립니다.
-         - 아래로는 차체 박스 윗면(0.50 m)보다 15 cm 위여야 gpu_lidar가 자기 차체에
-           가리지 않습니다.
-       주의: 이 xacro는 real.launch.py도 같이 씁니다. 실차 라이다를 실제로 0.65 m로
-       내려 달지 않으면 body_link->lidar_link TF가 실측과 어긋납니다. -->
+
   <joint name="lidar_joint" type="fixed">
-    <origin xyz="0.15 0 ${body_height/2 + 0.15}" rpy="0 0 0"/>
+    <origin xyz="${body_length/2 + lidar_offset_from_front_bumper} 0 ${lidar_height_from_ground - car_body_origin_point_from_ground}" rpy="0 0 0"/>
     <parent link="body_link"/>
     <child link="lidar_link"/>
   </joint>
