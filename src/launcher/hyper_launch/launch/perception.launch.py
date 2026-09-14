@@ -16,12 +16,6 @@ def generate_launch_description():
         # stage; see stage()'s launch_arguments in both.
         DeclareLaunchArgument('lane_input_backend', default_value='intra_process'),
 
-        # Forwarded to hyper_lane_detection's drivable.enabled parameter. Off by default -- see
-        # the argument's own comment in hyper_object_detection's perception.launch.py, and note
-        # that the consumer (drivable_area_layer in hyper_planner's nav2_controller.yaml) has to
-        # be enabled separately for this to change what the vehicle does.
-        DeclareLaunchArgument('drivable_area', default_value='false'),
-
         # Forwarded to hyper_object_detection's object_detection argument. false leaves the
         # camera, lane detection and image_saver_service running with no YOLO node -- the
         # image-collection setup. See that file for what stops publishing.
@@ -33,7 +27,6 @@ def generate_launch_description():
                 'launch', 'perception.launch.py')),
             launch_arguments={
                 'lane_input_backend': LaunchConfiguration('lane_input_backend'),
-                'drivable_area': LaunchConfiguration('drivable_area'),
                 'object_detection': LaunchConfiguration('object_detection'),
             }.items(),
         ),

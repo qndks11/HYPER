@@ -6,22 +6,32 @@
 # 라벨을 최근접 웨이포인트로 스냅하고, 거리가 label_snap_tolerance_m를 넘으면
 # 미션 전체를 거부합니다. 점을 옮기다 보면 그 선을 조용히 넘길 수 있으므로,
 # 스냅 거리를 실시간으로 보여 주고 넘긴 라벨은 빨갛게 칠합니다.
+#
+# 진입 금지 구역(keepout:)도 여기서 고르고, 새로 그리고, 지우고, 이름을 바꿉니다.
+# 꼭짓점 편집 자체는 캔버스에서 합니다(app_window).
 # =====================================================================
 
 from python_qt_binding.QtCore import Qt, Signal
 from python_qt_binding.QtGui import QColor
 from python_qt_binding.QtWidgets import (
-    QAbstractItemView, QCheckBox, QGroupBox, QHBoxLayout, QLabel, QListWidget,
+    QAbstractItemView, QCheckBox, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget)
 
 from .. import formats, theme
+from ..mission_model import KEEPOUT_MIN_POINTS
 
 
 class EditPanel(QWidget):
 
     label_selected = Signal(str)
     label_cleared = Signal(str)
+    label_deselected = Signal()
     cone_selected = Signal(str)
+    cone_deselected = Signal()
+    keepout_selected = Signal(int)
+    keepout_new = Signal()
+    keepout_delete = Signal()
+    keepout_renamed = Signal(str)
     save_mission = Signal()
     save_course = Signal()
     save_course_as = Signal()
@@ -105,9 +115,13 @@ class EditPanel(QWidget):
 
         self._list = QListWidget()
         self._list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._list.currentItemChanged.connect(self._on_label_selected)
+        # currentItemChanged가 아니라 선택 변화에 겁니다. 목록이 마우스가 아닌 이유로
+        # 포커스를 받으면(Tab, 대화상자 뒤 창 복귀) Qt가 첫 줄을 "현재 줄"로 잡는데,
+        # 그걸 선택으로 받으면 아무도 안 고른 라벨이 골라져 다음 클릭에 옮겨집니다.
+        self._list.itemSelectionChanged.connect(self._on_label_selection)
         self._list.setToolTip(
             '라벨을 고른 뒤 코스를 좌클릭하면 그 자리로 옮깁니다.\n'
+            '고른 채로는 캔버스 클릭이 전부 배치입니다 -- 점을 끌기 전에 Esc 또는 선택 해제로 푸세요.\n'
             '색은 스냅 거리입니다: 초록 안전, 주황 주의, 빨강이면 미션 로드가 거부됩니다.')
         labels_layout.addWidget(self._list, stretch=1)
 
@@ -117,6 +131,10 @@ class EditPanel(QWidget):
         labels_layout.addWidget(self._place_hint)
 
         label_buttons = QHBoxLayout()
+        deselect = QPushButton('선택 해제')
+        deselect.setToolTip('라벨 선택을 풉니다 (Esc).')
+        deselect.clicked.connect(self._list.clearSelection)
+        label_buttons.addWidget(deselect)
         clear = QPushButton('라벨 지우기')
         clear.clicked.connect(self._on_clear)
         self._save_mission = QPushButton('미션 저장')
@@ -142,17 +160,72 @@ class EditPanel(QWidget):
 
         self._cone_list = QListWidget()
         self._cone_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._cone_list.currentItemChanged.connect(self._on_cone_selected)
+        self._cone_list.itemSelectionChanged.connect(self._on_cone_selection)
         self._cone_list.setToolTip(
             '분기 판정에 쓰는 콘 좌표입니다(select_by: clearance). 스냅도 허용 오차도\n'
-            '없습니다 -- 고른 뒤 캔버스를 클릭하거나 끌면 그 좌표 그대로 옮겨집니다.')
+            '없습니다 -- 고른 뒤 캔버스를 클릭하거나 끌면 그 좌표 그대로 옮겨집니다.\n'
+            'Esc 또는 선택 해제로 풉니다.')
         cones_layout.addWidget(self._cone_list, stretch=1)
+
+        cone_deselect = QPushButton('선택 해제')
+        cone_deselect.setToolTip('콘 선택을 풉니다 (Esc).')
+        cone_deselect.clicked.connect(self._cone_list.clearSelection)
+        cones_layout.addWidget(cone_deselect)
 
         self._cone_place_hint = QLabel('')
         self._cone_place_hint.setWordWrap(True)
         self._cone_place_hint.setStyleSheet(f'color: {theme.COLOR_STALE};')
         cones_layout.addWidget(self._cone_place_hint)
         root.addWidget(cones, stretch=1)
+
+        # ---------------------------------------------------------- 진입 금지 구역
+        # 미션 파일의 최상위 keepout:. mission_manager가 이 다각형을 마스크로 구워 nav2
+        # local_costmap(keepout_layer, 팽창됨)에 줍니다. 저장은 "미션 저장"을 그대로 씁니다.
+        keepout = QGroupBox('진입 금지 구역')
+        keepout_layout = QVBoxLayout(keepout)
+        self._keepout_hint = QLabel('미션 파일이 열려 있지 않습니다.')
+        self._keepout_hint.setWordWrap(True)
+        self._keepout_hint.setStyleSheet(f'color: {theme.COLOR_STALE};')
+        keepout_layout.addWidget(self._keepout_hint)
+
+        self._zone_list = QListWidget()
+        self._zone_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._zone_list.currentItemChanged.connect(self._on_zone_selected)
+        self._zone_list.setToolTip(
+            '구역을 고르면 꼭짓점 핸들이 뜹니다.\n'
+            '  드래그: 꼭짓점 이동   Shift+좌클릭: 가장 가까운 변에 꼭짓점 삽입\n'
+            '  Del: 고른 꼭짓점 삭제(3개까지)   Esc: 선택 해제\n'
+            'nav2에는 lethal(254)로 들어갑니다 -- inflation을 받지 않으니 여유는 직접 그리세요.')
+        keepout_layout.addWidget(self._zone_list, stretch=1)
+
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel('이름'))
+        self._zone_name = QLineEdit()
+        self._zone_name.setEnabled(False)
+        self._zone_name.editingFinished.connect(
+            lambda: self.keepout_renamed.emit(self._zone_name.text()))
+        name_row.addWidget(self._zone_name, stretch=1)
+        keepout_layout.addLayout(name_row)
+
+        zone_buttons = QHBoxLayout()
+        self._new_zone = QPushButton('새 구역 그리기')
+        self._new_zone.setToolTip(
+            '캔버스를 클릭해 꼭짓점을 찍고 Enter / 더블클릭 / 첫 점 클릭으로 닫습니다.\n'
+            'Esc: 취소.')
+        self._new_zone.setEnabled(False)
+        self._new_zone.clicked.connect(self.keepout_new.emit)
+        self._delete_zone = QPushButton('구역 지우기')
+        self._delete_zone.setEnabled(False)
+        self._delete_zone.clicked.connect(self.keepout_delete.emit)
+        zone_buttons.addWidget(self._new_zone)
+        zone_buttons.addWidget(self._delete_zone)
+        keepout_layout.addLayout(zone_buttons)
+
+        self._zone_place_hint = QLabel('')
+        self._zone_place_hint.setWordWrap(True)
+        self._zone_place_hint.setStyleSheet(f'color: {theme.COLOR_STALE};')
+        keepout_layout.addWidget(self._zone_place_hint)
+        root.addWidget(keepout, stretch=1)
 
     # ------------------------------------------------------------------ 갱신
     def set_selected_point(self, index, x=None, y=None, yaw=None, reverse=False):
@@ -260,11 +333,7 @@ class EditPanel(QWidget):
                     '(label_snap_tolerance_m 초과).')
             self._list.addItem(item)
 
-        if active is not None:
-            for row in range(self._list.count()):
-                if self._list.item(row).data(Qt.UserRole) == active:
-                    self._list.setCurrentRow(row)
-                    break
+        self._select_row(self._list, active)
         self._save_mission.setEnabled(True)
         self._list.blockSignals(False)
 
@@ -272,8 +341,16 @@ class EditPanel(QWidget):
         self._place_hint.setText(text)
 
     def current_label(self):
-        item = self._list.currentItem()
-        return item.data(Qt.UserRole) if item else None
+        # currentItem이 아니라 선택입니다 -- 포커스만 받은 "현재 줄"을 지우면 안 됩니다.
+        items = self._list.selectedItems()
+        return items[0].data(Qt.UserRole) if items else None
+
+    def select_label(self, key):
+        """캔버스에서 고르거나 푼 것을 목록에 맞춥니다. None이면 선택과 안내를 비웁니다.
+        시그널을 막아 label_selected/label_deselected로 되돌아오지 않게 합니다."""
+        self._select_row(self._list, key)
+        if key is None:
+            self._place_hint.setText('')
 
     def set_cones(self, mission, mission_name=None, active=None):
         """mission은 MissionModel입니다(cone_names()/cones로 콘을 읽습니다)."""
@@ -295,30 +372,97 @@ class EditPanel(QWidget):
             item.setData(Qt.UserRole, key)
             self._cone_list.addItem(item)
 
-        if active is not None:
-            for row in range(self._cone_list.count()):
-                if self._cone_list.item(row).data(Qt.UserRole) == active:
-                    self._cone_list.setCurrentRow(row)
-                    break
+        self._select_row(self._cone_list, active)
         self._cone_list.blockSignals(False)
 
     def set_cone_place_hint(self, text):
         self._cone_place_hint.setText(text)
 
     def current_cone(self):
-        item = self._cone_list.currentItem()
-        return item.data(Qt.UserRole) if item else None
+        items = self._cone_list.selectedItems()
+        return items[0].data(Qt.UserRole) if items else None
+
+    def select_cone(self, key):
+        self._select_row(self._cone_list, key)
+        if key is None:
+            self._cone_place_hint.setText('')
+
+    @staticmethod
+    def _select_row(widget, key):
+        """key인 줄을 고르고, 없으면(None 포함) 선택도 현재 줄도 비웁니다. 시그널은 막습니다."""
+        blocked = widget.blockSignals(True)
+        widget.clearSelection()
+        widget.setCurrentRow(-1)
+        if key is not None:
+            for row in range(widget.count()):
+                if widget.item(row).data(Qt.UserRole) == key:
+                    widget.setCurrentRow(row)
+                    widget.item(row).setSelected(True)
+                    break
+        widget.blockSignals(blocked)
+
+    def set_keepout(self, zones, mission_name=None, active=None):
+        """zones는 MissionModel.keepout, active는 고른 구역의 인덱스(없으면 None)."""
+        self._zone_list.blockSignals(True)
+        self._zone_list.clear()
+        self._zone_name.blockSignals(True)
+        if mission_name is None:
+            self._keepout_hint.setText('미션 파일이 열려 있지 않습니다.')
+            self._zone_name.setText('')
+            self._zone_name.setEnabled(False)
+            self._new_zone.setEnabled(False)
+            self._delete_zone.setEnabled(False)
+            self._zone_name.blockSignals(False)
+            self._zone_list.blockSignals(False)
+            return
+
+        self._keepout_hint.setText(
+            f'{mission_name} -- 구역 {len(zones)}개' if zones else f'{mission_name} -- 구역 없음')
+        for index, zone in enumerate(zones):
+            count = len(zone['points'])
+            text = f"{zone['name']}   ({count}점)"
+            color = theme.COLOR_KEEPOUT
+            if count < KEEPOUT_MIN_POINTS:
+                text += '   ** 3점 미만: 미션 로드가 거부됩니다 **'
+                color = theme.COLOR_BAD
+            item = QListWidgetItem(text)
+            item.setForeground(QColor(color))
+            item.setData(Qt.UserRole, index)
+            self._zone_list.addItem(item)
+
+        valid = active is not None and 0 <= active < len(zones)
+        if valid:
+            self._zone_list.setCurrentRow(active)
+        self._zone_name.setText(zones[active]['name'] if valid else '')
+        self._zone_name.setEnabled(valid)
+        self._new_zone.setEnabled(True)
+        self._delete_zone.setEnabled(valid)
+        self._zone_name.blockSignals(False)
+        self._zone_list.blockSignals(False)
+
+    def set_zone_place_hint(self, text):
+        self._zone_place_hint.setText(text)
 
     # ------------------------------------------------------------------ 이벤트
-    def _on_label_selected(self, current, _previous):
-        if current is not None:
-            self.label_selected.emit(current.data(Qt.UserRole))
+    def _on_label_selection(self):
+        key = self.current_label()
+        if key is not None:
+            self.label_selected.emit(key)
+        else:
+            self.label_deselected.emit()
 
     def _on_clear(self):
         name = self.current_label()
         if name:
             self.label_cleared.emit(name)
 
-    def _on_cone_selected(self, current, _previous):
+    def _on_cone_selection(self):
+        key = self.current_cone()
+        if key is not None:
+            self.cone_selected.emit(key)
+        else:
+            self.cone_deselected.emit()
+
+    def _on_zone_selected(self, current, _previous):
         if current is not None:
-            self.cone_selected.emit(current.data(Qt.UserRole))
+            self.keepout_selected.emit(int(current.data(Qt.UserRole)))

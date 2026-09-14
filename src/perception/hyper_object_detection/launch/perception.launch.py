@@ -8,7 +8,6 @@ from launch.conditions import (
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer, Node
 from launch_ros.descriptions import ComposableNode
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -44,20 +43,9 @@ def generate_launch_description():
         default_value='intra_process',
     )
 
-    # Publishes /lane/drivable_area, the colour-based drivable-ground classification that
-    # hyper_costmap_plugins' DrivableAreaLayer folds into the local costmap. Off by default: it is
-    # the only output of this stage that steers the vehicle rather than just being watchable, so
-    # enabling it is a decision an entrypoint launch file makes on purpose. Turning it on here
-    # without also adding drivable_area_layer to the local_costmap plugins in
-    # hyper_planner/config/nav2_controller.yaml just publishes a topic nobody reads.
     sign_class_map_arg = DeclareLaunchArgument(
         'sign_class_map', default_value="['']",
         description="YOLO 클래스 이름 -> 신호 값 추가/덮어쓰기. \"['LaneBan:ban']\" 형태")
-
-    drivable_area_arg = DeclareLaunchArgument(
-        'drivable_area',
-        default_value='false',
-    )
 
     # Runs the YOLO node. Set false to bring the stage up as camera + lane detection +
     # image_saver_service only -- what an image-collection run needs, without paying for
@@ -93,11 +81,7 @@ def generate_launch_description():
                 name='lane_detection',
                 parameters=[
                     real_bev_params,
-                    {
-                        'input_backend': 'intra_process',
-                        'drivable.enabled': ParameterValue(
-                            LaunchConfiguration('drivable_area'), value_type=bool),
-                    },
+                    {'input_backend': 'intra_process'},
                 ],
                 remappings=[('/image_raw', '/camera/image_raw')],
                 extra_arguments=[{'use_intra_process_comms': True}],
@@ -114,8 +98,6 @@ def generate_launch_description():
         executable='lane_detection_node',
         parameters=[{
             'input_backend': LaunchConfiguration('lane_input_backend'),
-            'drivable.enabled': ParameterValue(
-                LaunchConfiguration('drivable_area'), value_type=bool),
         }],
         remappings=[('/image_raw', '/camera/image_raw')],
         output='screen',
@@ -161,7 +143,6 @@ def generate_launch_description():
     return LaunchDescription([
         lane_input_backend_arg,
         sign_class_map_arg,
-        drivable_area_arg,
         object_detection_arg,
         lane_detection_container,
         lane_detection_node,

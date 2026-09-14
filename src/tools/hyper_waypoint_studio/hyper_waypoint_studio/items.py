@@ -14,13 +14,15 @@ from python_qt_binding.QtCore import QPointF, QRectF, Qt
 from python_qt_binding.QtGui import (
     QBrush, QColor, QImage, QPainterPath, QPen, QPixmap, QPolygonF, QTransform)
 from python_qt_binding.QtWidgets import (
-    QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsPixmapItem)
+    QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsPixmapItem,
+    QGraphicsPolygonItem, QGraphicsSimpleTextItem)
 
 from . import theme
 
 # z 순서. 코스는 항상 배경 위에, 차량은 항상 맨 위에.
 Z_OVERLAY = 0
 Z_COSTMAP = 0.5
+Z_KEEPOUT = 0.8
 Z_COURSE = 1
 Z_LIVE_PATH = 1.5
 Z_HANDLE = 2
@@ -194,6 +196,46 @@ class CourseItem(QGraphicsPathItem):
 
     def set_dots_visible(self, visible):
         self._show_dots = visible
+
+
+class KeepoutItem(QGraphicsPolygonItem):
+    """진입 금지 구역 하나(mission.yaml의 keepout:). map 프레임 다각형을 그대로 그립니다.
+
+    채움은 반투명입니다 -- 어디를 막았는지는 배경 사진과 코스 위에서 판단하므로 그 둘이
+    비쳐야 합니다. 그래서 코스트맵 위, 코스 아래에 깝니다. 이름 글자만 변환 무시 자식입니다
+    (규칙 1). 꼭짓점 핸들은 이 아이템이 아니라 app_window가 고른 구역에만 따로 만듭니다.
+    """
+
+    def __init__(self, index, name, points, on_clicked):
+        super().__init__()
+        self.index = index
+        self._on_clicked = on_clicked
+        self.setZValue(Z_KEEPOUT)
+        self._label = QGraphicsSimpleTextItem(name, self)
+        self._label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.set_points(points)
+        self.set_active(False)
+
+    def set_points(self, points):
+        self.setPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
+        if points:
+            self._label.setPos(sum(p[0] for p in points) / len(points),
+                               sum(p[1] for p in points) / len(points))
+
+    def set_active(self, active):
+        color = QColor(theme.COLOR_KEEPOUT_ACTIVE if active else theme.COLOR_KEEPOUT)
+        pen = QPen(color, 2.5 if active else 1.5)
+        pen.setCosmetic(True)
+        pen.setJoinStyle(Qt.RoundJoin)
+        self.setPen(pen)
+        fill = QColor(color)
+        fill.setAlpha(90 if active else 55)
+        self.setBrush(QBrush(fill))
+        self._label.setBrush(QBrush(color))
+
+    def mousePressEvent(self, event):
+        self._on_clicked(self.index)
+        super().mousePressEvent(event)
 
 
 class HeadingItem(QGraphicsPathItem):

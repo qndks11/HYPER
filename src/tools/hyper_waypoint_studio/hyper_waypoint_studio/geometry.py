@@ -147,3 +147,32 @@ def inherited_flip(flips, before, after):
     if after is None:
         return flips[before]
     return flips[before] if flips[before] == flips[after] else flips[before]
+
+
+def point_segment_distance(px, py, ax, ay, bx, by):
+    """점 (px, py)에서 선분 a-b까지의 거리."""
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    if length_sq < DEGENERATE_M * DEGENERATE_M:
+        return math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_sq))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def nearest_edge(xs, ys, x, y, closed=True):
+    """(x, y)에 가장 가까운 변의 (시작점 인덱스, 거리). 새 점은 시작점 **뒤에** 넣습니다.
+
+    nearest_index(가장 가까운 점)로 넣을 자리를 고르면, 긴 변 한가운데를 클릭했는데 저쪽
+    끝점 옆에 박혀 다각형이 꼬입니다. closed면 마지막 점 -> 첫 점의 닫는 변도 봅니다.
+    점이 둘 미만이면 (None, inf).
+    """
+    n = len(xs)
+    if n < 2:
+        return None, float("inf")
+    best, best_distance = None, float("inf")
+    for i in range(n if closed else n - 1):
+        j = (i + 1) % n
+        distance = point_segment_distance(x, y, xs[i], ys[i], xs[j], ys[j])
+        if distance < best_distance:
+            best, best_distance = i, distance
+    return best, best_distance

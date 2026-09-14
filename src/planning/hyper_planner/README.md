@@ -9,14 +9,13 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
   대회 주행도, 한 바퀴 시험 주행도 전부 이 노드입니다.
 - `cmd_vel_to_ackermann_node`: nav2가 내는 `/cmd_vel`(Twist)을 `/velocity`, `/steering_angle`로 변환합니다.
   `input_timeout`(0.3초) 워치독이 있어 목표가 없으면 차가 섭니다 -- 이것이 `stop` 스텝의 정지 방식입니다.
-- `follow_path_client_node`: 코스 전체를 목표 하나로 보내던 예전 노드입니다. **레거시** -- 아래
-  [follow_path_client_node (레거시)](#follow_path_client_node-레거시) 참고.
 - `mission/mission_track.yaml`: 대회 미션(용인 트랙). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의이며, 미션 포맷의 기준 문서이기도 합니다. Gazebo 월드가 이 트랙의 디지털 트윈이라 시뮬과 실차가 이 파일을 같이 씁니다.
 - `mission/mission_track.yaml`: 대회 미션(실차 트랙). 갈림길이 넷이라 `track/`의 조각 CSV들을
   `courses`/`routes`로 엮습니다. 실행에 `controller_vx_max:=2.22`가 필요합니다 -- 이유는 그
   파일 머리 주석에 있습니다.
 - `mission/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
 - `config/nav2_controller.yaml`: nav2 `controller_server`(= `follow_path` 액션 서버) 파라미터입니다.
+- `include/hyper_planner/keepout_mask.hpp`: 미션의 `keepout:` 다각형을 local_costmap `keepout_layer`(StaticLayer)용 마스크로 굽습니다. 아래 [진입 금지 구역](#진입-금지-구역-keepout) 참고.
 - `src/mission_manager_parameters.yaml`: `mission_manager_node`의 파라미터 정의
   (generate_parameter_library가 여기서 헤더를 생성합니다). 파라미터의 의미는 이 파일이 원본입니다.
 
@@ -360,9 +359,9 @@ routes:
 읽습니다. `select_by: clearance`인데 `cone`이 없는 `case`가 하나라도 있으면 **로드가 거부됩니다**
 -- 좌표 없는 갈래는 늘 0셀, 즉 "비어 있음"으로 보여 말없이 그쪽으로만 가기 때문입니다.
 
-**254만 셉니다.** `InflationLayer`는 253 이하만 쓰므로 팽창 후광이 저절로 빠지고,
-`DrivableAreaLayer`의 차선 코스트(200)도 안 걸립니다. 다만 그 레이어의 `cost_value`도 254이므로,
-`drivable_area:=true`로 돌릴 때 노면이 아닌 지면이 콘으로 보이면 거기가 첫 번째 확인 지점입니다.
+**254만 셉니다.** `InflationLayer`는 253 이하만 쓰므로 팽창 후광이 저절로 빠집니다. 다만
+미션의 `keepout:` 구역(아래 "진입 금지 구역")도 254라서 **같이 셉니다** -- 콘 자리 반지름 안에
+구역이 걸치면 그 갈래는 늘 막힌 것으로 보입니다. 로드할 때 WARN으로 알려 줍니다.
 
 **창 밖은 "비어 있음"이 아닙니다.** 반지름이 20 x 20 m 코스트맵 밖으로 잘리면 그 갈래는 0셀로
 보이지만, 노드는 그것을 "모름"으로 처리해 **고르지 않고** WARN을 남깁니다(`... is partly outside
@@ -503,56 +502,56 @@ nav2 기본값(cost_weight 5, gamma 0.015)은 vx_max 0.5인 차동구동 로봇 
 대략 7~8 m 앞에서 생깁니다). 근본 해결은 tf에 실제 피치를 싣거나, 언덕 구간에서 obstacle_layer를
 끄는 지오펜스입니다.
 
-## RViz 시각화
+## 진입 금지 구역 (keepout)
 
-```bash
-rviz2 -d ~/HYPER/src/planning/hyper_planner/config/follow_path.rviz
+코스 밖 지면처럼 **라이다가 못 보는 금지 구역**은 미션 파일에 다각형으로 적습니다. 미션마다
+자기 구역을 갖고, waypoint studio의 편집 모드에서 그리고 고칩니다(스튜디오 README의
+"진입 금지 구역").
+
+```yaml
+keepout:
+  # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+  - name: grass_inner
+    points: [[-2.10, 20.35], [3.40, 21.02], [2.95, 24.80]]
 ```
 
-Fixed Frame은 `map`입니다. 표시되는 항목:
+- 좌표는 코스 프레임(`map`)이고 꼭짓점은 3개 이상입니다(닫는 변은 암묵적). 키가 없거나
+  `keepout: []`면 이 미션에는 금지 구역이 없습니다.
+- 모양이 틀리면(꼭짓점 3개 미만, `[x, y]`가 아닌 점, 전체 폭 500 m 초과) **미션 로드가 거부됩니다**.
 
-| 표시 | 토픽 | 색 |
-| --- | --- | --- |
-| 현재 미션 세그먼트 경로 | `/mission_manager/path` | 초록 |
-| 웨이포인트 경로 (CSV) | `/follow_path_client/path` | 진초록 |
-| MPPI가 추종 중인 참조 경로 | `/transformed_global_plan` | 파랑 |
-| MPPI 후보/최적 궤적 | `/trajectories` | 마커 |
-| RPP가 받은 경로 (후진 주차 구간만) | `/received_global_plan` | 노랑 |
-| lookahead 점 (후진 주차 구간만) | `/lookahead_point` | 빨강 |
-| 로컬 코스트맵 | `/local_costmap/costmap` | costmap |
-| footprint | `/local_costmap/published_footprint` | 자홍 |
-| 라이다 | `/scan` | 주황 |
-| BEV Front (차선 IPM 디버그 뷰) | `/lane/bev/image_raw` | Image 패널 |
-| BEV 지면 오버레이 (전방) | `/lane/bev/points` | 원본 색 (RGB8) |
+**어떻게 nav2에 들어가나.** `mission_manager_node`가 로드할 때 다각형을 map 프레임
+`OccupancyGrid`로 굽습니다(`include/hyper_planner/keepout_mask.hpp`: 셀 중심이 다각형 안이면 100,
+밖은 0, 격자는 bbox + `keepout_pad_m`). 그리고 `keepout_topic`(`/keepout_mask`)에 latched로
+냅니다. `local_costmap`의 `keepout_layer`(`nav2_costmap_2d::StaticLayer`, `plugins`의 맨 앞)가
+그 토픽을 구독해 매 주기 map -> odom tf로 옮겨 254로 넣고, 뒤의 `inflation_layer`가 라이다
+장애물과 똑같이 팽창시킵니다(`inflation_radius` 1.0, `cost_scaling_factor` 3.0). 구역이 없는
+미션도 0 한 칸짜리 마스크를 냅니다 -- 앞 미션의 구역이 레이어에 남지 않게 하려는 것입니다.
 
-BEV 패널은 `hyper_lane_detection`의 버드아이뷰 디버그 화면입니다. 그 노드는 자체 OpenCV 창을
-열지 않으므로, 경로/코스트맵과 차선 인지 결과를 한 화면에서 같이 보려면 이 패널을 씁니다. QoS는
-best-effort로 맞춰 두었습니다(발행 측이 SensorDataQoS라 Reliable로 두면 아무것도 안 나옵니다).
-패널 크기·위치는 드래그로 바꾼 뒤 `File > Save Config`로 저장하면 됩니다 — 다만 RViz가 파일을
-다시 쓰면서 이 설정 파일의 주석은 지워집니다.
+**반영 시점: `mission_manager` 재시작.** 마스크는 로드할 때 한 번만 굽고, 기본 `mission_yaml`은
+설치된 share 사본이므로 스튜디오에서 저장한 뒤에는 `colcon build --packages-select hyper_planner`
+후 다시 띄워야 합니다.
 
-**BEV 지면 오버레이 (전방)**는 같은 화면을 2D 패널이 아니라 3D 씬의 지면(`body_link`, z=0.02 m)에
-깔아 코스트맵·경로·footprint와 직접 겹쳐 봅니다. `body_link` tf가 있어야 보입니다. 오버레이가
-코스트맵과 어긋나 보이면 `hyper_lane_detection`의 지면 투영 파라미터(`bev.*` — 특히 장착 높이·피치,
-`ground_projection.hpp` 참고)가 실제 카메라와 어긋난 것이고, 같은 투영이 `/lane/center`의
-`offset_m`과 `/stopline/detection`의 `distance_m`도 만들어냅니다. 노드 시작 로그에 실제 만들어진
-지면 범위·스케일·원점이 한 줄 찍히므로 먼저 그 줄과 비교해 보십시오.
+**global costmap이 아니라 local costmap에 넣는 이유:** 이 스택에는 planner_server가 없고
+`controller_server`만 있습니다. MPPI/FRPP/RRPP는 전부 `local_costmap`만 보므로, global costmap을
+만들어도 아무도 읽지 않습니다. 컨트롤러가 보는 범위(수 m)는 30 m 창 안이라 잃는 것도 없습니다.
 
-후방을 보는 센서는 이제 없습니다. 후방 RGBD 카메라(D435i)와 그 파생 표시 -- 깊이 포인트 클라우드,
-`/scan_rear` 유사 라이다, 후방 BEV 패널 -- 는 배터리 절약을 위해 시뮬레이션·실차 양쪽에서
-제거되었습니다. 라이다는 전방 180도만 보므로(`vehicle.xacro`), 후진 구간에서 로컬 코스트맵의
-뒤쪽은 전진하며 마킹해 둔 셀과 빈 칸뿐이고 그것을 지워 줄 빔도 없습니다.
+컨트롤러별 반응:
 
-진초록 경로는 레거시 `follow_path_client_node`를 띄웠을 때만 나옵니다. 미션 주행에서 지금 무엇이
-나가고 있는지는 초록(`/mission_manager/path`)을 보세요 -- decel 프로파일이 켜진 스텝에서는 이 경로가
-정지선보다 12 m 더 뻗어 있는 것이 정상입니다.
+| 컨트롤러 | 구역(254 + 팽창) |
+| --- | --- |
+| `MPPI` | footprint가 닿는 궤적을 버리고, 팽창 기울기로 미리 밀려남 -> **우회** |
+| `FRPP` / `RRPP` | 경로가 걸치면 **멈춤**(돌아가지 않음) |
+| `FRPP_NC` | 무시 |
 
-`/received_global_plan`과 `/lookahead_point`은 RPP 전용 토픽입니다. 기본 주행 컨트롤러가
-MPPI로 바뀐 뒤로는 `RRPP`(후진 주차) 세그먼트가 돌 때만 나옵니다. 평상시
-주행 중에 컨트롤러가 무엇을 보고 있는지는 `/transformed_global_plan`으로 확인하세요.
+알아 둘 것:
 
-MPPI 쪽 두 토픽은 `nav2_controller.yaml`의 `MPPI.visualize: true`일 때만 나갑니다.
-경로가 안 보이면 그 값과 TF(`map` -> `odom` -> `body_link`)를 먼저 확인하세요.
+- **구역은 팽창됩니다.** 다각형은 실제 금지 경계 그대로 그리면 되고, 여유 폭은 `inflation_layer`가
+  줍니다. 반대로 구역을 좁은 통로 옆에 붙이면 팽창이 통로까지 번집니다.
+- 팽창 칸은 253 이하라 콘 판정(254만 셈)에는 잡히지 않습니다. 다각형 자체만 셉니다.
+- **콘 자리(`select_by: clearance`의 `cone`)에 구역을 걸치지 마세요.** 콘 판정이 254 셀을 세므로
+  그 갈래가 늘 막힌 것으로 보입니다. 걸치면 로드할 때 WARN이 납니다.
+- 마스크는 map 프레임이라 GPS/EKF 오차만큼 구역이 같이 흔들립니다.
+- `mission_manager`가 안 떠 있으면(조이스틱 주행 등) 마스크가 없어 레이어는 아무것도 안 합니다.
 
 ## 상태 확인
 
@@ -564,21 +563,3 @@ ros2 topic echo /velocity                    # 변환된 차량 명령
 ros2 topic echo /speed_limit                 # decel 프로파일이 내려보내는 상한
 ros2 lifecycle get /controller_server        # active 여야 함
 ```
-
-## follow_path_client_node (레거시)
-
-코스 전체를 목표 하나로 보내 한 바퀴 도는 노드입니다. 지금은 `mission:=simple`이 같은 일을 하고,
-그쪽은 실주행과 **동일한** 경로 처리(`path_loader.hpp`)를 거치므로 컨트롤러 튜닝 결과가 대회 주행에
-그대로 옮겨집니다. 이 노드는 CSV 로딩과 경로 다듬기를 자기 사본으로 들고 있어 리샘플링이 없고,
-abort 복구나 off-path 백스톱도 없습니다.
-
-```bash
-ros2 launch hyper_planner follow_path_client.launch.py \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/recorded.csv
-ros2 service call /follow_path_client/start std_srvs/srv/Trigger    # CSV 다시 읽어 재전송
-ros2 service call /follow_path_client/cancel std_srvs/srv/Trigger   # 진행 중인 목표 취소
-```
-
-`mission_manager_node`에 없는 것은 `shutdown_on_finish`(끝나면 프로세스 종료), `auto_start` 기본
-true, `start_from_nearest:=false`(tf를 무시하고 CSV 첫 점부터 그대로 보내기) 셋입니다. 이 셋이
-필요 없어지면 노드를 지워도 됩니다.

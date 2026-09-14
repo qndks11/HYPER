@@ -7,6 +7,10 @@ use_cmd_vel_to_ackermann:=false면 controller_server + lifecycle_manager만 뜹�
 몰면서 로컬 코스트맵(/local_costmap/costmap)만 보고 싶을 때 씁니다. 코스트맵은 목표 없이도
 controller_server가 활성화되면 publish되지만, cmd_vel_to_ackermann_node는 /cmd_vel이 없으면
 워치독이 /velocity + /steering_angle에 0.0을 계속 내보내 스틱 명령과 싸우므로 빼야 합니다.
+
+진입 금지 구역: local_costmap의 keepout_layer(StaticLayer)가 /keepout_mask를 직접 구독합니다.
+그 마스크는 여기가 아니라 mission_manager가 미션 파일의 keepout: 다각형으로 구워 냅니다 --
+미션이 없으면(조이스틱 주행) 레이어는 아무것도 안 합니다.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

@@ -38,6 +38,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "hyper_planner/common.hpp"
+#include "hyper_planner/keepout_mask.hpp"
 #include "hyper_planner/path_loader.hpp"
 
 namespace hyper_planner
@@ -268,6 +269,8 @@ struct MissionLoadConfig
 
   double decel_profile_lookahead_m{0.0};
   std::string sign_topic;           // prearm 로그 문구에만 씁니다
+  // keepout 구역이 clearance 콘 자리를 덮는지 볼 때의 반지름(케이스에 radius가 없을 때).
+  double cone_radius_m{0.0};
 };
 
 // CSV + mission.yaml -> 코스 목록 + 스텝 목록. load()가 false를 반환하면 사유는 이미
@@ -288,6 +291,7 @@ public:
   // load()가 성공한 뒤에만 의미가 있습니다. 호출자가 std::move로 가져가도 됩니다.
   std::vector<Course> & courses() {return courses_;}
   std::vector<Step> & steps() {return steps_;}
+  std::vector<KeepoutZone> & keepout() {return keepout_;}
 
 private:
   // 한 코스 위에서 drive 세그먼트를 이어 붙일 때 쓰는 커서. 세그먼트 시작점은 그 코스의
@@ -352,10 +356,17 @@ private:
     if (!check_branch_seams(seam_tolerance_m)) {
       return false;
     }
+    if (!load_keepout(root["keepout"])) {
+      return false;
+    }
+    warn_keepout_over_cones();
 
     RCLCPP_INFO(
-      logger_, "Mission '%s' loaded: %zu steps (%zu in the main sequence), %zu course(s).",
-      config_.mission_yaml.c_str(), steps_.size(), main_step_count_, courses_.size());
+      logger_,
+      "Mission '%s' loaded: %zu steps (%zu in the main sequence), %zu course(s), %zu keepout "
+      "zone(s).",
+      config_.mission_yaml.c_str(), steps_.size(), main_step_count_, courses_.size(),
+      keepout_.size());
     return true;
   }
 
@@ -1329,6 +1340,114 @@ private:
     return true;
   }
 
+  // --------------------------------------------------------------- 진입 금지 구역
+
+  // 최상위 `keepout:` -- 코스 프레임(map) 다각형 목록. 없거나 빈 목록이면 이 미션에는 금지
+  // 구역이 없습니다. mission_manager_node가 이걸 마스크로 구워 local_costmap의 keepout_layer에 줍니다.
+  //
+  // 모양이 틀린 구역은 미션 전체를 거부합니다. 조용히 버리면 "그려 놨는데 차가 들어간다"가
+  // 주행 중에야 드러납니다.
+  bool load_keepout(const YAML::Node & node)
+  {
+    keepout_.clear();
+    if (!node || node.IsNull()) {
+      return true;
+    }
+    if (!node.IsSequence()) {
+      RCLCPP_ERROR(
+        logger_, "'keepout' in '%s' must be a list of {name, points}.",
+        config_.mission_yaml.c_str());
+      return false;
+    }
+    bool have_bounds = false;
+    double all_x0 = 0.0, all_x1 = 0.0, all_y0 = 0.0, all_y1 = 0.0;
+    for (std::size_t z = 0; z < node.size(); ++z) {
+      const YAML::Node & entry = node[z];
+      if (!entry.IsMap() || !entry["points"] || !entry["points"].IsSequence()) {
+        RCLCPP_ERROR(logger_, "Keepout zone %zu needs 'points: [[x, y], ...]'.", z);
+        return false;
+      }
+      KeepoutZone zone;
+      try {
+        zone.name = entry["name"] ? entry["name"].as<std::string>() : "zone_" + std::to_string(z);
+        for (const auto & point : entry["points"]) {
+          if (!point.IsSequence() || point.size() != 2) {
+            RCLCPP_ERROR(
+              logger_, "Keepout zone %zu ('%s'): every point must be [x, y].", z,
+              zone.name.c_str());
+            return false;
+          }
+          zone.points.emplace_back(point[0].as<double>(), point[1].as<double>());
+        }
+      } catch (const YAML::Exception & ex) {
+        RCLCPP_ERROR(logger_, "Keepout zone %zu: %s", z, ex.what());
+        return false;
+      }
+      if (zone.points.size() < 3) {
+        RCLCPP_ERROR(
+          logger_, "Keepout zone %zu ('%s') has %zu point(s); a polygon needs at least 3.", z,
+          zone.name.c_str(), zone.points.size());
+        return false;
+      }
+      for (const auto & [x, y] : zone.points) {
+        if (!have_bounds) {
+          all_x0 = all_x1 = x;
+          all_y0 = all_y1 = y;
+          have_bounds = true;
+        }
+        all_x0 = std::min(all_x0, x);
+        all_x1 = std::max(all_x1, x);
+        all_y0 = std::min(all_y0, y);
+        all_y1 = std::max(all_y1, y);
+      }
+      keepout_.push_back(std::move(zone));
+    }
+    // 구역 하나하나가 작아도 서로 멀리 떨어져 있으면 마스크는 그 전체를 덮습니다. 좌표 하나를
+    // 잘못 적으면(부호, 자릿수) 격자가 수백 MB가 되므로 여기서 막습니다.
+    if (all_x1 - all_x0 > kMaxKeepoutSpanM || all_y1 - all_y0 > kMaxKeepoutSpanM) {
+      RCLCPP_ERROR(
+        logger_,
+        "Keepout zones span %.0f x %.0f m, more than %.0f m. A vertex is probably mistyped -- "
+        "the mask would be enormous.",
+        all_x1 - all_x0, all_y1 - all_y0, kMaxKeepoutSpanM);
+      return false;
+    }
+    return true;
+  }
+
+  // clearance 분기의 콘 자리를 금지 구역이 덮으면, 그 갈래는 콘이 없어도 늘 막힌 것으로
+  // 보입니다 -- keepout_layer가 쓰는 254를 콘 판정(lethal_cost)도 셉니다. 구역이 칸 입구
+  // 가까이 붙는 것은 흔한 일이라 거부하지 않고 경고만 합니다.
+  void warn_keepout_over_cones() const
+  {
+    for (std::size_t i = 0; i < steps_.size(); ++i) {
+      const Step & step = steps_[i];
+      if (step.type != StepType::kBranch || step.select != BranchSelect::kClearance) {
+        continue;
+      }
+      for (const auto & branch_case : step.cases) {
+        if (!branch_case.has_cone) {
+          continue;
+        }
+        const double radius = branch_case.cone_radius_m > 0.0
+          ? branch_case.cone_radius_m : config_.cone_radius_m;
+        for (const auto & zone : keepout_) {
+          if (circle_touches_polygon(
+              branch_case.cone_x, branch_case.cone_y, radius, zone.points))
+          {
+            RCLCPP_WARN(
+              logger_,
+              "Keepout zone '%s' overlaps the cone at (%.2f, %.2f) of branch step %zu, route "
+              "'%s' (radius %.2f m). The costmap will count the zone as a cone, so that route "
+              "will always look blocked. Pull the zone back from the cone.",
+              zone.name.c_str(), branch_case.cone_x, branch_case.cone_y, i,
+              branch_case.route.c_str(), radius);
+          }
+        }
+      }
+    }
+  }
+
   rclcpp::Logger logger_;
   MissionLoadConfig config_;
 
@@ -1340,6 +1459,7 @@ private:
 
   std::vector<Course> courses_;
   std::vector<Step> steps_;
+  std::vector<KeepoutZone> keepout_;
   // main 'steps' 시퀀스의 길이. 이 뒤에 route의 스텝들이 이어 붙습니다.
   std::size_t main_step_count_{0};
 

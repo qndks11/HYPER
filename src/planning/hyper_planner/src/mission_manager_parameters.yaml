@@ -377,12 +377,48 @@ mission_manager:
     description: |
       이 코스트 이상인 셀만 셉니다. 254(LETHAL_OBSTACLE)가 기본인 것은 InflationLayer가
       253 이하만 쓰기 때문입니다 -- 254만 세면 팽창 후광이 저절로 빠집니다.
-      DrivableAreaLayer의 차선 코스트(200)도 같은 이유로 안 걸립니다. 다만 그 레이어의
-      cost_value도 254이므로, drivable_area:=true로 돌릴 때 노면이 아닌 지면이 콘으로
-      보이면 여기가 첫 번째 확인 지점입니다.
+      mission.yaml keepout: 다각형(keepout_layer)도 254라서 같이 셉니다(그 팽창은 안 셉니다). 콘 자리 반지름
+      안에 다각형이 걸치면 그 갈래는 늘 막힌 것으로 보입니다(로드할 때 WARN이 납니다).
     validation:
       gt<>: [0]
       lt_eq<>: [255]
+
+  # ------------------------------------------------ 진입 금지 구역 (mission.yaml의 keepout:)
+  #
+  # 미션 파일의 다각형을 map 프레임 OccupancyGrid로 구워 latched로 냅니다. nav2 쪽에서는
+  # local_costmap의 keepout_layer(StaticLayer)가 이 토픽을 구독해 inflation_layer 앞에 넣습니다
+  # (nav2_controller.yaml). 로드할 때 한 번 구우므로 전부 read_only입니다 -- 구역을 바꾸면
+  # 이 노드를 다시 띄워야 합니다.
+  keepout_topic:
+    type: string
+    default_value: "/keepout_mask"
+    read_only: true
+    description: |
+      마스크를 낼 토픽. nav2_controller.yaml의 local_costmap.keepout_layer.map_topic과 같아야
+      합니다 -- 다르면 레이어가 아무 마스크도 못 받아 금지 구역이 경고 없이 사라집니다.
+    validation:
+      not_empty<>: []
+
+  keepout_resolution:
+    type: double
+    default_value: 0.05
+    read_only: true
+    description: |
+      마스크 한 칸의 크기 [m]. local_costmap의 resolution과 같게 둡니다 -- 더 거칠면 다각형
+      경계가 최대 한 칸만큼 계단으로 밀리고, 더 촘촘해도 코스트맵이 제 해상도로 다시 샘플합니다.
+    validation:
+      gt<>: [0.0]
+
+  keepout_pad_m:
+    type: double
+    default_value: 1.0
+    read_only: true
+    description: |
+      다각형 bbox 바깥으로 마스크를 이만큼 더 늘립니다 [m]. 늘린 칸은 전부 0(비어 있음)이라
+      주행에는 영향이 없습니다. 금지 구역을 넓히는 값이 **아닙니다** -- 여유 폭은
+      local_costmap의 inflation_layer가 줍니다.
+    validation:
+      gt_eq<>: [0.0]
 
   # ------------------------------------------------------------ '~/probe_costmap'의 인자
   #

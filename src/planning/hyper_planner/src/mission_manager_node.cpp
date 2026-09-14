@@ -94,6 +94,7 @@
 #include <nav2_msgs/action/follow_path.hpp>
 #include <nav2_msgs/msg/costmap.hpp>
 #include <nav2_msgs/msg/speed_limit.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -107,6 +108,7 @@
 #include "hyper_planner/mission_manager_parameters.hpp"
 #include "hyper_planner/common.hpp"
 #include "hyper_planner/costmap_query.hpp"
+#include "hyper_planner/keepout_mask.hpp"
 #include "hyper_planner/mission_loader.hpp"
 #include "hyper_planner/path_loader.hpp"
 #include "hyper_planner/path_progress.hpp"
@@ -214,6 +216,11 @@ public:
       "~/steps", rclcpp::QoS(1).transient_local());
     status_pub_ = create_publisher<std_msgs::msg::String>(
       "~/status", rclcpp::QoS(1).transient_local());
+    // 진입 금지 마스크(mission.yaml의 keepout:). local_costmap의 keepout_layer(StaticLayer)가
+    // 이 토픽을 map_server의 지도처럼 latched로 받기를 기대합니다 --
+    // controller_server가 이 노드보다 늦게 떠도 받아야 합니다.
+    keepout_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+      params_.keepout_topic, rclcpp::QoS(1).transient_local());
     // controller_server가 QoS(10)으로 구독합니다.
     speed_limit_ = std::make_unique<hyper_planner::SpeedLimitPublisher>(
       create_publisher<nav2_msgs::msg::SpeedLimit>(params_.speed_limit_topic, rclcpp::QoS(10)),
@@ -330,6 +337,7 @@ private:
     config.decel_profile_a = params_.decel_profile_a;
     config.decel_profile_lookahead_m = params_.decel_profile_lookahead_m;
     config.sign_topic = params_.sign_topic;
+    config.cone_radius_m = params_.cone_radius_m;
 
     hyper_planner::MissionLoader loader(get_logger(), config);
     if (!loader.load()) {
@@ -338,7 +346,33 @@ private:
     courses_ = std::move(loader.courses());
     steps_ = std::move(loader.steps());
     publish_steps();
+    publish_keepout(loader.keepout());
     return true;
+  }
+
+  // 미션의 keepout 다각형을 map 프레임 마스크로 구워 한 번 냅니다(latched).
+  //
+  // 구역이 없어도 냅니다 -- 0 한 칸짜리 격자로. 앞서 다른 미션으로 받은 마스크를
+  // keepout_layer가 들고 있을 수 있어서, 덮어써야 옛 구역이 남지 않습니다.
+  void publish_keepout(const std::vector<hyper_planner::KeepoutZone> & zones)
+  {
+    auto grid = hyper_planner::rasterize_keepout(
+      zones, params_.keepout_resolution, params_.frame_id, params_.keepout_pad_m);
+    grid.header.stamp = now();
+    grid.info.map_load_time = grid.header.stamp;
+    keepout_pub_->publish(grid);
+    if (zones.empty()) {
+      RCLCPP_INFO(
+        get_logger(), "No keepout zones in this mission; published an empty mask on '%s'.",
+        params_.keepout_topic.c_str());
+      return;
+    }
+    RCLCPP_INFO(
+      get_logger(),
+      "Keepout: %zu zone(s) -> %ux%u cell mask (%.2f m) at origin (%.2f, %.2f) in '%s', on '%s'.",
+      zones.size(), grid.info.width, grid.info.height, params_.keepout_resolution,
+      grid.info.origin.position.x, grid.info.origin.position.y, params_.frame_id.c_str(),
+      params_.keepout_topic.c_str());
   }
 
   // 펼쳐진 스텝 목록을 `index|type|label|course|route` 한 줄씩 내보냅니다.
@@ -2381,6 +2415,7 @@ private:
   GoalHandle::SharedPtr goal_handle_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr keepout_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr steps_pub_;
   std::unique_ptr<hyper_planner::SpeedLimitPublisher> speed_limit_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sign_sub_;

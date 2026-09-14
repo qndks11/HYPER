@@ -20,14 +20,14 @@ from python_qt_binding.QtCore import Qt, QTimer, Signal
 from python_qt_binding.QtGui import QColor, QKeySequence
 from python_qt_binding.QtWidgets import (
     QAction, QActionGroup, QApplication, QCheckBox, QDialog, QDialogButtonBox,
-    QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox, QVBoxLayout,
-    QWidget)
+    QDockWidget, QFileDialog, QFrame, QLabel, QMainWindow, QMessageBox, QScrollArea,
+    QVBoxLayout, QWidget)
 
 from . import formats, geometry, items, ros_link, theme
 from .course_model import CourseModel
 from .items import (
-    ConeMarker, CostmapItem, CourseItem, HeadingItem, LabelMarker, OverlayItem, VehicleItem,
-    WaypointHandle)
+    ConeMarker, CostmapItem, CourseItem, HeadingItem, KeepoutItem, LabelMarker, OverlayItem,
+    VehicleItem, WaypointHandle)
 from .mission_model import MissionModel
 from .panels.drive_panel import DrivePanel
 from .panels.edit_panel import EditPanel
@@ -104,6 +104,12 @@ class StudioWindow(QMainWindow):
         self._selected_point = None
         self._active_label = None
         self._active_cone = None
+        self._zone_items = []       # [KeepoutItem] -- 미션의 진입 금지 구역
+        self._zone_handles = []     # 고른 구역의 꼭짓점 WaypointHandle (편집 모드만)
+        self._active_zone = None    # MissionModel.keepout의 인덱스
+        self._selected_vertex = None
+        self._drawing = None        # 새 구역을 그리는 중이면 찍은 [(x, y)], 아니면 None
+        self._drawing_item = None
         self._color_cursor = 0
         self._recorder_file = ''
         self._previous_points = []
@@ -114,6 +120,7 @@ class StudioWindow(QMainWindow):
         self._view = StudioView(self._scene)
         self.setCentralWidget(self._view)
         self._view.clicked_at.connect(self._on_canvas_click)
+        self._view.double_clicked_at.connect(self._on_canvas_double_click)
         self._view.cursor_moved.connect(self._on_cursor_moved)
         self._view.follow_released.connect(self._on_follow_released)
 
@@ -183,7 +190,13 @@ class StudioWindow(QMainWindow):
         self._edit = EditPanel()
         self._edit.label_selected.connect(self._select_label)
         self._edit.label_cleared.connect(self._clear_label)
+        self._edit.label_deselected.connect(self._clear_label_cone_selection)
         self._edit.cone_selected.connect(self._select_cone)
+        self._edit.cone_deselected.connect(self._clear_label_cone_selection)
+        self._edit.keepout_selected.connect(self._select_zone)
+        self._edit.keepout_new.connect(self._start_zone)
+        self._edit.keepout_delete.connect(self._delete_zone)
+        self._edit.keepout_renamed.connect(self._rename_zone)
         self._edit.save_mission.connect(self._save_mission)
         self._edit.save_course.connect(lambda: self._save_course(False))
         self._edit.save_course_as.connect(lambda: self._save_course(True))
@@ -220,7 +233,13 @@ class StudioWindow(QMainWindow):
                 ('drive', '주행', self._drive, Qt.RightDockWidgetArea)):
             dock = QDockWidget(caption, self)
             dock.setObjectName(f'dock_{key}')
-            dock.setWidget(widget)
+            # 패널을 스크롤 영역에 넣습니다. 독의 최소 높이는 패널 내용 전체라, 편집 독처럼
+            # 묶음이 쌓이면 창 최소 높이가 화면(1080)을 넘고 창 관리자가 최대화를 거부합니다.
+            scroll = QScrollArea()
+            scroll.setWidget(widget)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            dock.setWidget(scroll)
             dock.setFeatures(QDockWidget.DockWidgetMovable |
                              QDockWidget.DockWidgetFloatable)
             self.addDockWidget(area, dock)
@@ -263,7 +282,16 @@ class StudioWindow(QMainWindow):
         delete = QAction('선택한 점 삭제', self)
         delete.setShortcut(QKeySequence.Delete)
         delete.triggered.connect(self._delete_selected)
-        for action in (undo, redo, delete):
+        # 새 구역을 그리는 동안에만 켭니다 -- 늘 켜 두면 이름 칸의 Enter를 창이 가로챕니다.
+        self._finish_zone_action = QAction('구역 닫기', self)
+        self._finish_zone_action.setShortcuts(
+            [QKeySequence(Qt.Key_Return), QKeySequence(Qt.Key_Enter)])
+        self._finish_zone_action.triggered.connect(self._finish_zone)
+        self._finish_zone_action.setEnabled(False)
+        escape = QAction('선택 해제 / 그리기 취소', self)
+        escape.setShortcut(QKeySequence(Qt.Key_Escape))
+        escape.triggered.connect(self._on_escape)
+        for action in (undo, redo, delete, self._finish_zone_action, escape):
             edit_menu.addAction(action)
 
         view_menu = self.menuBar().addMenu('보기')
@@ -347,6 +375,8 @@ class StudioWindow(QMainWindow):
             self._mode_actions[self._mode].setChecked(True)
             return
 
+        if mode != 'edit':
+            self._end_drawing()
         self._mode = mode
         self._mode_actions[mode].setChecked(True)
         self._docks['edit'].setVisible(mode == 'edit')
@@ -357,6 +387,7 @@ class StudioWindow(QMainWindow):
         # 정렬은 보기/편집에서만. 주행을 보다가 방향키로 배경을 밀어 버리는 사고 방지.
         self._overlay_panel.setEnabled(mode in ('view', 'edit'))
         self._rebuild_handles()
+        self._refresh_keepout()
         self._update_title()
 
     # ================================================================== 코스
@@ -502,6 +533,7 @@ class StudioWindow(QMainWindow):
         self._layers_panel.refresh(self._courses, self._active_row)
         self._refresh_labels()
         self._refresh_cones()
+        self._refresh_keepout()
         self._edit.set_undo_state(
             bool(self._active and self._active.can_undo),
             bool(self._active and self._active.can_redo))
@@ -532,6 +564,15 @@ class StudioWindow(QMainWindow):
             bounds.setRight(max(course.xs))
             bounds.setBottom(max(course.ys))
             rect = bounds if rect is None else rect.united(bounds)
+        for zone in (self._mission.keepout if self._mission is not None else []):
+            if not zone['points']:
+                continue
+            xs = [p[0] for p in zone['points']]
+            ys = [p[1] for p in zone['points']]
+            bounds = QRectF(min(xs), min(ys), 0, 0)
+            bounds.setRight(max(xs))
+            bounds.setBottom(max(ys))
+            rect = bounds if rect is None else rect.united(bounds)
         if self._overlay_item is not None:
             overlay = self._overlay_item.map_rect()
             rect = overlay if rect is None else rect.united(overlay)
@@ -542,6 +583,7 @@ class StudioWindow(QMainWindow):
     # ================================================================== 편집
     def _on_handle_clicked(self, index):
         self._selected_point = index
+        self._selected_vertex = None
         course = self._active
         if course is not None and 0 <= index < len(course):
             self._edit.set_selected_point(
@@ -610,6 +652,16 @@ class StudioWindow(QMainWindow):
         self._edit.set_reverse_note('')
 
     def _delete_selected(self):
+        # 구역의 꼭짓점을 골라 두었으면 Del은 그 꼭짓점입니다(코스 점보다 먼저).
+        if (self._mode == 'edit' and self._mission is not None
+                and self._active_zone is not None and self._selected_vertex is not None):
+            if not self._mission.delete_vertex(self._active_zone, self._selected_vertex):
+                self.statusBar().showMessage('더 지울 수 없습니다 (꼭짓점이 3개 이하).', 4000)
+                return
+            self._selected_vertex = None
+            self._refresh_keepout()
+            self._update_title()
+            return
         course = self._active
         if self._mode != 'edit' or course is None or self._selected_point is None:
             return
@@ -685,6 +737,18 @@ class StudioWindow(QMainWindow):
     def _on_canvas_click(self, x, y, button):
         if self._mode != 'edit':
             return
+        # 새 구역을 그리는 중이면 클릭은 전부 꼭짓점입니다 -- 콘/라벨/점 삽입보다 먼저.
+        if self._drawing is not None:
+            if button != int(Qt.LeftButton):
+                return
+            close_m = 10.0 * self._view.meters_per_pixel()
+            if (len(self._drawing) >= 3
+                    and math.hypot(x - self._drawing[0][0], y - self._drawing[0][1]) <= close_m):
+                self._finish_zone()
+                return
+            self._drawing.append((x, y))
+            self._update_drawing_preview()
+            return
         # 콘은 코스가 없어도(스냅 대상이 없으므로) 클릭한 좌표 그대로 옮길 수
         # 있습니다 -- 그래서 아래 "코스 없으면 종료"보다 먼저 처리합니다.
         if self._active_cone and self._mission is not None:
@@ -695,6 +759,19 @@ class StudioWindow(QMainWindow):
             self._update_title()
             return
         modifiers = QApplication.keyboardModifiers()
+        # 구역을 골라 두었으면 Shift+클릭은 그 구역의 가장 가까운 변에 꼭짓점을 넣습니다.
+        # 코스 점을 넣으려면 Esc로 구역 선택을 먼저 푸세요.
+        if (self._active_zone is not None and self._mission is not None
+                and modifiers & Qt.ShiftModifier and button == int(Qt.LeftButton)):
+            points = self._mission.keepout[self._active_zone]['points']
+            after, _ = geometry.nearest_edge(
+                [p[0] for p in points], [p[1] for p in points], x, y)
+            if after is None:
+                return
+            self._selected_vertex = self._mission.insert_vertex(self._active_zone, after, x, y)
+            self._refresh_keepout()
+            self._update_title()
+            return
         course = self._active
         if course is None:
             return
@@ -753,7 +830,12 @@ class StudioWindow(QMainWindow):
             QMessageBox.warning(self, '미션을 열 수 없음', str(exc))
             return
 
+        self._end_drawing()
         self._mission = mission
+        self._active_label = None
+        self._active_cone = None
+        self._active_zone = None
+        self._selected_vertex = None
         mission_dir = os.path.dirname(os.path.abspath(path))
         problems = []
 
@@ -785,6 +867,7 @@ class StudioWindow(QMainWindow):
         self._refresh_layers()
         self._refresh_labels()
         self._refresh_cones()
+        self._refresh_keepout()
         self._update_title()
         self._frame_all()
 
@@ -842,9 +925,11 @@ class StudioWindow(QMainWindow):
                               self._mission.orphans())
 
     def _select_label(self, key):
-        self._active_label = key
-        for marker_key, marker in self._labels.items():
-            marker.set_active(marker_key == key)
+        self._clear_zone_selection()
+        # 콘과 라벨은 동시에 고를 수 없습니다. 콘이 남아 있으면 캔버스 클릭에서 콘이
+        # 먼저 처리돼 라벨을 영영 못 옮깁니다(_on_canvas_click).
+        self._set_active_cone(None)
+        self._set_active_label(key)
         course, name = formats.split_key(key)
         if self._course_for(course) is None:
             self._edit.set_place_hint(
@@ -902,10 +987,30 @@ class StudioWindow(QMainWindow):
             self._cones[key] = marker
         self._edit.set_cones(self._mission, self._mission.name, self._active_cone)
 
-    def _select_cone(self, key):
+    def _set_active_label(self, key):
+        """마커와 목록만 맞춥니다(캔버스에서 고른 것도 목록에 보이게). 배치 안내는
+        호출하는 쪽이 씁니다."""
+        self._active_label = key
+        for marker_key, marker in self._labels.items():
+            marker.set_active(marker_key == key)
+        self._edit.select_label(key)
+
+    def _set_active_cone(self, key):
         self._active_cone = key
         for marker_key, marker in self._cones.items():
             marker.set_active(marker_key == key)
+        self._edit.select_cone(key)
+
+    def _clear_label_cone_selection(self):
+        """라벨/콘 선택을 풉니다. 골라 둔 채로는 캔버스 클릭이 전부 배치라, 점을 끌기
+        전에 이걸로 풀어야 라벨이 같이 끌려오지 않습니다(Esc, 편집 독의 선택 해제)."""
+        self._set_active_label(None)
+        self._set_active_cone(None)
+
+    def _select_cone(self, key):
+        self._clear_zone_selection()
+        self._set_active_label(None)
+        self._set_active_cone(key)
         cone = self._mission.cones[key]
         self._edit.set_cone_place_hint(
             f"'{cone['value']}' 선택됨 -- 캔버스를 클릭하거나 끌면 그 좌표 그대로 "
@@ -918,6 +1023,197 @@ class StudioWindow(QMainWindow):
         cone = self._mission.cones[key]
         self._edit.set_cone_place_hint(f"{cone['value']} -> ({x:.2f}, {y:.2f})")
         self._refresh_cones()
+        self._update_title()
+
+    # ================================================================== 진입 금지 구역
+    def _refresh_keepout(self):
+        """구역 아이템과 (편집 모드에서) 고른 구역의 꼭짓점 핸들을 다시 만듭니다.
+
+        꼭짓점 드래그 한 번에는 부르지 않습니다(_on_vertex_moved) -- 끌던 핸들을 지우고
+        다시 만들 이유가 없습니다. 개수가 바뀔 때(추가/삭제/삽입)만 통째로 다시 만듭니다.
+        """
+        for item in self._zone_items:
+            self._scene.removeItem(item)
+        for handle in self._zone_handles:
+            self._scene.removeItem(handle)
+        self._zone_items = []
+        self._zone_handles = []
+        if self._mission is None:
+            self._active_zone = None
+            self._selected_vertex = None
+            self._edit.set_keepout([], None)
+            return
+        zones = self._mission.keepout
+        if self._active_zone is not None and not 0 <= self._active_zone < len(zones):
+            self._active_zone = None
+            self._selected_vertex = None
+        for index, zone in enumerate(zones):
+            item = KeepoutItem(index, zone['name'], zone['points'], self._on_zone_clicked)
+            item.set_active(index == self._active_zone)
+            self._scene.addItem(item)
+            self._zone_items.append(item)
+        if self._mode == 'edit' and self._active_zone is not None:
+            for vertex, (x, y) in enumerate(zones[self._active_zone]['points']):
+                handle = WaypointHandle(vertex, x, y, theme.COLOR_KEEPOUT_ACTIVE,
+                                        self._on_vertex_moved, self._on_vertex_clicked)
+                handle.setSelected(vertex == self._selected_vertex)
+                self._scene.addItem(handle)
+                self._zone_handles.append(handle)
+        self._edit.set_keepout(zones, self._mission.name, self._active_zone)
+
+    def _select_zone(self, index):
+        if self._mission is None or self._drawing is not None:
+            return
+        # 한 번의 캔버스 클릭이 가리키는 대상은 하나여야 합니다: 구역을 고르면 라벨/콘
+        # 선택을 풉니다(반대쪽은 _select_label/_select_cone이 풉니다).
+        self._active_label = None
+        self._active_cone = None
+        for marker in list(self._labels.values()) + list(self._cones.values()):
+            marker.set_active(False)
+        self._active_zone = index
+        self._selected_vertex = None
+        self._refresh_labels()
+        self._refresh_cones()
+        self._refresh_keepout()
+        zone = self._mission.keepout[index]
+        self._edit.set_zone_place_hint(
+            f"'{zone['name']}' 선택됨 -- 꼭짓점을 끌거나, Shift+클릭으로 꼭짓점을 넣고, "
+            f"꼭짓점을 고른 뒤 Del로 지웁니다. Esc: 선택 해제."
+            + ('' if self._mode == 'edit' else '  (편집 모드에서만 고칠 수 있습니다)'))
+
+    def _on_zone_clicked(self, index):
+        """캔버스에서 구역을 눌렀을 때. 이미 다른 것을 배치 중이면 무시합니다.
+
+        뷰는 clicked_at을 아이템보다 먼저 냅니다(scene.py). 콘을 고른 채 구역 안을
+        클릭하면 콘은 이미 옮겨졌고, 여기서 구역으로 선택을 바꾸면 다음 클릭부터 콘을 못
+        옮기게 됩니다. Shift+클릭(꼭짓점 삽입)도 같은 이유로 선택을 바꾸지 않습니다.
+        """
+        if (self._drawing is not None or self._active_cone or self._active_label
+                or QApplication.keyboardModifiers() & Qt.ShiftModifier
+                or index == self._active_zone):
+            return
+        self._select_zone(index)
+
+    def _clear_zone_selection(self):
+        if self._active_zone is None:
+            return
+        self._active_zone = None
+        self._selected_vertex = None
+        self._edit.set_zone_place_hint('')
+        self._refresh_keepout()
+
+    def _on_vertex_clicked(self, vertex):
+        self._selected_vertex = vertex
+        self._selected_point = None
+        if self._active_zone is None or self._mission is None:
+            return
+        points = self._mission.keepout[self._active_zone]['points']
+        if 0 <= vertex < len(points):
+            x, y = points[vertex]
+            self._edit.set_zone_place_hint(
+                f'꼭짓점 #{vertex}   ({x:.2f}, {y:.2f})   -- Del로 지웁니다.')
+
+    def _on_vertex_moved(self, vertex, x, y):
+        if self._active_zone is None or self._mission is None:
+            return
+        self._mission.move_vertex(self._active_zone, vertex, x, y)
+        if 0 <= self._active_zone < len(self._zone_items):
+            self._zone_items[self._active_zone].set_points(
+                self._mission.keepout[self._active_zone]['points'])
+        self._on_vertex_clicked(vertex)
+        self._update_title()
+
+    def _start_zone(self):
+        if self._mission is None:
+            return
+        if self._mode != 'edit':
+            self.set_mode('edit')
+            if self._mode != 'edit':
+                return          # 녹화 중이라 막혔습니다.
+        self._end_drawing()
+        self._active_label = None
+        self._active_cone = None
+        self._active_zone = None
+        self._selected_vertex = None
+        self._refresh_labels()
+        self._refresh_cones()
+        self._refresh_keepout()
+        self._drawing = []
+        self._drawing_item = CourseItem(theme.COLOR_KEEPOUT_ACTIVE)
+        self._drawing_item.setZValue(items.Z_CONE + 0.1)
+        self._scene.addItem(self._drawing_item)
+        self._finish_zone_action.setEnabled(True)
+        self._edit.set_zone_place_hint(
+            '새 구역: 캔버스를 클릭해 꼭짓점을 찍으세요. Enter / 더블클릭 / 첫 점 클릭으로 '
+            '닫고, Esc로 취소합니다.')
+
+    def _update_drawing_preview(self):
+        if self._drawing_item is None:
+            return
+        xs = [p[0] for p in self._drawing]
+        ys = [p[1] for p in self._drawing]
+        self._drawing_item.set_points(xs, ys)
+        self._edit.set_zone_place_hint(
+            f'새 구역: 꼭짓점 {len(self._drawing)}개'
+            + ('' if len(self._drawing) >= 3 else ' -- 3개 이상 찍어야 닫을 수 있습니다')
+            + '. Enter / 더블클릭 / 첫 점 클릭: 닫기, Esc: 취소.')
+
+    def _on_canvas_double_click(self, x, y, button):
+        if self._drawing is not None and button == int(Qt.LeftButton):
+            self._finish_zone()
+
+    def _finish_zone(self):
+        if self._drawing is None or self._mission is None:
+            return
+        if len(self._drawing) < 3:
+            self.statusBar().showMessage('꼭짓점이 3개 이상이어야 구역을 닫을 수 있습니다.', 4000)
+            return
+        points = list(self._drawing)
+        self._end_drawing()
+        index = self._mission.add_zone(points)
+        self._select_zone(index)
+        self._update_title()
+
+    def _end_drawing(self):
+        """그리던 구역을 버립니다(닫았으면 이미 모델에 들어갔습니다)."""
+        if self._drawing_item is not None:
+            self._scene.removeItem(self._drawing_item)
+        self._drawing_item = None
+        self._drawing = None
+        if hasattr(self, '_finish_zone_action'):
+            self._finish_zone_action.setEnabled(False)
+
+    def _on_escape(self):
+        if self._drawing is not None:
+            self._end_drawing()
+            self._edit.set_zone_place_hint('새 구역 그리기를 취소했습니다.')
+            return
+        self._clear_zone_selection()
+        self._clear_label_cone_selection()
+
+    def _delete_zone(self):
+        if self._mission is None or self._active_zone is None:
+            return
+        zone = self._mission.keepout[self._active_zone]
+        answer = QMessageBox.question(
+            self, '구역 지우기',
+            f"진입 금지 구역 '{zone['name']}'(꼭짓점 {len(zone['points'])}개)을 지울까요?\n"
+            '되돌리기가 없습니다 -- 저장하기 전이면 미션을 다시 열어 되살릴 수 있습니다.',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self._mission.remove_zone(self._active_zone)
+        self._active_zone = None
+        self._selected_vertex = None
+        self._edit.set_zone_place_hint('')
+        self._refresh_keepout()
+        self._update_title()
+
+    def _rename_zone(self, name):
+        if self._mission is None or self._active_zone is None:
+            return
+        self._mission.rename_zone(self._active_zone, name)
+        self._refresh_keepout()
         self._update_title()
 
     # ================================================================== 배경
@@ -1039,6 +1335,7 @@ class StudioWindow(QMainWindow):
                 QMessageBox.Save | QMessageBox.Cancel, QMessageBox.Cancel)
             if answer != QMessageBox.Save:
                 return
+        keepout_changed = self._mission.keepout_dirty
         try:
             self._mission.save(courses)
         except formats.FileChangedError:
@@ -1049,13 +1346,21 @@ class StudioWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if answer == QMessageBox.Yes:
                 self._mission.reload()
+                self._active_zone = None
+                self._selected_vertex = None
                 self._refresh_labels()
                 self._refresh_cones()
+                self._refresh_keepout()
             return
         except OSError as exc:
             QMessageBox.warning(self, '저장 실패', str(exc))
             return
-        self.statusBar().showMessage(f'{self._mission.name} 저장됨', 5000)
+        if keepout_changed:
+            self.statusBar().showMessage(
+                f'{self._mission.name} 저장됨 -- 진입 금지 구역은 mission_manager를 다시 '
+                '빌드하고 재시작해야 반영됩니다.', 10000)
+        else:
+            self.statusBar().showMessage(f'{self._mission.name} 저장됨', 5000)
         self._update_title()
 
     def _update_title(self):

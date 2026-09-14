@@ -43,6 +43,7 @@ class StudioView(QGraphicsView):
     """
 
     clicked_at = Signal(float, float, int)   # x, y, Qt 버튼
+    double_clicked_at = Signal(float, float, int)
     cursor_moved = Signal(float, float)
     follow_released = Signal()               # 팬으로 차량 고정이 풀렸습니다
 
@@ -118,6 +119,14 @@ class StudioView(QGraphicsView):
         # 아이템이 먼저 먹는 경우(핸들 드래그)에도 패널이 좌표를 알아야 하므로 먼저 냅니다.
         self.clicked_at.emit(point.x(), point.y(), int(event.button()))
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        # 두 번째 누름은 mousePressEvent로 오지 않고 여기로만 옵니다. 진입 금지 구역을
+        # 그릴 때 "여기서 닫기"로 씁니다.
+        if event.button() != Qt.MiddleButton:
+            point = self.mapToScene(event.pos())
+            self.double_clicked_at.emit(point.x(), point.y(), int(event.button()))
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._panning and self._pan_from is not None:

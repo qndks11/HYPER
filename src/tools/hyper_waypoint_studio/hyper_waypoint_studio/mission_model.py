@@ -9,11 +9,17 @@
 # main의 것이고, courses.<n>.labels는 그 갈래의 것이며, 같은 이름이 두 코스에 있어도
 # 됩니다. 그래서 이 모델 안에서 라벨을 가리키는 것은 이름이 아니라 (코스, 이름)이고,
 # 그 쌍을 문자열 하나로 만든 것이 formats.label_key입니다.
+#
+# 진입 금지 구역(최상위 keepout:)은 코스에도 스텝에도 묶이지 않는 map 프레임 다각형
+# 목록입니다. 목록의 인덱스로 가리키고, 저장하면 블록을 통째로 다시 씁니다.
 # =====================================================================
 
 import os
 
 from . import formats
+
+# 다각형이 되려면 꼭짓점이 이만큼은 있어야 합니다(mission_loader.hpp도 이보다 적으면 거부).
+KEEPOUT_MIN_POINTS = 3
 
 
 class MissionModel:
@@ -29,8 +35,11 @@ class MissionModel:
         # 콘은 코스에 묶이지 않습니다 -- key -> {x, y, value, radius, scope, step_index,
         # case_index}. 라벨과 달리 스냅도 sentinel도 없습니다(formats.load_mission 참고).
         self.cones = {k: dict(v) for k, v in cones.items()}
+        # [{"name": str, "points": [(x, y), ...]}] -- formats.load_keepout 참고.
+        self.keepout = formats.load_keepout(doc)
         self._saved = self._snapshot()
         self._saved_cones = self._cone_snapshot()
+        self._saved_keepout = self._keepout_snapshot()
 
     @classmethod
     def load(cls, path):
@@ -42,13 +51,22 @@ class MissionModel:
     def _cone_snapshot(self):
         return {k: (v["x"], v["y"]) for k, v in self.cones.items()}
 
+    def _keepout_snapshot(self):
+        return [(z["name"], tuple(z["points"])) for z in self.keepout]
+
     @property
     def name(self):
         return os.path.basename(self.path)
 
     @property
     def dirty(self):
-        return self.positions != self._saved or self._cone_snapshot() != self._saved_cones
+        return (self.positions != self._saved
+                or self._cone_snapshot() != self._saved_cones
+                or self.keepout_dirty)
+
+    @property
+    def keepout_dirty(self):
+        return self._keepout_snapshot() != self._saved_keepout
 
     @property
     def snap_tolerance(self):
@@ -222,6 +240,47 @@ class MissionModel:
             self.cones[key]["x"] = float(x)
             self.cones[key]["y"] = float(y)
 
+    # ------------------------------------------------------------------ 진입 금지 구역
+    def add_zone(self, points, name=None):
+        """새 구역을 목록 끝에 붙이고 그 인덱스를 돌려줍니다. 이름이 없으면 zone_N."""
+        names = {zone["name"] for zone in self.keepout}
+        if not name:
+            k = len(self.keepout)
+            while f"zone_{k}" in names:
+                k += 1
+            name = f"zone_{k}"
+        self.keepout.append({"name": str(name),
+                             "points": [(float(x), float(y)) for x, y in points]})
+        return len(self.keepout) - 1
+
+    def remove_zone(self, index):
+        if 0 <= index < len(self.keepout):
+            self.keepout.pop(index)
+
+    def rename_zone(self, index, name):
+        name = (name or "").strip()
+        if name and 0 <= index < len(self.keepout):
+            self.keepout[index]["name"] = name
+
+    def move_vertex(self, index, vertex, x, y):
+        points = self.keepout[index]["points"]
+        if 0 <= vertex < len(points):
+            points[vertex] = (float(x), float(y))
+
+    def insert_vertex(self, index, after, x, y):
+        """after번 꼭짓점 뒤에 넣고 새 꼭짓점의 인덱스를 돌려줍니다."""
+        points = self.keepout[index]["points"]
+        points.insert(after + 1, (float(x), float(y)))
+        return after + 1
+
+    def delete_vertex(self, index, vertex):
+        """지웠으면 True. 3개 이하면 지우지 않습니다 -- 다각형이 아니게 됩니다."""
+        points = self.keepout[index]["points"]
+        if len(points) <= KEEPOUT_MIN_POINTS or not 0 <= vertex < len(points):
+            return False
+        points.pop(vertex)
+        return True
+
     def orphans(self):
         """(course, name) 목록. 어떤 step도 until로 참조하지 않는 라벨입니다."""
         out = []
@@ -262,9 +321,16 @@ class MissionModel:
             if (c["x"], c["y"]) != self._saved_cones.get(key)
         ]
 
-        self.text = formats.save_mission(self.path, self.text, blocks, cone_edits)
+        # 구역은 바뀌었을 때만 다시 씁니다 -- 안 건드린 파일에 빈 keepout: []를 새로 만들지
+        # 않도록.
+        keepout_block = (formats.render_keepout_block(self.keepout)
+                         if self.keepout_dirty else None)
+
+        self.text = formats.save_mission(
+            self.path, self.text, blocks, cone_edits, keepout_block)
         self._saved = self._snapshot()
         self._saved_cones = self._cone_snapshot()
+        self._saved_keepout = self._keepout_snapshot()
         return self.path
 
     def reload(self):
@@ -273,5 +339,7 @@ class MissionModel:
         self.positions = {c: dict(v) for c, v in positions.items()}
         self.sentinels = {c: set(v) for c, v in sentinels.items()}
         self.cones = {k: dict(v) for k, v in cones.items()}
+        self.keepout = formats.load_keepout(self.doc)
         self._saved = self._snapshot()
         self._saved_cones = self._cone_snapshot()
+        self._saved_keepout = self._keepout_snapshot()

@@ -138,45 +138,6 @@ LaneDetection::LaneDetection(const rclcpp::NodeOptions & options)
   raw_image_subscriber_ = create_subscription<sensor_msgs::msg::Image>(
     "/image_raw", 10, std::bind(&LaneDetection::raw_image_callback, this, std::placeholders::_1));
 
-  // ---- Drivable-area classification (see drivable_area.hpp) ----
-  // Off unless a launch file asks for it: unlike this node's other outputs, this one is consumed
-  // by the local costmap and therefore steers the vehicle, so it should not switch itself on just
-  // because someone started the node to look at a BEV.
-  drivable_enabled_ = declare_parameter<bool>("drivable.enabled", false);
-  drivable_max_range_m_ = declare_parameter<double>("drivable.max_range", 9.0);
-  drivable_max_lateral_m_ = declare_parameter<double>("drivable.max_lateral", 6.0);
-
-  hyper_lane_detection::DrivableAreaSettings drivable_settings;
-  drivable_settings.surface_max_saturation = declare_parameter<int>(
-    "drivable.surface_max_saturation", drivable_settings.surface_max_saturation);
-  drivable_settings.paint_hue_min =
-    declare_parameter<int>("drivable.paint_hue_min", drivable_settings.paint_hue_min);
-  drivable_settings.paint_hue_max =
-    declare_parameter<int>("drivable.paint_hue_max", drivable_settings.paint_hue_max);
-  drivable_settings.paint_min_saturation = declare_parameter<int>(
-    "drivable.paint_min_saturation", drivable_settings.paint_min_saturation);
-  drivable_settings.close_radius_m =
-    declare_parameter<double>("drivable.close_radius", drivable_settings.close_radius_m);
-  drivable_settings.open_radius_m =
-    declare_parameter<double>("drivable.open_radius", drivable_settings.open_radius_m);
-  drivable_settings.seed_width_m =
-    declare_parameter<double>("drivable.seed_width", drivable_settings.seed_width_m);
-  drivable_settings.seed_depth_m =
-    declare_parameter<double>("drivable.seed_depth", drivable_settings.seed_depth_m);
-  drivable_settings.min_seed_coverage =
-    declare_parameter<double>("drivable.min_seed_coverage", drivable_settings.min_seed_coverage);
-  drivable_detector_ = hyper_lane_detection::DrivableAreaDetector{drivable_settings};
-
-  if (drivable_enabled_) {
-    // Reliable, depth 1. The BEV streams above are best-effort because a dropped debug frame
-    // costs nothing; a dropped classification frame instead quietly ages the costmap layer's
-    // belief, and that layer's decay would read the silence as "the road went away".
-    drivable_grid_publisher_ =
-      create_publisher<nav_msgs::msg::OccupancyGrid>("/lane/drivable_area", rclcpp::QoS(1));
-    drivable_image_publisher_ =
-      create_publisher<sensor_msgs::msg::Image>("/lane/drivable/image_raw", debug_image_qos);
-  }
-
   // ---- Dataset recording (see handle_image_saving) ----
   // Only the destination and the rate are parameters; whether recording is *running* is not, so
   // that it can only ever be turned on by an explicit call, never by a stale config file.
@@ -333,93 +294,6 @@ void LaneDetection::publish_bev_cloud(
   publisher->publish(cloud);
 }
 
-void LaneDetection::publish_drivable_area(
-  const cv::Mat & view, const std_msgs::msg::Header & header, const GroundProjection & projection)
-{
-  if (!drivable_grid_publisher_) {
-    return;
-  }
-
-  const double meters_per_pixel = projection.meters_per_pixel();
-  const cv::Point2d origin = projection.origin_px();
-
-  // Crop to the box actually worth publishing, before classifying. The BEV is 18 m wide at the
-  // configured half_width of 5.5 m, and its outer columns are stretched out of a handful of source
-  // pixels near the frame edge -- keeping them would cost four times the work to hand the flood
-  // fill its least trustworthy input. Rows are clipped from the far end (small row index = far
-  // ground); columns symmetrically about the vehicle's own column.
-  const int far_row =
-    static_cast<int>(std::ceil(origin.y - drivable_max_range_m_ / meters_per_pixel));
-  const int lateral_px =
-    static_cast<int>(std::lround(drivable_max_lateral_m_ / meters_per_pixel));
-  cv::Rect crop(
-    static_cast<int>(std::lround(origin.x)) - lateral_px, std::max(0, far_row),
-    2 * lateral_px + 1, view.rows - std::max(0, far_row));
-  crop &= cv::Rect(cv::Point(0, 0), view.size());
-  if (crop.empty()) {
-    RCLCPP_ERROR_THROTTLE(
-      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
-      "drivable.max_range/max_lateral select nothing inside the %dx%d BEV -- no grid published",
-      view.cols, view.rows);
-    return;
-  }
-
-  const cv::Mat cropped = view(crop);
-  // The vehicle origin, expressed in the cropped raster's own pixels.
-  const cv::Point2d crop_origin(origin.x - crop.x, origin.y - crop.y);
-  const auto result = drivable_detector_.detect(cropped, crop_origin, meters_per_pixel);
-
-  if (!result.seeded) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(), *get_clock(), kProjectionErrorThrottleMs,
-      "No drivable surface under the vehicle -- publishing the grid as all-unknown. Either the "
-      "vehicle is genuinely off-course, or drivable.surface_max_saturation does not match this "
-      "camera's road.");
-  }
-
-  // BEV -> OccupancyGrid. The grid's x axis is the vehicle's, so it indexes BEV *rows*: width is
-  // the longitudinal cell count and height the lateral one, which reads backwards until you
-  // remember an OccupancyGrid is indexed in its own frame, not in image order.
-  //
-  //   BEV row r is at x = (origin.y - r) * mpp, so i = (rows - 1 - r) makes x grow with i.
-  //   BEV col c is at y = (origin.x - c) * mpp, so j = (cols - 1 - c) makes y grow with j.
-  //
-  // Both axes therefore run opposite to the image's, and the grid's own origin is its minimum
-  // corner, half a cell out from the first cell's center.
-  const int rows = result.classes.rows;
-  const int cols = result.classes.cols;
-
-  nav_msgs::msg::OccupancyGrid grid;
-  grid.header = header;
-  grid.header.frame_id = bev_cloud_frame_id_;
-  grid.info.map_load_time = header.stamp;
-  grid.info.resolution = static_cast<float>(meters_per_pixel);
-  grid.info.width = static_cast<uint32_t>(rows);
-  grid.info.height = static_cast<uint32_t>(cols);
-  grid.info.origin.position.x = (crop_origin.y - rows + 0.5) * meters_per_pixel;
-  grid.info.origin.position.y = (crop_origin.x - cols + 0.5) * meters_per_pixel;
-  grid.info.origin.position.z = 0.0;
-  grid.info.origin.orientation.w = 1.0;
-
-  grid.data.resize(static_cast<size_t>(rows) * static_cast<size_t>(cols));
-  for (int r = 0; r < rows; ++r) {
-    const int8_t * class_row = result.classes.ptr<int8_t>(r);
-    const size_t i = static_cast<size_t>(rows - 1 - r);
-    for (int c = 0; c < cols; ++c) {
-      const size_t j = static_cast<size_t>(cols - 1 - c);
-      grid.data[j * static_cast<size_t>(rows) + i] = class_row[c];
-    }
-  }
-  drivable_grid_publisher_->publish(grid);
-
-  if (drivable_image_publisher_ && drivable_image_publisher_->get_subscription_count() > 0) {
-    cv::Mat annotated = cropped.clone();
-    drivable_detector_.draw(result, crop_origin, meters_per_pixel, annotated);
-    drivable_image_publisher_->publish(
-      *cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, annotated).toImageMsg());
-  }
-}
-
 void LaneDetection::raw_image_callback(const sensor_msgs::msg::Image::ConstSharedPtr & msg)
 {
   cv_bridge::CvImageConstPtr cv_ptr;
@@ -541,10 +415,6 @@ void LaneDetection::process_frame(
   cv::warpPerspective(image, warped, projection->homography(), projection->bev_size());
 
   publish_bev_cloud(warped, header, *projection);
-
-  if (drivable_enabled_) {
-    publish_drivable_area(warped, header, *projection);
-  }
 
   // The BEV view's only sink: a topic, read by RViz's Image display (or rqt_image_view). This
   // node deliberately opens no cv::imshow window of its own -- a GUI window pins the node to a

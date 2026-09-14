@@ -105,13 +105,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'software_rendering', default_value='false',
             description='Force llvmpipe software rendering. Only needed on WSL2.'),
-        # 전방 카메라의 색 기반 주행가능영역 분류(/lane/drivable_area)를 켭니다. 기본은 off --
-        # 이 토픽을 실제로 읽는 쪽(hyper_planner/config/nav2_controller.yaml의 local_costmap
-        # plugins에 있는 drivable_area_layer)도 따로 켜야 주행이 달라집니다. 켜기 전에
-        # /lane/drivable/image_raw를 rqt_image_view로 먼저 확인하세요.
-        DeclareLaunchArgument(
-            'drivable_area', default_value='false',
-            description="Publish the camera drivable-area grid for nav2's DrivableAreaLayer"),
         # headless:=true와 짝지어 쓰는 인자. Gazebo 창 대신 rviz로 봅니다. 끄려면 false.
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
@@ -140,8 +133,7 @@ def generate_launch_description():
         # object_detection_node subscribes to that same bridged /camera/image_raw -- the sim has
         # one camera, matching the car.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
-            stage('perception.launch.py', lane_input_backend='ros_raw',
-                  drivable_area=LaunchConfiguration('drivable_area'))]),
+            stage('perception.launch.py', lane_input_backend='ros_raw')]),
         # 어느 코스를 달릴지는 mission이 고른 mission/<이름>.yaml의 courses:가
         # 정합니다(예: mission_track -> track/*.csv).
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
