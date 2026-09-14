@@ -13,6 +13,10 @@ COLOR_CAR = '#bc8cff'
 COLOR_PREV = '#8b949e'
 COLOR_LABEL = '#f0883e'
 COLOR_LABEL_ACTIVE = '#f85149'
+# 콘은 라벨(주황/빨강)과 절대 헷갈리면 안 되므로 팔레트에서 비어 있는 색 계열(분홍)을
+# 씁니다. 스냅 상태가 없어 COLOR_OK/COLOR_BAD 같은 상태색도 안 씁니다.
+COLOR_CONE = '#f778ba'
+COLOR_CONE_ACTIVE = '#ff9bd2'
 COLOR_GRID = '#21262d'
 
 # 코스 레이어에 순서대로 배정하는 색. 배경(아스팔트/잔디) 위에서도 서로 구분되고

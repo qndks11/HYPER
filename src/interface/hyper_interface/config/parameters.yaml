@@ -4,6 +4,6 @@
     baud_rate: 115200
     send_rate: 50.0 # [Hz]
     command_timeout: 0.3 # [s]
-    max_velocity: 1.30 # 저속 테스트용으로 하향. hyper_control과 동일하게 맞춤 [m/s]
+    max_velocity: 2.0 # 저속 테스트용으로 하향. hyper_control과 동일하게 맞춤 [m/s]
     max_steering_angle: 0.5061455 # 29 deg (실측) [rad]
     wheel_base: 0.72 # [m]

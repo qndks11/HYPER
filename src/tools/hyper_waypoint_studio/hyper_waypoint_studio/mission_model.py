@@ -18,7 +18,7 @@ from . import formats
 
 class MissionModel:
 
-    def __init__(self, path, text, doc, required, positions, sentinels):
+    def __init__(self, path, text, doc, required, positions, sentinels, cones):
         self.path = path
         self.text = text
         self.doc = doc
@@ -26,7 +26,11 @@ class MissionModel:
         self.required = required          # course -> [steps가 until로 참조하는 이름]
         self.positions = {c: dict(v) for c, v in positions.items()}   # course -> {name: (x, y)}
         self.sentinels = {c: set(v) for c, v in sentinels.items()}    # course -> {name} (`last`)
+        # 콘은 코스에 묶이지 않습니다 -- key -> {x, y, value, radius, scope, step_index,
+        # case_index}. 라벨과 달리 스냅도 sentinel도 없습니다(formats.load_mission 참고).
+        self.cones = {k: dict(v) for k, v in cones.items()}
         self._saved = self._snapshot()
+        self._saved_cones = self._cone_snapshot()
 
     @classmethod
     def load(cls, path):
@@ -35,13 +39,16 @@ class MissionModel:
     def _snapshot(self):
         return {c: dict(v) for c, v in self.positions.items()}
 
+    def _cone_snapshot(self):
+        return {k: (v["x"], v["y"]) for k, v in self.cones.items()}
+
     @property
     def name(self):
         return os.path.basename(self.path)
 
     @property
     def dirty(self):
-        return self.positions != self._saved
+        return self.positions != self._saved or self._cone_snapshot() != self._saved_cones
 
     @property
     def snap_tolerance(self):
@@ -176,6 +183,22 @@ class MissionModel:
                 report.append((course_name, name, index, distance, state))
         return report
 
+    # ------------------------------------------------------------------ 콘
+    def cone_names(self):
+        """콘 키를 (scope, step_index, case_index) 순으로 정렬해 돌려줍니다 --
+        화면에서 항상 같은 순서로 보이게 합니다."""
+        return sorted(
+            self.cones,
+            key=lambda k: (str(self.cones[k]["scope"]),
+                            self.cones[k]["step_index"],
+                            self.cones[k]["case_index"]))
+
+    def place_cone(self, key, x, y):
+        """콘은 스냅도 허용 오차도 없습니다 -- 클릭/드래그한 좌표를 그대로 받습니다."""
+        if key in self.cones:
+            self.cones[key]["x"] = float(x)
+            self.cones[key]["y"] = float(y)
+
     def orphans(self):
         """(course, name) 목록. 어떤 step도 until로 참조하지 않는 라벨입니다."""
         out = []
@@ -207,13 +230,25 @@ class MissionModel:
                     indices[name] = course.nearest(x, y)[0]
             blocks.append((course_name, formats.render_labels_block(
                 positions, indices, self.required.get(course_name, []), sentinels)))
-        self.text = formats.save_mission(self.path, self.text, blocks)
+
+        # 좌표가 실제로 바뀐 콘만 갈아끼웁니다 -- 건드리지 않은 케이스의 줄은 손대지
+        # 않는 편이 안전합니다.
+        cone_edits = [
+            (c["scope"], c["step_index"], c["case_index"], c["x"], c["y"], c["value"])
+            for key, c in self.cones.items()
+            if (c["x"], c["y"]) != self._saved_cones.get(key)
+        ]
+
+        self.text = formats.save_mission(self.path, self.text, blocks, cone_edits)
         self._saved = self._snapshot()
+        self._saved_cones = self._cone_snapshot()
         return self.path
 
     def reload(self):
         (self.text, self.doc, self.required,
-         positions, sentinels) = formats.load_mission(self.path)
+         positions, sentinels, cones) = formats.load_mission(self.path)
         self.positions = {c: dict(v) for c, v in positions.items()}
         self.sentinels = {c: set(v) for c, v in sentinels.items()}
+        self.cones = {k: dict(v) for k, v in cones.items()}
         self._saved = self._snapshot()
+        self._saved_cones = self._cone_snapshot()

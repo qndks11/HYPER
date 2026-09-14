@@ -34,11 +34,11 @@ courses:
     labels:
       # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
       light_1: {x: -0.846, y: 1.740}   # wp #68
-      s_curve_start: {x: -23.101, y: -23.846}   # wp #138
-      s_curve_end: {x: -43.334, y: -1.138}   # wp #185
-      cone_2: {x: 5.037, y: -17.705}   # wp #264
-      park_t_entry: {x: -2.297, y: -35.820}   # wp #289
-      light_2: {x: -12.994, y: -6.010}   # wp #230, orphan: 어떤 step도 참조하지 않음
+      s_curve_start: {x: -23.101, y: -23.846}   # wp #136
+      s_curve_end: {x: -43.334, y: -1.138}   # wp #183
+      cone_2: {x: 5.037, y: -17.705}   # wp #262
+      park_t_entry: {x: -2.297, y: -35.820}   # wp #287
+      light_2: {x: -12.994, y: -6.010}   # wp #228, orphan: 어떤 step도 참조하지 않음
 
   # 2) T자 주차 갈래. 두 CSV 모두 common_1의 끝(park_t_entry)에서 *후진으로* 시작합니다
   #    -- 녹화가 그렇게 되어 있습니다(t_left #0~23, t_right #0~24가 후진 구간). 그래서
@@ -156,10 +156,9 @@ steps:
     timeout_s: 6.0
     vote_window_s: 2.0
     prearm_distance_m: 0.0
-    cone_radius: 1.0
     cases:
-      - {value: "t_left",   goto: t_left_route, cone: {x: 4.75, y: -30.70}}  
-      - {value: "t_right", goto: t_right_route, cone: {x: 5.61, y: -28.79}}  
+      - {value: "t_left",   goto: t_left_route, cone: {x: 3.39, y: -31.71, radius: 1.0}}  
+      - {value: "t_right", goto: t_right_route, cone: {x: 5.14, y: -27.40, radius: 1.0}}  
 
   # [8~9] 합류(common_2) 뒤 두 번째 신호등.
   - {type: drive, course: common_2, until: light_3, controller: FRPP,
@@ -182,13 +181,14 @@ steps:
 
   # [13] 평행 주차 갈래. [7]과 같이 판정 조건이 아직 없습니다.
   - type: branch
-    default: p_down_route
-    timeout_s: 3.0
-    vote_window_s: 1.0          # 위 T자 주차와 같은 이유로 짧게.
+    select_by: clearance
+    default: p_up_route
+    timeout_s: 6.0
+    vote_window_s: 2.0
     prearm_distance_m: 0.0
     cases:
-      - {value: "p_up",   goto: p_up_route}
-      - {value: "p_down", goto: p_down_route}
+      - {value: "p_up",   goto: p_up_route,   cone: {x: 18.08, y: -9.59, radius: 1.0}}  
+      - {value: "p_down", goto: p_down_route, cone: {x: 25.27, y: -12.55, radius: 1.0}}  
 
   # [14] 합류(common_3) -- 마지막 차선 갈림길까지.
   - {type: drive, course: common_3, until: common_3_end, controller: FRPP,
@@ -215,12 +215,12 @@ routes:
     - {type: drive, course: start_left, until: stopline_left, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
     - {type: stop, duration_s: 5.0}
-    - {type: drive, course: start_left, until: start_left_end, controller: FRPP}
+    - {type: drive, course: start_left, until: start_left_end, controller: FRPP, handoff_m: 6.0}
   start_right_route:
     - {type: drive, course: start_right, until: stopline_right, controller: FRPP,
        goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
     - {type: stop, duration_s: 5.0}
-    - {type: drive, course: start_right, until: start_right_end, controller: FRPP}
+    - {type: drive, course: start_right, until: start_right_end, controller: FRPP, handoff_m: 6.0}
 
   # T자 주차: 분기 지점에서 곧바로 후진 입고 -> 정차 -> 전진 출차. 출차가 별도 갈래
   # 스텝인 이유는 RPP가 한 경로 안의 방향 전환을 처리하지 못하기 때문입니다.

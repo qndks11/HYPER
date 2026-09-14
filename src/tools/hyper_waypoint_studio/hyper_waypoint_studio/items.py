@@ -25,6 +25,7 @@ Z_COURSE = 1
 Z_LIVE_PATH = 1.5
 Z_HANDLE = 2
 Z_LABEL = 3
+Z_CONE = 3.2
 Z_VEHICLE = 4
 
 
@@ -350,6 +351,55 @@ class LabelMarker(QGraphicsObject):
         s = self.SIZE_PX
         painter.drawLine(QPointF(-s, -s), QPointF(s, s))
         painter.drawLine(QPointF(-s, s), QPointF(s, -s))
+        painter.setPen(QPen(color, 1))
+        painter.drawText(QPointF(s + 4, s - 1), self.name)
+
+    def mousePressEvent(self, event):
+        self._on_clicked(self.key)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        position = self.pos()
+        self._on_moved(self.key, position.x(), position.y())
+
+
+class ConeMarker(QGraphicsObject):
+    """분기 케이스의 콘 좌표 하나(steps[].cases[].cone). LabelMarker와 겉모습을
+    확실히 다르게 합니다 -- 스냅 상태가 없는 생좌표라 라벨로 착각하면 안 됩니다.
+    """
+
+    SIZE_PX = 7.0
+
+    def __init__(self, key, text, x, y, radius_m, on_moved, on_clicked):
+        super().__init__()
+        self.key = key            # formats.cone_key(scope, step_index, case_index)
+        self.name = text          # case의 value (예: "t_left")
+        self._radius_m = radius_m
+        self._on_moved = on_moved
+        self._on_clicked = on_clicked
+        self._active = False
+        self.setZValue(Z_CONE)
+        self.setPos(x, y)
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+
+    def set_active(self, active):
+        self._active = bool(active)
+        self.update()
+
+    def boundingRect(self):
+        return QRectF(-self.SIZE_PX - 2, -self.SIZE_PX - 2, 220, 2 * self.SIZE_PX + 4)
+
+    def paint(self, painter, _option, _widget=None):
+        painter.setRenderHint(painter.Antialiasing, True)
+        color = QColor(theme.COLOR_CONE_ACTIVE if self._active else theme.COLOR_CONE)
+        s = self.SIZE_PX
+        painter.setPen(QPen(color, 2.0 if self._active else 1.5))
+        painter.setBrush(QBrush(color) if self._active else Qt.NoBrush)
+        painter.drawPolygon(QPolygonF(
+            [QPointF(0, -s), QPointF(s, s), QPointF(-s, s)]))
         painter.setPen(QPen(color, 1))
         painter.drawText(QPointF(s + 4, s - 1), self.name)
 

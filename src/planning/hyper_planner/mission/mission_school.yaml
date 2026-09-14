@@ -137,8 +137,8 @@ steps:
     vote_window_s: 2.0
     prearm_distance_m: 0.0
     cases:
-      - {value: "t_left",  goto: t_left_route,  cone: {x: -3, y: 21.02}}   
-      - {value: "t_right", goto: t_right_route, cone: {x: -5, y: 22.05}}  
+      - {value: "t_left",  goto: t_left_route,  cone: {x: -3, y: 21.02, radius: 1.0}}   
+      - {value: "t_right", goto: t_right_route, cone: {x: -5, y: 22.05, radius: 1.0}}  
 
   # [8~9] 합류(common_2) 뒤 두 번째 신호등
   # [10~11] 가속 구간. 여기는 원래부터 RPP여야 하는 곳입니다 -- 장애물 앞에서 비켜 가지
@@ -172,8 +172,8 @@ steps:
     vote_window_s: 2.0
     prearm_distance_m: 0.0
     cases:
-      - {value: "p_up",   goto: p_up_route,   cone: {x: -20, y: 24.46}}  
-      - {value: "p_down", goto: p_down_route, cone: {x: -15.24, y: 23.03}}  
+      - {value: "p_up",   goto: p_up_route,   cone: {x: -20, y: 24.46, radius: 1.0}}  
+      - {value: "p_down", goto: p_down_route, cone: {x: -15.24, y: 23.03, radius: 1.0}}  
 
   # [14] 합류(common_3) -- 마지막 차선 갈림길까지.
   - {type: drive, course: common_3, until: common_3_end, controller: FRPP,

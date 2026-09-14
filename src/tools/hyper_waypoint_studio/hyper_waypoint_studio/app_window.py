@@ -26,7 +26,7 @@ from python_qt_binding.QtWidgets import (
 from . import formats, geometry, items, ros_link, theme
 from .course_model import CourseModel
 from .items import (
-    CostmapItem, CourseItem, HeadingItem, LabelMarker, OverlayItem, VehicleItem,
+    ConeMarker, CostmapItem, CourseItem, HeadingItem, LabelMarker, OverlayItem, VehicleItem,
     WaypointHandle)
 from .mission_model import MissionModel
 from .panels.drive_panel import DrivePanel
@@ -96,6 +96,7 @@ class StudioWindow(QMainWindow):
         self._layers = []           # [{'course': CourseItem, 'heading': HeadingItem}]
         self._handles = []          # 편집 중인 코스의 WaypointHandle
         self._labels = {}           # name -> LabelMarker
+        self._cones = {}            # key -> ConeMarker
         self._mission = None
         self._overlay_item = None
         self._overlay_path = None
@@ -104,6 +105,7 @@ class StudioWindow(QMainWindow):
         self._active_row = None
         self._selected_point = None
         self._active_label = None
+        self._active_cone = None
         self._color_cursor = 0
         self._recorder_file = ''
         self._previous_points = []
@@ -191,6 +193,7 @@ class StudioWindow(QMainWindow):
         self._edit = EditPanel()
         self._edit.label_selected.connect(self._select_label)
         self._edit.label_cleared.connect(self._clear_label)
+        self._edit.cone_selected.connect(self._select_cone)
         self._edit.save_mission.connect(self._save_mission)
         self._edit.save_course.connect(lambda: self._save_course(False))
         self._edit.save_course_as.connect(lambda: self._save_course(True))
@@ -548,6 +551,7 @@ class StudioWindow(QMainWindow):
             self._layers_panel.set_mission_courses(self._mission.course_names)
         self._layers_panel.refresh(self._courses, self._active_row)
         self._refresh_labels()
+        self._refresh_cones()
         self._edit.set_undo_state(
             bool(self._active and self._active.can_undo),
             bool(self._active and self._active.can_redo))
@@ -731,6 +735,15 @@ class StudioWindow(QMainWindow):
     def _on_canvas_click(self, x, y, button):
         if self._mode != 'edit':
             return
+        # 콘은 코스가 없어도(스냅 대상이 없으므로) 클릭한 좌표 그대로 옮길 수
+        # 있습니다 -- 그래서 아래 "코스 없으면 종료"보다 먼저 처리합니다.
+        if self._active_cone and self._mission is not None:
+            self._mission.place_cone(self._active_cone, x, y)
+            cone = self._mission.cones[self._active_cone]
+            self._edit.set_cone_place_hint(f"{cone['value']} -> ({x:.2f}, {y:.2f})")
+            self._refresh_cones()
+            self._update_title()
+            return
         modifiers = QApplication.keyboardModifiers()
         course = self._active
         if course is None:
@@ -877,6 +890,43 @@ class StudioWindow(QMainWindow):
             self._edit.set_place_hint(
                 f"{name}: 코스 '{label_course}'가 안 열려 있어 클릭한 좌표 그대로 뒀습니다.")
         self._refresh_labels()
+        self._update_title()
+
+    # ================================================================== 콘
+    def _refresh_cones(self):
+        """콘은 라벨과 달리 코스에 묶이지 않으므로 열린 코스와 상관없이 항상
+        절대 좌표에 그립니다(라벨도 이미 그렇게 그리고 있습니다 -- _refresh_labels)."""
+        for marker in self._cones.values():
+            self._scene.removeItem(marker)
+        self._cones = {}
+        if self._mission is None:
+            self._edit.set_cones(None, None, None)
+            return
+        for key in self._mission.cone_names():
+            cone = self._mission.cones[key]
+            marker = ConeMarker(key, cone['value'], cone['x'], cone['y'], cone.get('radius'),
+                                 self._on_cone_moved, self._select_cone)
+            marker.set_active(key == self._active_cone)
+            self._scene.addItem(marker)
+            self._cones[key] = marker
+        self._edit.set_cones(self._mission, self._mission.name, self._active_cone)
+
+    def _select_cone(self, key):
+        self._active_cone = key
+        for marker_key, marker in self._cones.items():
+            marker.set_active(marker_key == key)
+        cone = self._mission.cones[key]
+        self._edit.set_cone_place_hint(
+            f"'{cone['value']}' 선택됨 -- 캔버스를 클릭하거나 끌면 그 좌표 그대로 "
+            f"옮깁니다(스냅 없음).")
+
+    def _on_cone_moved(self, key, x, y):
+        if self._mission is None:
+            return
+        self._mission.place_cone(key, x, y)
+        cone = self._mission.cones[key]
+        self._edit.set_cone_place_hint(f"{cone['value']} -> ({x:.2f}, {y:.2f})")
+        self._refresh_cones()
         self._update_title()
 
     # ================================================================== 배경
@@ -1045,6 +1095,7 @@ class StudioWindow(QMainWindow):
             if answer == QMessageBox.Yes:
                 self._mission.reload()
                 self._refresh_labels()
+                self._refresh_cones()
             return
         except OSError as exc:
             QMessageBox.warning(self, '저장 실패', str(exc))

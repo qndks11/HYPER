@@ -220,18 +220,24 @@ class StudioView(QGraphicsView):
     def frame(self, rect, pad_m=5.0):
         """rect(map 프레임)가 다 보이도록 맞춥니다.
 
-        직접 계산하는 이유: 변환이 걸린 배경 아이템은 fitInView가 쓰는 자동 경계에
-        제대로 안 잡히는 경우가 있어서, 잘못 놓인 배경이 화면 밖에 있다는 힌트조차
-        없이 사라집니다.
+        fitInView 대신 직접 스케일을 계산해 _apply_view_transform으로 적용합니다.
+        fitInView/centerOn은 내부적으로 스크롤바를 움직이는데, 이 뷰는
+        ScrollBarAlwaysOff로 스크롤바를 숨기면서도 평소엔 절대 건드리지 않습니다
+        (팬/줌은 전부 transform() 자체를 고칩니다 -- mouseMoveEvent, wheelEvent).
+        fitInView로 스크롤바가 한 번이라도 움직으면 그 이후 값이 0이라고 가정하는
+        _apply_view_transform(follow_to 등)의 계산이 전부 어긋나 차량 고정이
+        화면 중앙에서 벗어나게 됩니다.
         """
         if rect is None or rect.isEmpty():
             return
         padded = rect.adjusted(-pad_m, -pad_m, pad_m, pad_m)
-        self.fitInView(padded, Qt.KeepAspectRatio)
-        # fitInView는 y-flip을 유지하지만 축척 한계는 안 봅니다.
-        current = abs(self.transform().m11())
-        if current > MAX_SCALE:
-            self.scale(MAX_SCALE / current, MAX_SCALE / current)
+        viewport = self.viewport().rect()
+        if viewport.width() <= 0 or viewport.height() <= 0:
+            return
+        scale = min(viewport.width() / padded.width(), viewport.height() / padded.height())
+        scale = max(MIN_SCALE, min(MAX_SCALE, scale))
+        self._applied_yaw = 0.0
+        self._apply_view_transform(scale, 0.0, padded.center().x(), padded.center().y())
 
     def meters_per_pixel(self):
         scale = self._current_scale()

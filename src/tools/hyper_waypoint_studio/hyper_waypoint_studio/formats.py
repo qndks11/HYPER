@@ -154,12 +154,28 @@ def split_key(key):
     return course, name
 
 
+# 콘은 라벨이 아닙니다(steps[].cases[].cone -- courses.<n>.labels가 아니라). case의
+# value 문자열이 미션 전체에서 유일하다는 보장이 없으므로, 이름이 아니라 위치
+# (scope, step_index, case_index)로 키를 만듭니다.
+def cone_key(scope, step_index, case_index):
+    tag = scope if scope == "steps" else f"routes{KEY_SEPARATOR}{scope[1]}"
+    return f"{tag}{KEY_SEPARATOR}{step_index}{KEY_SEPARATOR}{case_index}"
+
+
+def split_cone_key(key):
+    parts = key.split(KEY_SEPARATOR)
+    if parts[0] == "steps":
+        return "steps", int(parts[1]), int(parts[2])
+    return ("routes", parts[1]), int(parts[2]), int(parts[3])
+
+
 def load_mission(path):
-    """mission.yaml -> (raw_text, doc, required, positions, sentinels).
+    """mission.yaml -> (raw_text, doc, required, positions, sentinels, cones).
 
     raw_text를 들고 다니는 이유가 이 파일의 핵심입니다. 저장할 때 PyYAML로 다시
     쓰면 mission_track.yaml의 수백 줄짜리 튜닝 주석이 전부 날아가므로, labels 블록만
-    바이트 단위로 갈아끼웁니다(splice_labels).
+    바이트 단위로 갈아끼웁니다(splice_labels). 콘도 같은 이유로 값 하나만
+    갈아끼웁니다(splice_cone).
 
     required / positions / sentinels는 전부 **코스 이름으로 묶인** dict입니다.
     최상위 labels:는 main의 것이고, courses.<n>.labels는 그 갈래의 것입니다 --
@@ -170,6 +186,11 @@ def load_mission(path):
     좌표가 없으니 화면에 찍을 수도 옮길 수도 없지만, **저장할 때 반드시 도로
     써 줘야 합니다** -- 안 그러면 저장 한 번에 파일에서 사라지고 미션이 로드되지
     않습니다.
+
+    cones는 cone_key(scope, step_index, case_index) -> {x, y, value, radius,
+    scope, step_index, case_index}입니다. 라벨과 달리 코스에 묶이지 않고(생좌표라
+    어떤 CSV에도 스냅되지 않습니다), 좌표 없이는 존재할 수 없으므로 sentinel도
+    없습니다.
     """
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
@@ -213,7 +234,38 @@ def load_mission(path):
         if isinstance(entry, dict):
             note_labels(course, entry.get("labels"))
 
-    return text, doc, required, positions, sentinels
+    # 콘은 라벨과 완전히 다른 자리(steps[].cases[].cone)에 있습니다. required 스캔과
+    # 같은 순서(steps 먼저, 그다음 routes)로 훑어야 splice_cone의 step_index가
+    # save_mission이 다시 읽을 때와 항상 같은 스텝을 가리킵니다.
+    cones = {}
+
+    def note_branch(scope, step_index, step):
+        if not isinstance(step, dict) or step.get("type") != "branch":
+            return
+        for case_index, case in enumerate(step.get("cases") or []):
+            if not isinstance(case, dict):
+                continue
+            cone = case.get("cone")
+            if not isinstance(cone, dict) or "x" not in cone or "y" not in cone:
+                continue
+            key = cone_key(scope, step_index, case_index)
+            cones[key] = {
+                "x": float(cone["x"]),
+                "y": float(cone["y"]),
+                "value": case.get("value", ""),
+                "radius": cone.get("radius", step.get("cone_radius")),
+                "scope": scope,
+                "step_index": step_index,
+                "case_index": case_index,
+            }
+
+    for i, step in enumerate(doc.get("steps") or []):
+        note_branch("steps", i, step)
+    for route_name, route in (doc.get("routes") or {}).items():
+        for i, step in enumerate(route or []):
+            note_branch(("routes", route_name), i, step)
+
+    return text, doc, required, positions, sentinels, cones
 
 
 def render_labels_block(positions, indices, order, sentinels=()):
@@ -339,11 +391,130 @@ def splice_labels(text, block, course=None):
             + "".join(lines[labels_end:]))
 
 
-def save_mission(path, original_text, blocks):
-    """labels 블록들만 갈아끼워 저장합니다. 원자적으로 씁니다.
+def _first_dash_indent(lines, lo, hi):
+    """[lo, hi)에서 첫 `- ` 항목의 들여쓰기 칸 수. 없으면 None.
+
+    부모 키(`steps:`, `cases:`, ...)의 들여쓰기에서 몇 칸을 더 들여썼는지는 파일마다
+    또는 코스 갈래마다 다를 수 있어 고정폭으로 가정하지 않고 실제 줄에서 잽니다.
+    """
+    for i in range(lo, hi):
+        match = re.match(r"^(\s*)- ", lines[i])
+        if match:
+            return len(match.group(1))
+    return None
+
+
+def _list_item_ranges(lines, list_indent, lo, hi):
+    """[lo, hi)에서 정확히 list_indent 칸 들여쓴 `- `로 시작하는 각 항목의 [start, end)
+    범위 목록. 한 줄짜리 flow 항목(`- {a: 1}`)과 여러 줄짜리 block 항목(`- type: x\\n
+    ...`) 둘 다에 씁니다 -- block 항목의 이어지는 줄은 항상 그 항목의 대시보다 더
+    깊이 들여쓰이므로, 다음 `- `가 나올 때까지가 그 항목입니다.
+    """
+    pattern = re.compile(r"^" + " " * list_indent + r"- ")
+    starts = [i for i in range(lo, hi) if pattern.match(lines[i])]
+    ranges = []
+    for idx, start in enumerate(starts):
+        end = starts[idx + 1] if idx + 1 < len(starts) else hi
+        while end > start + 1 and lines[end - 1].strip() == "":
+            end -= 1
+        ranges.append((start, end))
+    return ranges
+
+
+def splice_cone(text, scope, step_index, case_index, x, y, expected_value=None):
+    """text에서 한 콘의 x/y만 자리에서 바꿔치기합니다. 나머지 바이트는 그대로.
+
+    라벨과 달리 콘은 courses.<n>.labels 같은 자기 블록이 없습니다 -- steps[].cases[]
+    또는 routes.<name>[].cases[] 안, 한 줄짜리 flow 매핑(`- {value: ..., cone: {x:
+    .., y: ..}}`) 속에 파묻혀 있으므로, 블록 전체가 아니라 그 줄의 cone: {...}
+    부분문자열만 고쳐야 value/goto/주석이 그대로 남습니다.
+
+    scope는 "steps" 또는 ("routes", 이름)입니다. expected_value를 주면 찾아낸 case가
+    그 value를 갖고 있는지 확인하고, 아니면 인덱스가 어긋난 것이므로 조용히 엉뚱한
+    자리를 고치는 대신 ValueError를 냅니다.
+
+    들여쓰기는 어디서도 고정폭으로 가정하지 않고 실제 줄에서 잽니다 -- steps:의 항목
+    들여쓰기와 routes.<name>:의 항목 들여쓰기가 갈래마다 다를 수 있기 때문입니다.
+    """
+    lines = text.splitlines(keepends=True)
+
+    if scope == "steps":
+        owner = _key_line(lines, "steps", 0, 0, len(lines))
+        if owner is None:
+            raise ValueError("mission.yaml에 최상위 'steps:' 블록이 없습니다.")
+        list_lo, list_hi = owner + 1, _body_end(lines, owner, 0, len(lines))
+    else:
+        _, route_name = scope
+        routes = _key_line(lines, "routes", 0, 0, len(lines))
+        if routes is None:
+            raise ValueError("mission.yaml에 최상위 'routes:' 블록이 없습니다.")
+        routes_end = _body_end(lines, routes, 0, len(lines))
+        entry = entry_indent = None
+        pattern = re.compile(r"^(\s+)" + re.escape(route_name) + r":\s*(#.*)?$")
+        for i in range(routes + 1, routes_end):
+            match = pattern.match(lines[i])
+            if match:
+                entry, entry_indent = i, len(match.group(1))
+                break
+        if entry is None:
+            raise ValueError(f"'routes:' 아래에 '{route_name}:' 항목이 없습니다.")
+        list_lo, list_hi = entry + 1, _body_end(lines, entry, entry_indent, routes_end)
+
+    list_indent = _first_dash_indent(lines, list_lo, list_hi)
+    if list_indent is None:
+        raise ValueError("스텝 목록에서 '- ' 항목을 찾지 못했습니다.")
+    step_ranges = _list_item_ranges(lines, list_indent, list_lo, list_hi)
+    if not (0 <= step_index < len(step_ranges)):
+        raise ValueError(f"스텝 인덱스 {step_index}가 범위를 벗어났습니다.")
+    step_start, step_end = step_ranges[step_index]
+
+    cases = None
+    cases_pattern = re.compile(r"^(\s+)cases:\s*(#.*)?$")
+    for i in range(step_start, step_end):
+        match = cases_pattern.match(lines[i])
+        if match:
+            cases, cases_indent = i, len(match.group(1))
+            break
+    if cases is None:
+        raise ValueError("그 스텝에 'cases:'가 없습니다.")
+    cases_body_lo, cases_body_hi = cases + 1, _body_end(lines, cases, cases_indent, step_end)
+
+    item_indent = _first_dash_indent(lines, cases_body_lo, cases_body_hi)
+    if item_indent is None:
+        raise ValueError("그 스텝의 'cases:'에 항목이 없습니다.")
+
+    case_ranges = _list_item_ranges(lines, item_indent, cases_body_lo, cases_body_hi)
+    if not (0 <= case_index < len(case_ranges)):
+        raise ValueError(f"케이스 인덱스 {case_index}가 범위를 벗어났습니다.")
+    case_start, case_end = case_ranges[case_index]
+    case_text = "".join(lines[case_start:case_end])
+
+    if expected_value is not None:
+        value_pattern = re.compile(r"value:\s*[\"']?" + re.escape(str(expected_value)))
+        if not value_pattern.search(case_text):
+            raise ValueError(
+                f"'{expected_value}' 케이스를 찾지 못했습니다 -- 인덱스가 어긋났습니다.")
+
+    cone_pattern = re.compile(r"cone:\s*\{[^{}]*\}")
+    cone_match = cone_pattern.search(case_text)
+    if cone_match is None:
+        raise ValueError("그 케이스에서 'cone: {...}' 한 줄짜리 표기를 찾지 못했습니다.")
+    inner = cone_match.group(0)
+    inner = re.sub(r"(\bx:\s*)-?\d+(?:\.\d+)?", lambda m: m.group(1) + f"{x:.2f}",
+                    inner, count=1)
+    inner = re.sub(r"(\by:\s*)-?\d+(?:\.\d+)?", lambda m: m.group(1) + f"{y:.2f}",
+                    inner, count=1)
+    new_case_text = case_text[:cone_match.start()] + inner + case_text[cone_match.end():]
+
+    return "".join(lines[:case_start]) + new_case_text + "".join(lines[case_end:])
+
+
+def save_mission(path, original_text, blocks, cone_edits=()):
+    """labels 블록들과 콘 좌표들을 갈아끼워 저장합니다. 원자적으로 씁니다.
 
     blocks는 (코스 이름, 블록) 목록입니다 -- 코스마다 자기 labels 블록이 따로
-    있으므로 한 번의 저장이 여러 자리를 건드립니다.
+    있으므로 한 번의 저장이 여러 자리를 건드립니다. cone_edits는 (scope,
+    step_index, case_index, x, y, expected_value) 목록입니다.
 
     바이트 스플라이스는 그 바이트를 읽은 시점의 파일에 대해서만 유효하므로,
     연 뒤에 파일이 밖에서 바뀌었으면 거부합니다 -- 그대로 쓰면 남의 편집을
@@ -357,6 +528,8 @@ def save_mission(path, original_text, blocks):
     updated = original_text
     for course, block in blocks:
         updated = splice_labels(updated, block, course)
+    for scope, step_index, case_index, x, y, expected_value in cone_edits:
+        updated = splice_cone(updated, scope, step_index, case_index, x, y, expected_value)
 
     directory = os.path.dirname(os.path.abspath(path)) or "."
     handle = tempfile.NamedTemporaryFile(

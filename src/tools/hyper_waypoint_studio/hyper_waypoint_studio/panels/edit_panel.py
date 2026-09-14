@@ -21,6 +21,7 @@ class EditPanel(QWidget):
 
     label_selected = Signal(str)
     label_cleared = Signal(str)
+    cone_selected = Signal(str)
     save_mission = Signal()
     save_course = Signal()
     save_course_as = Signal()
@@ -126,6 +127,32 @@ class EditPanel(QWidget):
         label_buttons.addWidget(self._save_mission)
         labels_layout.addLayout(label_buttons)
         root.addWidget(labels, stretch=1)
+
+        # ---------------------------------------------------------- 콘
+        # 콘은 라벨과 다릅니다: 스냅도, 코스 소속도, 허용 오차도 없습니다
+        # (steps[].cases[].cone -- courses.<n>.labels가 아닙니다). 그래서 이 목록에는
+        # 색으로 나타낼 상태가 없고, 저장은 "미션 저장" 버튼을 그대로 씁니다(라벨과
+        # 한 번에 저장됩니다).
+        cones = QGroupBox('미션 콘')
+        cones_layout = QVBoxLayout(cones)
+        self._cones_hint = QLabel('미션 파일이 열려 있지 않습니다.')
+        self._cones_hint.setWordWrap(True)
+        self._cones_hint.setStyleSheet(f'color: {theme.COLOR_STALE};')
+        cones_layout.addWidget(self._cones_hint)
+
+        self._cone_list = QListWidget()
+        self._cone_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._cone_list.currentItemChanged.connect(self._on_cone_selected)
+        self._cone_list.setToolTip(
+            '분기 판정에 쓰는 콘 좌표입니다(select_by: clearance). 스냅도 허용 오차도\n'
+            '없습니다 -- 고른 뒤 캔버스를 클릭하거나 끌면 그 좌표 그대로 옮겨집니다.')
+        cones_layout.addWidget(self._cone_list, stretch=1)
+
+        self._cone_place_hint = QLabel('')
+        self._cone_place_hint.setWordWrap(True)
+        self._cone_place_hint.setStyleSheet(f'color: {theme.COLOR_STALE};')
+        cones_layout.addWidget(self._cone_place_hint)
+        root.addWidget(cones, stretch=1)
 
     # ------------------------------------------------------------------ 갱신
     def set_selected_point(self, index, x=None, y=None, yaw=None, reverse=False):
@@ -248,6 +275,40 @@ class EditPanel(QWidget):
         item = self._list.currentItem()
         return item.data(Qt.UserRole) if item else None
 
+    def set_cones(self, mission, mission_name=None, active=None):
+        """mission은 MissionModel입니다(cone_names()/cones로 콘을 읽습니다)."""
+        self._cone_list.blockSignals(True)
+        self._cone_list.clear()
+        if mission_name is None:
+            self._cones_hint.setText('미션 파일이 열려 있지 않습니다.')
+            self._cone_list.blockSignals(False)
+            return
+
+        keys = mission.cone_names()
+        self._cones_hint.setText(
+            f'{mission_name} -- 콘 {len(keys)}개' if keys else f'{mission_name} -- 콘 없음')
+
+        for key in keys:
+            cone = mission.cones[key]
+            item = QListWidgetItem(f"{cone['value']}   ({cone['x']:.2f}, {cone['y']:.2f})")
+            item.setForeground(QColor(theme.COLOR_CONE))
+            item.setData(Qt.UserRole, key)
+            self._cone_list.addItem(item)
+
+        if active is not None:
+            for row in range(self._cone_list.count()):
+                if self._cone_list.item(row).data(Qt.UserRole) == active:
+                    self._cone_list.setCurrentRow(row)
+                    break
+        self._cone_list.blockSignals(False)
+
+    def set_cone_place_hint(self, text):
+        self._cone_place_hint.setText(text)
+
+    def current_cone(self):
+        item = self._cone_list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
     # ------------------------------------------------------------------ 이벤트
     def _on_label_selected(self, current, _previous):
         if current is not None:
@@ -257,3 +318,7 @@ class EditPanel(QWidget):
         name = self.current_label()
         if name:
             self.label_cleared.emit(name)
+
+    def _on_cone_selected(self, current, _previous):
+        if current is not None:
+            self.cone_selected.emit(current.data(Qt.UserRole))

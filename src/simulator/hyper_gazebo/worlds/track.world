@@ -27,100 +27,152 @@
       <direction>-0.3 0.2 -0.9</direction>
     </light>
 
+    <!-- Cone line A: runs alongside the acceleration path, then branches out
+         toward the far end (construction_cone_14_8 onward). -->
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_1</name> 
-      <pose>4.4252 -31.8717 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_1</name>
+      <pose>3.14744 -31.4026 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_2</name> 
-      <pose>4.5497 -31.5325 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_3</name>
+      <pose>3.40171 -30.7263 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_3</name> 
-      <pose>4.6742 -31.1934 0.0000 0.0 0.0 1.21898</pose>
-    </include>
-    
-    <include>
-      <uri>model://construction_cone</uri>
-      <name>construction_cone_4</name> 
-      <pose>4.7987 -30.8542 0.0000 0.0 0.0 1.21898</pose>
-    </include>
-    
-    <include>
-      <uri>model://construction_cone</uri>
-      <name>construction_cone_5</name> 
-      <pose>4.9232 -30.5151 0.0000 0.0 0.0 1.21898</pose>
-    </include>
-    
-    <include>
-      <uri>model://construction_cone</uri>
-      <name>construction_cone_15</name> 
-      <pose>5.0477 -30.1759 0.0000 0.0 0.0 1.21898</pose>
-    </include>
-    
-    <include>
-      <uri>model://construction_cone</uri>
-      <name>construction_cone_16</name> 
-      <pose>5.1722 -29.8368 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_5</name>
+      <pose>3.6377 -30.0433 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_6</name> 
+      <name>construction_cone_15</name>
+      <pose>3.84746 -29.4912 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_8</name>
+      <pose>5.11484 -29.9784 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_9</name>
+      <pose>6.34077 -30.4678 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_10</name>
+      <pose>7.27722 -30.9084 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_11</name>
+      <pose>8.24872 -31.3683 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_12</name>
+      <pose>9.08477 -31.7271 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_13</name>
+      <pose>10.0839 -32.1222 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <!-- Cone line B: anchored at construction_cone_6, running down to
+         construction_cone_14, then turning the corner (14_1 onward). -->
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_6</name>
       <pose>28.6561 -13.3555 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_7</name> 
-      <pose>28.2321 -13.1999 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_7</name>
+      <pose>27.6801 -12.9973 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_8</name> 
-      <pose>27.8082 -13.0443 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_8</name>
+      <pose>26.5595 -12.5859 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_9</name> 
-      <pose>27.3843 -12.8886 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_10</name>
+      <pose>25.596 -12.2322 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_10</name> 
-      <pose>26.9603 -12.7330 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_9</name>
+      <pose>24.8166 -11.946 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_11</name> 
-      <pose>26.5364 -12.5774 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_11</name>
+      <pose>24.0727 -11.673 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_12</name> 
-      <pose>26.1124 -12.4218 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_12</name>
+      <pose>23.2225 -11.361 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_13</name> 
-      <pose>25.6885 -12.2661 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_13</name>
+      <pose>22.4264 -11.0686 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <include>
       <uri>model://construction_cone</uri>
-      <name>construction_cone_14</name> 
-      <pose>25.2646 -12.1105 0.0000 0.0 0.0 1.21898</pose>
+      <name>construction_cone_14</name>
+      <pose>21.7254 -10.8113 0.0000 0.0 0.0 1.21879</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_3</name>
+      <pose>21.9998 -10.1605 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_4</name>
+      <pose>22.3572 -9.41375 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_5</name>
+      <pose>22.6476 -8.69559 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_6</name>
+      <pose>22.9349 -8.20786 0.0000 0.0 0.0 1.21898</pose>
+    </include>
+
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>construction_cone_14_7</name>
+      <pose>23.3163 -7.59682 0.0000 0.0 0.0 1.21898</pose>
     </include>
 
     <!-- 코스 전체를 용인 트랙의 map 좌표로 옮기는 자리입니다. real_course.png는
@@ -129,6 +181,7 @@
          씁니다 (center_x, center_y, rotation_deg 0). -->
     <include>
       <uri>model://driving_course</uri>
+      <name>driving_course</name>
       <pose>-5.1645 -5.2907 0 0 0 0</pose>
     </include>
 
@@ -136,25 +189,27 @@
          Path runs from accel_start (-53.250, -26.930) to accel_end (2.155, -49.931)
          (see hyper_planner/mission/mission_track.yaml); heading along the path is -0.3934 rad. -->
 
-    <!-- Pedestrian at the midpoint of the acceleration path, facing oncoming traffic. -->
+    <!-- Pedestrian at the midpoint of the acceleration path, facing oncoming traffic.
+         person_standing has an 80 kg inertial and no <static> of its own, so without
+         this override the car knocks it over instead of it acting as a fixed obstacle. -->
     <include>
       <uri>model://person_standing</uri>
       <name>accel_pedestrian</name>
       <static>true</static>
-      <pose>-27.0644 -36.9281 0.0000 0.0 0.0 2.78978</pose>
+      <pose>-27.1974 -37.2906 0.0000 0.0 0.0 2.78978</pose>
     </include>
 
-    <!-- Two parked vehicles along the acceleration path (positions to be tuned). -->
+    <!-- Two parked vehicles along the acceleration path. -->
     <include>
       <uri>model://hatchback</uri>
       <name>accel_car_1</name>
-      <pose>-31.5019 -11.5115 0.0000 0.0 0.0 -1.32812</pose>
+      <pose>-31.5019 -11.5115 0.0000 0.0 0.0 -0.0063</pose>
     </include>
 
     <include>
       <uri>model://suv</uri>
       <name>accel_car_2</name>
-      <pose>-42.9424 -9.0744 0.0000 0.0 0.0 0.82198</pose>
+      <pose>-42.118 -8.4922 0.0000 0.0 0.0 -0.8541</pose>
     </include>
 
     <include>
