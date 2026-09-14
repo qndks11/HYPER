@@ -13,6 +13,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 include_directories(include)
 
@@ -21,6 +22,9 @@ ament_target_dependencies(vehicle_controller_node rclcpp std_msgs)
 
 add_executable(joystick_controller_node src/joystick_controller_node.cpp)
 ament_target_dependencies(joystick_controller_node rclcpp std_msgs sensor_msgs)
+
+add_executable(estop_controller_node src/estop_controller_node.cpp)
+ament_target_dependencies(estop_controller_node rclcpp std_msgs sensor_msgs std_srvs)
 
 install(
   DIRECTORY launch urdf config
@@ -36,6 +40,7 @@ install(
 install(TARGETS
   vehicle_controller_node
   joystick_controller_node
+  estop_controller_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

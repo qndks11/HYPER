@@ -28,10 +28,12 @@ Quaternion field order on the wire is [z][y][x][w] (spec 5-1/6-1-4), not
 ROS's [x][y][z][w] -- reordered below. No other axis remapping is applied:
 this publishes in the sensor's own body frame as-is. Whether that lines up
 with the vehicle's ENU/base_link convention (particularly yaw sign and
-sign of angular_velocity.z) has to be checked on the actual vehicle -- see
-imu_enu_relay.py in hyper_localization, which does exactly that correction
-for the other IMU on this platform (WitMotion WT901BLE) and is the
-expected pattern to reuse here if this module replaces or joins it.
+sign of angular_velocity.z) has to be checked on the actual vehicle, and
+matters a lot: ekf_global fuses this orientation as its absolute map-frame
+heading (dual_ekf_navsat.yaml, imu0_config index 5). If it turns out to be
+mirrored or offset, point this node's `topic` at imu/raw and re-enable
+imu_enu_relay.py in hyper_localization -- it applies exactly that correction
+and is currently commented out in odometry.launch.py.
 """
 import math
 import time
@@ -52,7 +54,7 @@ class EbimuNode(Node):
     def __init__(self):
         super().__init__('ebimu_node')
 
-        self.declare_parameter('port', '/dev/ttyUSB0')
+        self.declare_parameter('port', '/dev/tty_ebimu')
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('frame_id', 'imu_link')
         self.declare_parameter('topic', 'imu')

@@ -8,6 +8,11 @@ os.makedirs(MESH,exist_ok=True)
 img=cv2.imread(SRC)
 H,W=img.shape[:2]
 MPP=0.10                      # 3 m / 30 px
+# 주의: 이 스크립트가 쓰는 ground.obj는 **스케일 적용 전** 크기입니다. 지금
+# 커밋된 meshes/ground.obj와 hill.obj에는 fit_to_track.py가 구한 등방 스케일
+# 0.90320이 구워져 있습니다(용인 트랙 실측 대비 10.7% 크게 그려져 있었음).
+# 이 스크립트를 다시 돌렸다면 ground.obj 정점에 그 스케일을 다시 먹이고
+# build_hill.py(SCALE 상수)도 같이 돌리세요.
 CURB_H=0.12                   # curb / grass plateau height (m)
 Xh=(W/2)*MPP; Yh=(H/2)*MPP    # half extents (m)  -> 37.0 x 50.4
 

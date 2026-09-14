@@ -244,6 +244,15 @@ const float DRIVE_INTEGRAL_LIMIT_PWM = 150.0f;
 // Tune by trial.
 const int16_t DRIVE_MIN_PWM = 60;
 
+// Speed below which a commanded stop counts as stopped, so the DRIVE_MIN_PWM
+// braking floor is released (see apply_drive()'s braking_to_stop). Above this,
+// zero-target braking gets real reverse force; below it, only the raw PI
+// output holds position -- weak, but it keeps resisting a push (the reason
+// apply_drive() has no coast-to-stop shortcut) without plugging the motors
+// back and forth across zero. Raise it if the vehicle judders at a standstill;
+// lower it if it still creeps after an e-stop.
+const float DRIVE_STOP_EPS_MPS = 0.03f;
+
 // ---- Serial link ----
 const unsigned long BAUD_RATE = 115200;
 
@@ -544,9 +553,23 @@ void apply_drive(float velocity_target) {
   // friction -- the vehicle just sits there. OR in the same breakaway
   // check an earlier version used (measured velocity near zero while a
   // nonzero target is commanded) so low-target starts still get a kick.
+  //
+  // And a third case both of the above miss: braking the last bit of the way
+  // to a FULL STOP. velocity_target == 0 makes breaking_away false (it wants
+  // a nonzero target), and once the roll is slower than the |error| threshold
+  // large_error is false too, so the floor disengages at ~0.15 m/s with only
+  // KP*error (~2 PWM) left -- far below stiction. The integral can't close it
+  // either: at that error it accumulates ~0.18 PWM/s, i.e. minutes to reach
+  // DRIVE_MIN_PWM. Symptom: an e-stop (or any stop command) brakes hard down
+  // to a crawl and then rolls on indefinitely instead of stopping. So force
+  // the floor whenever a stop is commanded and the vehicle is still moving
+  // faster than DRIVE_STOP_EPS_MPS -- below that it releases again, so the
+  // motors aren't plugged back and forth across zero at a standstill.
   bool large_error = fabs(error) > 0.15f;
   bool breaking_away = fabs(measured_drive_velocity) < 0.05f && fabs(velocity_target) > 0.01f;
-  bool needs_floor = large_error || breaking_away;
+  bool braking_to_stop = fabs(velocity_target) < 0.01f
+      && fabs(measured_drive_velocity) > DRIVE_STOP_EPS_MPS;
+  bool needs_floor = large_error || breaking_away || braking_to_stop;
   if (needs_floor) {
     if (pwm > 0 && pwm < DRIVE_MIN_PWM) {
       pwm = DRIVE_MIN_PWM;

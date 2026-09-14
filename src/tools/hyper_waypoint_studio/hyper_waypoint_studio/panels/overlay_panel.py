@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+# =====================================================================
+# 배경 이미지의 배치.
+#
+# **이 패널은 이미지를 열지 않습니다.** 어느 이미지를 까는지는 mission.yaml의
+# `background:`가 정하고, app_window가 미션을 열 때 같이 올립니다 -- 캔버스가 편집
+# 중인 미션과 다른 그림을 깔고 있을 수 있으면 라벨 좌표를 눈으로 믿을 수 없습니다.
+#
+# 여기 남은 것은 그 이미지를 코스에 맞추는 일뿐입니다. 항공사진에는 지오레퍼런스가
+# 없으므로 중심/가로 폭/회전을 손으로 맞추고, 그 값은 <이미지>.align.yaml에 남습니다.
+# =====================================================================
+
+import os
+
+from python_qt_binding.QtCore import Signal
+from python_qt_binding.QtWidgets import (
+    QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QSlider, QVBoxLayout, QWidget)
+from python_qt_binding.QtCore import Qt
+
+from .. import theme
+
+NUDGE_M = 2.0
+NUDGE_FINE_M = 0.2
+SCALE_STEP = 1.01
+SCALE_FINE = 1.001
+ROT_STEP = 0.5
+ROT_FINE = 0.05
+
+
+class OverlayPanel(QWidget):
+
+    clear_overlay = Signal()
+    save_alignment = Signal()
+    nudged = Signal(float, float, float, float)   # dx, dy, scale, rot
+    alpha_changed = Signal(float)
+    costmap_alpha_changed = Signal(float)
+    fit_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+
+        buttons = QHBoxLayout()
+        clear = QPushButton('없애기')
+        clear.setToolTip('배경만 내립니다. 미션을 다시 열면 돌아옵니다')
+        clear.clicked.connect(self.clear_overlay.emit)
+        buttons.addWidget(clear)
+        buttons.addStretch(1)
+        root.addLayout(buttons)
+
+        self._source = QLabel('배경 없음')
+        self._source.setWordWrap(True)
+        self._source.setStyleSheet(f'color: {theme.COLOR_STALE};')
+        root.addWidget(self._source)
+
+        alpha_row = QHBoxLayout()
+        alpha_row.addWidget(QLabel('불투명도'))
+        self._alpha = QSlider(Qt.Horizontal)
+        self._alpha.setRange(10, 100)
+        self._alpha.setValue(100)
+        self._alpha.valueChanged.connect(
+            lambda value: self.alpha_changed.emit(value / 100.0))
+        alpha_row.addWidget(self._alpha, stretch=1)
+        root.addLayout(alpha_row)
+
+        # 코스트맵은 배경 이미지가 아니지만 겹쳐 보는 대상이 같아서 여기 둡니다.
+        # 배경이 없어도 쓸 수 있어야 하므로 정렬 그룹과 달리 늘 켜져 있습니다.
+        costmap_row = QHBoxLayout()
+        costmap_row.addWidget(QLabel('코스트맵'))
+        self._costmap_alpha = QSlider(Qt.Horizontal)
+        self._costmap_alpha.setRange(10, 100)
+        self._costmap_alpha.setValue(60)
+        self._costmap_alpha.setToolTip(
+            '로컬 코스트맵 불투명도. 표시 여부는 보기 ▸ 로컬 코스트맵입니다.')
+        self._costmap_alpha.valueChanged.connect(
+            lambda value: self.costmap_alpha_changed.emit(value / 100.0))
+        costmap_row.addWidget(self._costmap_alpha, stretch=1)
+        root.addLayout(costmap_row)
+
+        self._align_box = QGroupBox('정렬')
+        self._align_box.setToolTip(
+            '항공사진처럼 지오레퍼런스가 없는 이미지를 코스에 맞춥니다.\n'
+            '맞춘 뒤 "정렬 저장"을 눌러야 <이미지>.align.yaml에 남습니다.')
+        align = QVBoxLayout(self._align_box)
+
+        grid = QHBoxLayout()
+        for caption, dx, dy in (('←', -1, 0), ('→', 1, 0), ('↑', 0, 1), ('↓', 0, -1)):
+            button = QPushButton(caption)
+            button.setFixedWidth(34)
+            button.setToolTip(f'{NUDGE_M} m 이동 (Shift: {NUDGE_FINE_M} m)')
+            button.clicked.connect(
+                lambda _=False, x=dx, y=dy: self._move(x, y))
+            grid.addWidget(button)
+        align.addLayout(grid)
+
+        scale_row = QHBoxLayout()
+        for caption, factor in (('축소 -', 1.0 / SCALE_STEP), ('확대 +', SCALE_STEP)):
+            button = QPushButton(caption)
+            button.setToolTip('축척 ±1% (Shift: ±0.1%)')
+            button.clicked.connect(lambda _=False, f=factor: self._scale(f))
+            scale_row.addWidget(button)
+        align.addLayout(scale_row)
+
+        rot_row = QHBoxLayout()
+        for caption, delta in (('↺ ,', ROT_STEP), ('↻ .', -ROT_STEP)):
+            button = QPushButton(caption)
+            button.setToolTip('회전 ±0.5° (Shift: ±0.05°)')
+            button.clicked.connect(lambda _=False, d=delta: self._rotate(d))
+            rot_row.addWidget(button)
+        align.addLayout(rot_row)
+
+        self._readout = QLabel('-')
+        self._readout.setStyleSheet(f'color: {theme.COLOR_STALE};')
+        self._readout.setWordWrap(True)
+        align.addWidget(self._readout)
+
+        tail = QHBoxLayout()
+        fit = QPushButton('화면 맞춤')
+        fit.clicked.connect(self.fit_requested.emit)
+        self._save = QPushButton('정렬 저장')
+        self._save.clicked.connect(self.save_alignment.emit)
+        tail.addWidget(fit)
+        tail.addWidget(self._save)
+        align.addLayout(tail)
+
+        root.addWidget(self._align_box)
+        root.addStretch(1)
+        self.set_overlay(None)
+
+    # ------------------------------------------------------------------ 상태
+    def set_overlay(self, path, cx=0.0, cy=0.0, width_m=0.0, rot=0.0, dirty=False):
+        if path is None:
+            self._source.setText('배경 없음')
+            self._align_box.setEnabled(False)
+            self._readout.setText('-')
+            return
+        self._source.setText(os.path.basename(path))
+        self._source.setToolTip(path)
+        self._align_box.setEnabled(True)
+        star = ' *' if dirty else ''
+        self._readout.setText(
+            f'중심 ({cx:.2f}, {cy:.2f})\n폭 {width_m:.2f} m   회전 {rot:.2f}°{star}')
+        self._save.setEnabled(dirty)
+
+    # ------------------------------------------------------------------ 조작
+    @staticmethod
+    def _fine():
+        from python_qt_binding.QtWidgets import QApplication
+        return bool(QApplication.keyboardModifiers() & Qt.ShiftModifier)
+
+    def _move(self, sx, sy):
+        step = NUDGE_FINE_M if self._fine() else NUDGE_M
+        self.nudged.emit(sx * step, sy * step, 1.0, 0.0)
+
+    def _scale(self, factor):
+        if self._fine():
+            factor = SCALE_FINE if factor > 1.0 else 1.0 / SCALE_FINE
+        self.nudged.emit(0.0, 0.0, factor, 0.0)
+
+    def _rotate(self, delta):
+        if self._fine():
+            delta = ROT_FINE if delta > 0 else -ROT_FINE
+        self.nudged.emit(0.0, 0.0, 1.0, delta)

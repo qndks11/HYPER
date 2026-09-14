@@ -1,7 +1,9 @@
 #ifndef HYPER_LANE_DETECTION__LANE_DETECTION_NODE_HPP_
 #define HYPER_LANE_DETECTION__LANE_DETECTION_NODE_HPP_
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -12,6 +14,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 #include "hyper_lane_detection/drivable_area.hpp"
 #include "hyper_lane_detection/ground_projection.hpp"
@@ -26,8 +29,8 @@ private:
   /**
    * @brief Camera callback: a plain sensor_msgs/Image subscription, shared by both
    * backends. Under ros_raw this is Gazebo's bridged (already-rectified-equivalent) sim frame;
-   * under intra_process it's hyper_camera's ElpCameraPublisherNode component, loaded into the
-   * same container as this node so the frame arrives by pointer rather than over a serialized
+   * under intra_process it's hyper_camera's LogitechCameraPublisherNode component, loaded into
+   * the same container as this node so the frame arrives by pointer rather than over a serialized
    * topic -- either way this callback just decodes via cv_bridge and hands off to
    * process_frame().
    *
@@ -41,9 +44,10 @@ private:
    * detection runs here any more; this node produces the BEV view and nothing else. Factored out
    * so the warp never depends on which backend fed the topic this frame arrived on.
    *
-   * @param image Camera frame (BGR8) -- already rectified under input_backend:=intra_process
-   * (rectified upstream by hyper_camera's ElpCameraPublisherNode); passed through as-is under
-   * ros_raw (the simulated frames need no rectification at all).
+   * @param image Camera frame (BGR8), passed through as-is under either backend -- nothing
+   * rectifies it. The real camera is a normal ~70 deg lens with no calibration file (see
+   * hyper_camera's LogitechCameraPublisherNode) and the simulated frames need no rectification
+   * at all, so both are modelled as ideal centered pinholes.
    * @param header Header of the frame `image` was decoded from. Copied onto the published debug
    * image and cloud so RViz gets the capture timestamp.
    */
@@ -81,9 +85,10 @@ private:
    *
    * @details The grid is cropped out of the BEV first (see drivable_max_range_m_ /
    * drivable_max_lateral_m_) and only then classified. Cropping first is not just cheaper: the
-   * configured half_width of 9 m puts the BEV's outer columns far past anything the source frame
-   * actually sampled well, and feeding that extrapolated fringe to the reachability flood fill
-   * lets it decide the road connects to things it does not.
+   * configured half_width of 5.5 m is the widest ground the 70 deg lens sees at all, and only at
+   * the BEV's far edge -- every row nearer than that has outer columns extrapolated from source
+   * pixels that sampled them barely or not at all, and feeding that fringe to the reachability
+   * flood fill lets it decide the road connects to things it does not.
    *
    * Published in the *vehicle* frame with an identity orientation, leaving the transform into the
    * costmap's rolling odom frame to the costmap layer, which has the tf buffer and the message
@@ -97,6 +102,40 @@ private:
   void publish_drivable_area(
     const cv::Mat & view, const std_msgs::msg::Header & header,
     const hyper_lane_detection::GroundProjection & projection);
+
+  /**
+   * @brief std_srvs/SetBool handler for `~/image_saving`: turns the dataset-recording mode on
+   * (data: true) or off (data: false). Idempotent -- toggling a mode that is already in that
+   * state just re-reports the directory, so a launch script can assert "off" without caring what
+   * the last run left behind.
+   *
+   * @details The mode is deliberately a *service* rather than a parameter callback: the response
+   * carries back the absolute directory the frames are landing in, which is the one thing an
+   * operator actually needs to know after flipping it on, and a parameter set gives no such
+   * answer. The directory is created here, when recording is switched on, rather than at startup,
+   * so a node that never records leaves no empty folder behind.
+   */
+  void handle_image_saving(
+    const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+    std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+
+  /**
+   * @brief Writes one camera frame into image_save_dir_ if recording is on and at least
+   * image_save_period_s_ has passed since the last one.
+   *
+   * @details Rate-limited off the *node* clock, so under use_sim_time the 2 fps is 2 frames per
+   * simulated second -- a recording made in a sped-up or slowed-down sim stays proportional to
+   * what the vehicle saw, not to how fast the machine happened to render it. The camera runs
+   * well above the save rate, so this drops most frames by design: the point is a dataset with
+   * distinguishable frames, not a video.
+   *
+   * Failures are logged (throttled) and never propagate: a full disk or a read-only path must not
+   * take down the detection pipeline that this recording is a side observation of.
+   *
+   * @param image The frame to write (BGR8), as received -- unwarped, so the recording is training
+   * data for the camera rather than a picture of this node's own BEV parameters.
+   */
+  void save_frame_if_due(const cv::Mat & image);
 
   /**
    * @brief The ground projection for the camera at one source-frame size, building it on first
@@ -176,6 +215,30 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr drivable_image_publisher_;
 
   hyper_lane_detection::DrivableAreaDetector drivable_detector_;
+
+  /// `~/image_saving` -- see handle_image_saving(). Recording is off at every startup: it is a
+  /// deliberate operator action, and a node that came up recording would quietly fill a disk
+  /// during a long run nobody meant to capture.
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr image_saving_service_;
+
+  /// Read by the camera callback, written by the service callback. Atomic because this node is
+  /// also loaded as a component into a shared container, whose executor may well be
+  /// multi-threaded -- the two callbacks are then genuinely concurrent.
+  std::atomic<bool> image_saving_enabled_{false};
+
+  /// Guards the fields below, which the service callback rewrites while the camera callback is
+  /// reading them.
+  std::mutex image_save_mutex_;
+
+  /// Where frames land. A relative path (the "data" default) is resolved against the process's
+  /// working directory, which for a launched node is wherever the operator ran the launch from.
+  std::string image_save_dir_;
+
+  /// Minimum spacing between saved frames [s]; 0.5 for the default 2 fps.
+  double image_save_period_s_{0.5};
+
+  /// Node-clock stamp of the last frame written, unset until the first one.
+  std::optional<rclcpp::Time> last_image_save_time_;
 
   /// Master switch. Off by default: this node's existing outputs are debug views that cost
   /// nothing when unsubscribed, whereas this one feeds the costmap and therefore the controller,

@@ -5,14 +5,17 @@ HYPER의 행동 결정과 차량 제어를 담당하는 C++ 패키지입니다. 
 
 ## 구성
 
-- `mission_manager_node`: `config/<mission>.yaml`의 스텝 큐(주행/정지/신호 대기)를 순서대로 실행합니다.
+- `mission_manager_node`: `mission/<mission>.yaml`의 스텝 큐(주행/정지/신호 대기)를 순서대로 실행합니다.
   대회 주행도, 한 바퀴 시험 주행도 전부 이 노드입니다.
 - `cmd_vel_to_ackermann_node`: nav2가 내는 `/cmd_vel`(Twist)을 `/velocity`, `/steering_angle`로 변환합니다.
   `input_timeout`(0.3초) 워치독이 있어 목표가 없으면 차가 섭니다 -- 이것이 `stop` 스텝의 정지 방식입니다.
 - `follow_path_client_node`: 코스 전체를 목표 하나로 보내던 예전 노드입니다. **레거시** -- 아래
   [follow_path_client_node (레거시)](#follow_path_client_node-레거시) 참고.
-- `config/mission.yaml`: 대회 미션. 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의입니다.
-- `config/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
+- `mission/mission_track.yaml`: 대회 미션(용인 트랙). 시퀀스(`steps`)와 코스 위 이벤트 지점(`labels`) 정의이며, 미션 포맷의 기준 문서이기도 합니다. Gazebo 월드가 이 트랙의 디지털 트윈이라 시뮬과 실차가 이 파일을 같이 씁니다.
+- `mission/mission_track.yaml`: 대회 미션(실차 트랙). 갈림길이 넷이라 `track/`의 조각 CSV들을
+  `courses`/`routes`로 엮습니다. 실행에 `controller_vx_max:=2.22`가 필요합니다 -- 이유는 그
+  파일 머리 주석에 있습니다.
+- `mission/simple.yaml`: 코스 한 바퀴. 골 하나짜리 미션이고, 정지도 신호도 주차도 없습니다.
 - `config/nav2_controller.yaml`: nav2 `controller_server`(= `follow_path` 액션 서버) 파라미터입니다.
 - `src/mission_manager_parameters.yaml`: `mission_manager_node`의 파라미터 정의
   (generate_parameter_library가 여기서 헤더를 생성합니다). 파라미터의 의미는 이 파일이 원본입니다.
@@ -28,59 +31,90 @@ source install/setup.bash
 
 터미널마다 `source ~/HYPER/install/setup.bash`를 먼저 실행하세요.
 
-## 실행
-
-경로: 웨이포인트 CSV -> `nav_msgs/Path` -> nav2 `follow_path` 액션 -> `/cmd_vel` -> `/velocity`, `/steering_angle`.
-
-가장 짧은 길은 전체 스택을 한 번에 띄우는 것입니다. `mission:=`으로 어떤 미션을 실을지 고릅니다
-(`hyper_planner/config/<이름>.yaml`로 풀립니다).
-
-```bash
-ros2 launch hyper_launch simulation.launch.py                 # config/mission.yaml (대회 미션)
-ros2 launch hyper_launch simulation.launch.py mission:=simple # config/simple.yaml (한 바퀴)
-ros2 service call /mission_manager/start std_srvs/srv/Trigger
-```
-
-`auto_start` 기본값이 `false`라 노드는 뜨자마자 달리지 않고 `~/start`를 기다립니다. 실차에서 이게
-안전합니다. 같은 `mission:=` 인자가 `hyper_launch real.launch.py`와 `behavior.launch.py`에도 있습니다.
-
-단계별로 띄우려면:
-
-```bash
-# 1) 시뮬레이터 + 오도메트리 (TF: map -> odom -> body_link, /scan 필요)
-ros2 launch hyper_launch sim.launch.py
-ros2 launch hyper_launch odometry.launch.py
-# 2) 액션 서버 (controller_server + lifecycle_manager + cmd_vel 변환)
-ros2 launch hyper_planner nav2_controller.launch.py      # 실차는 use_sim_time:=false
-# 3) 신호등 인식 (/perception/sign) -- wait_signal 스텝이 이걸 봅니다
-ros2 launch hyper_object_detection perception.launch.py
-# 4) 미션 매니저
-ros2 launch hyper_planner mission.launch.py mission:=simple
-ros2 service call /mission_manager/start std_srvs/srv/Trigger
-```
-
-`mission_yaml:=`에 절대 경로를 주면 `mission:=`을 덮어씁니다(패키지 밖의 미션 파일을 쓸 때).
-코스 CSV는 `waypoint_csv:=`이고 기본값은 `hyper_waypoint/waypoints/sim.csv`입니다.
-
-`controller_with_parking_node`도 `/velocity`, `/steering_angle`에 퍼블리시하므로
-`parking_system_cpp.launch.py`와 동시에 실행하지 마세요.
-
-### 서비스와 토픽
+## 서비스와 토픽
 
 | 서비스 | 하는 일 |
 | --- | --- |
 | `/mission_manager/start` | 현재 스텝부터 미션 시작/재개 |
+| `/mission_manager/pause` | 스텝 안에서 일시정지 (`resume`으로 이어 감) |
+| `/mission_manager/resume` | 일시정지를 풀고 멈춘 자리에서 이어 감 |
 | `/mission_manager/cancel` | 진행 중인 목표를 취소하고 그 스텝에서 대기 |
 | `/mission_manager/skip` | 현재 스텝을 포기하고 다음으로 |
 | `/mission_manager/restart` | 스텝 0으로 되돌림 (`start`로 다시 시작) |
+| `/mission_manager/goto_step` | 임의의 스텝 앞으로 점프하고 대기 (`start`로 시작) |
+| `/mission_manager/probe_costmap` | 좌표를 주면 그 자리의 로컬 코스트맵을 세어 준다 (`probe_points` 파라미터) |
+
+### `~/pause` / `~/resume` -- 스텝 안에서 멈추기
+
+`~/cancel`은 미션을 `idle`로 내려놓습니다. 시험 주행 중에 잠깐 세울 때마다 그러면 스텝에
+남아 있던 상태(멈춰야 할 남은 시간, 신호 대기 기한, `obstacle_hold_s` 예산)가 사라지고
+패널의 Start를 다시 눌러야 합니다. 그래서 **잠깐 세우는 일은 `~/pause`**입니다.
+
+```bash
+ros2 service call /mission_manager/pause std_srvs/srv/Trigger    # 지금 자리에 선다
+ros2 service call /mission_manager/resume std_srvs/srv/Trigger   # 이어서 간다
+```
+
+멈추면 status에 `paused` 접두사가 붙습니다(`paused [3/21] drive until=stopline_1`).
+조이스틱의 정지 버튼(`estop_controller_node`)이 부르는 것이 바로 이 둘입니다.
+
+무엇이 멈추는가:
+
+- **골은 실제로 취소합니다.** nav2의 `follow_path`에는 일시정지가 없고, `/cmd_vel`이 계속
+  나가면 워치독이 차를 세우지 못합니다. 대신 스텝은 그대로 두므로(`kIdle`로 안 갑니다)
+  `~/resume`이 같은 골을 **지금 위치에서 다시 잘라** 보냅니다 -- `kBlocked`가 장애물이
+  치워진 뒤 이어 가는 것과 같은 방식입니다. 따라서 멈춘 사이에 차를 조금 밀어 놓아도 됩니다.
+- **시계도 멈춥니다.** 기한은 재개할 때 멈춰 있던 만큼 뒤로 밀립니다. 이게 없으면
+  `wait_signal` 스텝에서 2분 쉬었다 재개하는 순간 `timeout_s`가 이미 지나 있어 곧바로
+  실패(분기라면 엉뚱한 default 갈래)로 갑니다.
+- **신호 debounce는 세지 않고, 재개할 때 0부터 다시 셉니다.** 서 있는 동안 초록불이
+  채워져 재개하자마자 튀어나가는 일을 막습니다. 분기의 투표와 `select_by: clearance`의
+  셀 수도 같이 버립니다 -- 창을 뒤로 밀어 두면 멈춰 있던 시간이 창 안에 들어와 "이미 다
+  찼다"가 되어, 재개 직후 한 장으로 길이 정해집니다. 콘 쪽은 이유가 하나 더 있습니다:
+  멈춘 사이에 누가 콘을 옮겼을 수 있고(멈추는 이유가 바로 그것일 때가 많습니다), 모아 둔
+  최대값은 옮기기 전의 주장입니다.
+
+멈춘 동안 `~/start`와 `~/skip`은 거절합니다(`~/resume`을 쓰라고 알려 줍니다). `~/cancel`,
+`~/restart`, `~/goto_step`은 일시정지보다 세서, 부르면 멈춘 상태를 풀고 `idle`로 갑니다.
+
+### `~/goto_step` -- 미션을 중간부터
+
+미션 후반의 스텝 하나(평행 주차, 완주)를 고치고 확인하려고 코스를 처음부터 돌 이유가
+없습니다. `~/start`가 "현재 스텝부터"이므로, 현재 스텝을 원하는 곳으로 옮기는 서비스만
+있으면 됩니다.
+
+목적지는 요청 필드가 아니라 **파라미터**로 받습니다 -- `teleport_service`의 `label`,
+`model_service`의 모델 이름과 같은 방식이라, GUI가 `set_parameters`로 값을 밀어 넣고
+인자 없는 `Trigger`를 부르면 됩니다.
+
+```bash
+ros2 param set /mission_manager step_label park_p_entry   # 또는 step_index 12
+ros2 service call /mission_manager/goto_step std_srvs/srv/Trigger
+#  -> "[14/20] drive until=park_p_entry course=main -- call '~/start' to run."
+ros2 service call /mission_manager/start std_srvs/srv/Trigger
+```
+
+`step_label`이 비어 있지 않으면 `step_index`보다 우선합니다 -- 스텝을 넣고 빼면 인덱스는
+밀리지만 라벨은 그대로이기 때문입니다.
+
+**`goto_step`은 출발시키지 않습니다.** 스텝만 고르고 `idle`로 섭니다. 그 사이에 시뮬에서는
+차를 라벨 위치로 순간이동시키고(`/teleport_service`), 실차에서는 사람이 차를 그 지점에
+가져다 놓은 뒤 `~/start`를 부릅니다. 주행 중에 부르면 진행 중인 골을 취소하고 그 스텝에서
+섭니다.
+
+**주의**: `drive` 스텝의 `begin_index`는 로드 시점에 정해집니다. n번 스텝으로 뛰면 경로는
+n-1번이 끝난 자리에서 시작하므로, 차가 거기 없으면 먼저 그리로 갑니다.
 
 상태는 `/mission_manager/status`(latched `std_msgs/String`), 현재 세그먼트 경로는
-`/mission_manager/path`(latched `nav_msgs/Path`)로 나갑니다. decel 프로파일이 켜진 스텝에서는
+`/mission_manager/path`(latched `nav_msgs/Path`), 펼쳐진 스텝 목록은
+`/mission_manager/steps`(latched `std_msgs/String`, `index|type|label|course|route` 한 줄씩)로
+나갑니다. 스텝 목록이 따로 있는 이유는 `MissionLoader`가 `routes`의 스텝을 `steps` 뒤에
+덧붙이므로 yaml만 봐서는 갈래 스텝의 인덱스를 셀 수 없기 때문입니다. decel 프로파일이 켜진 스텝에서는
 `/speed_limit`(`nav2_msgs/SpeedLimit`)도 나갑니다.
 
 ## 미션 파일 (mission.yaml / simple.yaml)
 
-핵심 아이디어는 **한 `drive` 스텝 = FollowPath 목표 하나**입니다. 정지선·신호등·주차 지점이 곧
+핵심 아이디어는 **한 `drive` 스텝 = follow_path 목표 하나**입니다. 정지선·신호등·주차 지점이 곧
 세그먼트의 끝이므로 "도착했는가?"를 따로 판정할 필요가 없습니다 -- nav2의 goal checker가 목표를
 성공 처리하는 순간이 도착입니다. 정지에도 별도의 정지 명령이 없습니다. 목표를 보내지 않으면
 `/cmd_vel`이 끊기고 `cmd_vel_to_ackermann`의 워치독이 차를 세웁니다.
@@ -88,7 +122,7 @@ ros2 service call /mission_manager/start std_srvs/srv/Trigger
 장애물 회피는 스텝이 아닙니다. MPPI가 해당 `drive` 스텝 안에서 로컬 costmap을 보며 알아서 처리합니다.
 
 파일은 "어디서"(`labels`)와 "무엇을"(`steps`)로 나뉩니다. 각 필드의 의미와 튜닝 지침은
-[config/mission.yaml](config/mission.yaml)의 주석이 원본입니다 -- 여기서는 구조만 설명합니다.
+[mission/mission_track.yaml](mission/mission_track.yaml)의 주석이 원본입니다 -- 여기서는 구조만 설명합니다.
 
 ### 라벨과 세그먼트
 
@@ -101,8 +135,12 @@ ros2 service call /mission_manager/start std_srvs/srv/Trigger
 세그먼트가 비거나 뒤집히므로 로드가 실패합니다. 첫 `drive` 스텝만 CSV의 처음(#0)부터 시작하고,
 이후 세그먼트는 직전 스텝의 도착점에서 이어집니다.
 
-라벨 찍기는 `hyper_waypoint/scripts/label_waypoints.py`(코스 이미지 위에 웨이포인트를 겹쳐 띄우고
-클릭으로 배치 -> `labels:` 블록만 다시 씁니다)를 쓰세요.
+라벨 찍기는
+```bash
+ros2 run hyper_waypoint_studio waypoint_studio \
+    src/planning/hyper_waypoint/waypoints/track/real.csv \
+    --mission src/planning/hyper_planner/mission/stopline.yaml --mode edit
+```
 
 ### drive 스텝: 감속과 도착 판정
 
@@ -146,6 +184,21 @@ costmap 반지름(10 m)부터 기어가기 시작해 정지까지 5초 넘게 �
 합니다). `a` 값은 2.0이면 6 m/s에서 제동거리 9 m입니다. "reached ... above cancel_on_arrival_speed"
 경고가 나면 차가 프로파일만큼 못 줄이고 있다는 뜻이니 낮추세요.
 
+**`handoff_m`** -- 라벨에서 서지 않고 다음 `drive` 스텝으로 넘어갑니다. 골까지 이만큼 남으면 그 자리에서
+"지금 위치 -> 다음 drive 스텝의 끝"을 새 골로 보내고, 실행 중인 골은 취소하지 않고 **갈아끼웁니다**
+(prearm과 같은 preemption이므로 `/cmd_vel`이 끊기지 않습니다).
+
+쓰는 이유는 하나입니다. `controller_id`는 follow_path 골에 실려 나가므로 컨트롤러를 바꾸려면 새 골을
+보내야 하는데, 보통의 스텝 전환은 골 판정을 기다리므로 차가 라벨에서 한 번 섰다 다시 출발합니다.
+`handoff_m`은 그 전환을 정차 없이 합니다 -- `mission_track.yaml`의 s자 구간이 이렇게 RPP와 MPPI를
+오갑니다. prearm과 달리 두 스텝의 컨트롤러가 다른지는 **보지 않습니다**(다른 것이 목적입니다).
+
+`decel_profile_a` / `cancel_on_arrival_m`과 **같이 쓸 수 없습니다.** 둘 다 "라벨에서 선다"는 뜻이고,
+cancel-on-arrival이 먼저 골을 취소해 버리면 갈아끼울 골이 없습니다. 그 밖에 다음 스텝이 `drive`가
+아니거나, 어느 한쪽이 후진 세그먼트이거나(한 골 안에 방향 전환이 생깁니다), 이 스텝에 이미 prearm이
+걸려 있으면(신호를 보는 쪽이 이깁니다) 로드 시점에 경고를 남기고 그 자리의 handoff만 끕니다 -- 그러면
+예전처럼 라벨에서 한 번 섭니다.
+
 ### wait_signal 스텝과 prearm
 
 `/perception/sign`이 `value`를 `debounce_frames` 연속으로 낼 때까지 대기합니다. `value`에 쉼표를
@@ -182,7 +235,7 @@ steps:
   - type: branch
     default: ban_route        # 표지를 못 읽었을 때 갈 곳. 필수입니다.
     timeout_s: 8.0
-    debounce_frames: 3
+    vote_window_s: 3.0        # 이 시간 동안 모아 다수결. timeout_s보다 작아야 합니다.
     prearm_distance_m: 12.0   # 서지 않고 그대로 갈래로 들어갑니다.
     cases:
       - {value: "allow", goto: allow_route}
@@ -195,22 +248,54 @@ routes:
     - {type: drive, course: lane_ban, until: lane_ban_end, ...}
 ```
 
-**라벨은 코스마다 독립입니다.** 최상위 `labels:`는 `main` 코스(= `waypoint_csv`)의 것이고
--- `label_waypoints.py`가 그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 갈래 코스는
+**미션이 달릴 코스는 `courses:`가 정합니다.** launch 인자로 넘기는 것이 아니므로, 어느 미션이
+어느 코스로 도는지는 미션 파일만 보면 됩니다. 이름은 자유이고 `main`만 특별합니다:
+
+- **`main`이 있는 미션** -- 코스가 사실상 하나인 미션(`simple.yaml`, `stopline.yaml`)이
+  이 모양입니다. `course:`를 안 적은 `drive` 스텝은 `main`을 달리고, 최상위 `labels:`가
+  `main`의 라벨입니다.
+- **`main`이 없는 미션** -- 트랙을 조각으로 녹화해 이어 붙이는 미션(`mission_track.yaml`)에는
+  "이 미션이 달리는 코스" 하나가 없습니다. `main`을 두지 않으면 모든 `drive` 스텝이 `course:`를
+  명시해야 하고(빠지면 로드가 거부됩니다), 최상위 `labels:`는 임자가 없으므로 두면 안 됩니다
+  (역시 거부됩니다).
+
+**라벨은 코스마다 독립입니다.** 최상위 `labels:`는 `main` 코스의 것이고 -- waypoint studio가
+그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 나머지 코스는
 `courses.<이름>.labels`를 씁니다. `drive` 스텝은 자기 `course:`의 라벨만 찾습니다.
 
-**CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) mission.yaml이 있는 디렉터리,
-(3) 준 그대로 순으로 찾습니다. 갈래 CSV를 `sim.csv` 옆에 두고 파일 이름만 적으면
-`waypoint_csv:=.../real.csv`로 실차 코스를 실을 때 갈래도 같이 따라갑니다.
+**최상위 `background:`는 waypoint studio 것입니다.** 미션을 열 때 배경으로 깔 항공사진
+(`real_course.png` / `school.png`)이고, 코스 CSV와 마찬가지로 파일 이름만 적으면 스튜디오가
+찾아 줍니다. `mission_manager`는 모르는 최상위 키를 그냥 지나가므로 로드에 영향이 없습니다.
+
+**CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) `waypoints_dir` 파라미터
+(기본 `hyper_waypoint/waypoints`), (3) mission.yaml이 있는 디렉터리, (4) 준 그대로 순으로
+찾습니다. 기본은 (2)입니다 -- 코스마다 `track/common_1.csv`처럼 `waypoints/` 아래 상대 경로를
+적습니다(`mission_track.yaml`). (1)은 `main`이 있는 미션의 편의로, 갈래를 main과 같은 폴더에
+두면 파일 이름만 적어도 되고 코스 폴더를 옮길 때 `main` 한 줄만 고치면 갈래가 전부 따라옵니다.
 
 **갈래 CSV는 반드시 분기 지점에서 시작해야 합니다.** 첫 점이 분기 라벨에서
 `branch_seam_tolerance_m`(기본 2 m)보다 멀면 로드가 **거부**됩니다. 안 그러면 차가 분기 지점에서
 갈래 CSV의 첫 점까지 직선(lead-in)으로 코스를 가로지릅니다 -- 라벨 스냅 허용치와 같은 취지입니다.
 
-**판정은 "같은 값이 `debounce_frames` 연속"입니다.** `wait_signal`의 "허용 목록 안이기만 하면 됨"과
-다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기 때문입니다. 두 표지가 번갈아 보이면 어느 쪽도
-확정되지 않고 `default` 갈래로 갑니다 -- 애매할 때 찍지 않는 쪽이 맞습니다. 같은 값이 두 `cases`에
-나오면 로드 시점에 거부합니다.
+**판정은 "`vote_window_s` 동안 모은 표의 다수결"입니다.** `wait_signal`의 "허용 목록 안이기만 하면 됨"과
+다른데, 분기는 *어느 값이* 나왔는지가 곧 어느 길이기 때문입니다. 연속 프레임을 쓰지 않는 이유는 실제
+갈림길 표지판이 세 장 나란히 서서 **깜빡이기** 때문입니다 -- 연속이 계속 끊겨 어느 값도 확정되지 않고
+매번 `default`로 떨어집니다. 대신 창이 다 차면 표가 가장 많은 `cases`의 갈래로 갑니다:
+
+- 어느 `cases`에도 없는 값(`none`, `red`, 짝을 못 찾은 `allow` ...)은 **세기만 하고 이길 수 없습니다.**
+  깜빡이는 표지가 `allow_left` 6표, `none` 11표를 내도 `allow_left`로 갑니다.
+- 표가 모자라거나(이긴 값이 3표 미만) 두 갈래가 **동점**이면 고르지 않고 `timeout_s`까지 계속 모읍니다
+  -- 애매할 때 찍지 않는 쪽이 맞습니다. 그래도 안 갈리면 `default`입니다.
+- 최소 3표를 요구하는 이유는 prearm이 연 창을 분기 스텝이 이어받을 때 창이 이미 다 차 있어, 표 한 장이
+  그대로 길을 정해 버리는 것을 막기 위해서입니다.
+- 고른 순간과 `timeout` 순간에 **표 현황이 로그로 나갑니다** -- `Branch vote over 3.0 s: allow_left 14,
+  allow_right 3, none 6 (23 sample(s)) -> 'allow_left'.` 실패했을 때 `nothing; 0 sample(s)`이면 검출기가
+  죽었거나 토픽 이름이 틀린 것이고, `none 40`이면 갈림길 로직이 표지판 두 칸을 못 잡은 것이며,
+  `allow_left 19, allow_right 19`면 진짜 동점입니다.
+
+`vote_window_s`(기본 3.0초)는 **`timeout_s`보다 작아야 합니다** -- 크거나 같으면 창이 차기 전에 무조건
+`default`로 가는 설정이므로 로드 시점에 **거부**합니다. `debounce_frames`는 `wait_signal`의 것이라 분기에
+적어 두면 경고를 남기고 무시합니다. 같은 값이 두 `cases`에 나오면 로드 시점에 거부합니다.
 
 **`default`가 필수인 이유**: `wait_signal`은 못 보면 서 있으면 되지만(그게 안전), 갈림길에서는
 어디로든 가야 합니다. 그래서 `proceed_on_signal_timeout` 같은 선택지가 없고 timeout이 지나면 반드시
@@ -218,20 +303,96 @@ routes:
 답이 나오지 않습니다.
 
 **`prearm_distance_m`**는 `wait_signal`과 같습니다. 확인되면 서지 않고 그대로 갈래로 들어갑니다:
-골을 "지금 위치 -> 분기 지점(main 코스) -> 고른 갈래의 끝(갈래 코스)"으로 갈아끼웁니다. 두 코스에
+골을 "지금 위치 -> 분기 지점(앞 코스) -> 고른 갈래의 끝(갈래 코스)"으로 갈아끼웁니다. 두 코스에
 걸친 경로를 한 골로 만드는 것이 신호등 prearm과의 유일한 차이입니다. 확인이 안 되면 원래 골 그대로
 분기 지점에 서고, 거기서 `branch` 스텝이 다시 봅니다.
 
-갈래가 끝나면 `branch` 뒤의 main 스텝으로 **합류**하고, `branch`가 main의 마지막 스텝이면 미션이
+갈래가 끝나면 `branch` 뒤의 `steps:` 스텝으로 **합류**하고, `branch`가 `steps:`의 마지막이면 미션이
 끝납니다. route 안에 또 `branch`를 두는 것은 지원하지 않습니다(합류 지점이 모호해집니다).
 
-표지 값(`ban` / `allow`)은 `hyper_object_detection`이 냅니다 -- YOLO 클래스 이름이 다르면
+표지 값(`allow_left` / `allow_right`)은 `hyper_object_detection`이 냅니다 -- 나란히 선 표지판 세 장 중
+**왼쪽 두 장**을 읽어 어느 쪽 차선이 허용인지까지 정한 값입니다(한 칸이 꺼져 있어도 나머지 한 칸이
+`allow`/`ban`이면 답이 정해집니다). YOLO 클래스 이름이 다르면
 `sign_class_map` 파라미터로 맞추세요(그 패키지의 README 참고).
+
+**`select_by: position`** -- 표지가 아니라 **차의 현재 위치**로 갈래를 고릅니다. 갈래마다 그 첫
+`drive` 스텝의 시작 웨이포인트(= `branch_seam_tolerance_m`가 재는 그 점)까지의 거리를 비교해 가까운
+쪽으로 갑니다. 출발선이 둘인 코스에서 "차를 어디에 놓았느냐가 곧 어느 코스인가"를 그대로 조건으로 쓰는
+용도입니다 -- `mission_track.yaml`의 첫 스텝이 이렇게 `start_left` / `start_right`를 고릅니다.
+
+판정에 신호가 필요 없으므로 `vote_window_s`도 `debounce_frames`도 쓰이지 않고(둘 다 검사에서 빠집니다 --
+`vote_window_s >= timeout_s`여도 거부하지 않습니다), `prearm_distance_m`도 켤 수 없습니다
+(미리 볼 표지가 없습니다 -- 켜 두면 경고를 남기고 끕니다). tf를 못 읽으면 아무 일도 일어나지 않고
+`timeout_s` 뒤 `default`로 갑니다. 표지 분기와 같은 실패 방식입니다.
+
+`cases`는 그대로 두는 편이 좋습니다. 위치 판정이 우선이지만, `/perception/sign`으로 값을 밀어 넣어
+갈래를 손수 강제할 수 있는 통로가 남습니다.
+
+**`select_by: clearance`** -- 갈래마다 정해 둔 **콘 자리의 로컬 코스트맵**을 보고 막히지 않은 쪽으로
+갑니다. 주차 칸 둘 중 하나의 입구에 콘이 서 있는 분기용입니다(`mission_school.yaml`의 T자 주차와
+평행 주차가 이렇게 고릅니다).
+
+콘 자리를 미리 아는 것이 핵심입니다. 그래서 이것은 인식 문제가 아니라 "A 주변과 B 주변에 lethal
+코스트맵이 얼마나 있는가"라는 국소적인 질문이 되고, 라이다가 이미 콘을 코스트맵에 찍어 두었으므로
+새로 볼 것이 없습니다.
+
+```yaml
+- type: branch
+  select_by: clearance
+  default: t_right_route      # 판정이 안 서면 갈 곳. 여전히 필수입니다.
+  timeout_s: 6.0
+  vote_window_s: 2.0          # 이 시간 동안 셀 수를 모읍니다(갈래별 최대값).
+  prearm_distance_m: 0.0      # 켤 수 없습니다 -- 아래 참고.
+  cases:
+    - {value: "t_left",  goto: t_left_route,  cone: {x: -2.4, y: 22.6}}
+    - {value: "t_right", goto: t_right_route, cone: {x: -4.7, y: 23.3}}
+```
+
+**판정 규칙은 "막히지 않은 갈래가 정확히 하나"입니다.** 갈래마다 `cone` 자리 반지름
+(`cone_radius_m`, 기본 0.5 m) 안에서 `lethal_cost`(기본 254) 이상인 셀을 세고, `cone_min_cells`
+(기본 3) 미만인 갈래가 **하나뿐일 때만** 그리로 갑니다. 둘 다 비었거나 둘 다 막혔으면 아무것도
+고르지 않고 `timeout_s` 뒤 `default`로 갑니다 -- 애매할 때 찍지 않는 쪽입니다. 갈래가 둘일 때
+이 규칙은 "막힌 갈래가 정확히 하나"와 같은 말이고, 셋 이상이면 이쪽이 맞는 일반화입니다.
+
+**콘 좌표는 라벨이 아니라 생좌표입니다.** 라벨은 최근접 웨이포인트로 스냅되고
+`label_snap_tolerance_m`를 넘으면 미션이 거부되는데, 콘은 녹화 경로 위가 아니라 그 옆(칸 입구)에
+서 있기 때문입니다. 좌표는 코스 프레임(보통 `map`)이고, 노드가 코스트맵 프레임(`odom`)으로 옮겨
+읽습니다. `select_by: clearance`인데 `cone`이 없는 `case`가 하나라도 있으면 **로드가 거부됩니다**
+-- 좌표 없는 갈래는 늘 0셀, 즉 "비어 있음"으로 보여 말없이 그쪽으로만 가기 때문입니다.
+
+**254만 셉니다.** `InflationLayer`는 253 이하만 쓰므로 팽창 후광이 저절로 빠지고,
+`DrivableAreaLayer`의 차선 코스트(200)도 안 걸립니다. 다만 그 레이어의 `cost_value`도 254이므로,
+`drivable_area:=true`로 돌릴 때 노면이 아닌 지면이 콘으로 보이면 거기가 첫 번째 확인 지점입니다.
+
+**창 밖은 "비어 있음"이 아닙니다.** 반지름이 20 x 20 m 코스트맵 밖으로 잘리면 그 갈래는 0셀로
+보이지만, 노드는 그것을 "모름"으로 처리해 **고르지 않고** WARN을 남깁니다(`... is partly outside
+the 400x400 cell costmap window`). 그 줄이 보이면 콘 좌표가 멀거나 분기 지점이 잘못된 것입니다.
+
+`prearm_distance_m`는 켤 수 없습니다 -- 멀리서는 콘이 창 밖이거나 라이다에 안 잡히고, 이 분기가
+쓰이는 주차 갈래는 두 갈래 모두 후진으로 시작해 골을 하나로 잇지도 못합니다(켜 두면 경고를 남기고
+끕니다). `cases`의 `value`는 `position`과 같은 이유로 그대로 두세요 -- `/perception/sign`으로
+갈래를 손수 강제할 통로가 남습니다.
+
+### `~/probe_costmap` -- 콘 자리가 정말 거기인지 확인하기
+
+콘 좌표를 미션 파일에 적기 전에, 그 자리에 실제로 셀이 잡히는지 물어볼 수 있습니다. 좌표는
+`goto_step`의 `step_label`과 같은 방식으로 파라미터에 넣고 인자 없는 `Trigger`를 부릅니다.
+
+```bash
+ros2 param set /mission_manager probe_points "[-2.4, 22.6, -4.7, 23.3]"
+ros2 service call /mission_manager/probe_costmap std_srvs/srv/Trigger
+#  -> "(-2.40, 22.60): 31 cells   (-4.70, 23.30): 0 cells
+#      ->  (-4.700, 23.300) is clearest (r=0.50 m, cost >= 254, frame 'map')"
+```
+
+점은 두 개 이상 몇 개든 됩니다(x1, y1, x2, y2, ...). 미션 상태는 건드리지 않으므로 주행 중에
+불러도 안전합니다. 창 밖으로 잘린 점은 `(outside the window -- unknown, not clear)`로 표시되고
+"가장 비었다"의 후보에서 빠집니다 -- 분기가 쓰는 규칙과 같습니다.
 
 ### 후진 세그먼트 (`reverse: true`)
 
 주차는 후진으로 녹화한 구간을 되짚어 갑니다. 이 구간은 MPPI가 아니라 RPP를 씁니다
-(`controller: ReverseFollowPath`). MPPI는 `vx_min`으로 후진을 허용할 뿐이고 `PreferForwardCritic`이
+(`controller: RRPP`). MPPI는 `vx_min`으로 후진을 허용할 뿐이고 `PreferForwardCritic`이
 후진에 벌점을 주므로 주차칸까지 밀어 넣는 기동을 안정적으로 못 냅니다.
 
 `reverse: true`가 실제로 하는 일은 세 가지뿐입니다.
@@ -304,7 +465,7 @@ CSV는 헤더 이름으로 파싱하므로 `idx,x,y,yaw,frame_id` 형태와 레�
 
 ## 컨트롤러: MPPI
 
-`FollowPath` 플러그인은 `nav2_mppi_controller`(motion_model `Ackermann`, `min_turning_r` 1.74 m)입니다.
+`MPPI` 플러그인은 `nav2_mppi_controller`(motion_model `Ackermann`, `min_turning_r` 1.74 m)입니다.
 RPP(Regulated Pure Pursuit)는 경로 추종 전용이라 장애물을 만나도 우회하지 않고 abort만 하므로,
 연속 회피(슬라럼)를 위해 교체했습니다. MPPI는 CSV 경로를 참조로 두고 로컬 costmap을 보며
 매 틱 궤적을 재최적화하므로 옆으로 비켰다가 경로로 복귀합니다.
@@ -387,10 +548,10 @@ best-effort로 맞춰 두었습니다(발행 측이 SensorDataQoS라 Reliable로
 정지선보다 12 m 더 뻗어 있는 것이 정상입니다.
 
 `/received_global_plan`과 `/lookahead_point`은 RPP 전용 토픽입니다. 기본 주행 컨트롤러가
-MPPI로 바뀐 뒤로는 `ReverseFollowPath`(후진 주차) 세그먼트가 돌 때만 나옵니다. 평상시
+MPPI로 바뀐 뒤로는 `RRPP`(후진 주차) 세그먼트가 돌 때만 나옵니다. 평상시
 주행 중에 컨트롤러가 무엇을 보고 있는지는 `/transformed_global_plan`으로 확인하세요.
 
-MPPI 쪽 두 토픽은 `nav2_controller.yaml`의 `FollowPath.visualize: true`일 때만 나갑니다.
+MPPI 쪽 두 토픽은 `nav2_controller.yaml`의 `MPPI.visualize: true`일 때만 나갑니다.
 경로가 안 보이면 그 값과 TF(`map` -> `odom` -> `body_link`)를 먼저 확인하세요.
 
 ## 상태 확인
@@ -413,7 +574,7 @@ abort 복구나 off-path 백스톱도 없습니다.
 
 ```bash
 ros2 launch hyper_planner follow_path_client.launch.py \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/sim.csv
+  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track/recorded.csv
 ros2 service call /follow_path_client/start std_srvs/srv/Trigger    # CSV 다시 읽어 재전송
 ros2 service call /follow_path_client/cancel std_srvs/srv/Trigger   # 진행 중인 목표 취소
 ```

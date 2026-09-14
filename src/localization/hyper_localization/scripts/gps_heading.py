@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
 """Absolute yaw for ekf_global from GPS course over ground.
 
-Why this node exists
---------------------
+NOT LAUNCHED RIGHT NOW. ekf_global's absolute heading (dual_ekf_navsat.yaml,
+imu1) now comes from a dual-GNSS moving-base RTK heading instead: two ZED-F9P
+boards (hyper_rtk, base+rover) give NAV-RELPOSNED9 relPosHeading, which the
+rover's ublox_gps_node itself converts to an Imu and publishes on imu/heading
+directly -- no separate node needed for that path (see
+hyper_rtk/launch/rtk.launch.py and ublox_gps's hp_pos_rec_product.cpp). That
+superseded the EBIMU-9DOFV5's magnetometer yaw, which superseded this node in
+turn -- both are dormant fallbacks now, kept in case the GNSS heading hardware
+is unavailable (imu0_config index 5 = true for EBIMU, or the setup below for
+this node). To bring this one back: uncomment the node in odometry.launch.py,
+restore an imu1 block pointed at this script's imu/heading in
+dual_ekf_navsat.yaml's ekf_global, and make sure imu0's yaw and the GNSS
+moving-base imu1 are both false so only one absolute heading is live at a
+time. The "roll 0.5 m" yaw calibration mentioned below no longer exists; it
+was removed from gps_accuracy_gui along with the rest of the initial-yaw
+machinery.
+
+Why this node exists (for the 6-axis IMU it was written for)
+------------------------------------------------------------
 The WitMotion WT901BLE's yaw is not trustworthy as an absolute heading: it runs
 in 6-axis mode (no usable magnetometer fusion), so its zero is wherever the
 sensor happened to be powered on and it drifts ~0.5 deg/min from there. Feeding

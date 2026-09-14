@@ -1,0 +1,251 @@
+label_snap_tolerance_m: 1.0
+
+branch_seam_tolerance_m: 2.0
+
+# waypoint studio가 배경으로 까는 항공사진입니다. mission_manager는 이 키를 읽지 않습니다.
+# 파일 이름만 적으면 스튜디오가 (1) 이 yaml의 폴더, (2) ~/HYPER, (3) hyper_gazebo의
+# meshes/ 순으로 찾습니다. 배치(중심/가로 폭/회전)는 옆의 <이미지>.align.yaml에 있습니다.
+background: school.png
+
+courses:
+  start_left:
+    csv: school/start_left.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      stopline_left: {x: -20.167, y: 27.818}   # wp #24
+      start_left_end: {x: -33.151, y: 20.622}   # wp #71
+      
+  start_right:
+    csv: school/start_right.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      stopline_right: {x: -19.384, y: 29.995}   # wp #25
+      start_right_end: {x: -33.175, y: 20.602}   # wp #92
+
+  common_1:
+    csv: school/common_1.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      light_1: {x: -32.392, y: 20.260}   # wp #1
+      s_curve_start: {x: -30.098, y: 20.953}   # wp #6
+      s_curve_end: {x: -17.012, y: 21.649}   # wp #51
+      light_2: {x: -13.606, y: 20.717}   # wp #60
+      park_t_entry: {x: -0.906, y: 16.303}   # wp #99
+
+  t_left:
+    csv: school/t_left.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      t_left_spot: {x: -2.415, y: 22.582}   # wp #23
+      t_left_end: last
+  t_right:
+    csv: school/t_right.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      t_right_spot: {x: -4.670, y: 23.348}   # wp #35
+      t_right_end: last
+
+  # 3) T자 주차 뒤의 공통 구간. 신호등 -> 가속 구간 -> 평행 주차 진입까지입니다.
+  common_2:
+    csv: school/common_2.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      light_3: {x: -11.594, y: 20.044}   # wp #10
+      accel_start: {x: -13.377, y: 20.603}   # wp #17
+      accel_end: {x: -17.356, y: 22.002}   # wp #34
+      park_p_entry: {x: -19.748, y: 22.968}   # wp #42
+
+  p_up:
+    csv: school/p_up.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      p_up_entry: {x: -24.428, y: 24.796}   # wp #21
+      p_up_spot: {x: -18.284, y: 24.860}   # wp #51
+      p_up_end: last
+  p_down:
+    csv: school/p_down.csv
+    # p_down_spot은 칸 안 방향 전환점입니다 -- wp #9.
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      p_down_spot: {x: -13.588, y: 23.435}   # wp #27
+      p_down_end: last
+
+  # 5) 주차 뒤 합류 구간과 마지막 차선 갈래.
+  common_3:
+    csv: school/common_3.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      common_3_end: last
+  end_left:
+    csv: school/end_left.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      end_left_end: last
+  end_right:
+    csv: school/end_right.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      end_right_end: last
+
+# --- 미션 시퀀스 ---
+#
+# 갈래(routes)가 끝나면 그 branch 바로 뒤의 스텝으로 합류합니다. 그래서 아래 순서는
+#   [분기] -> [합류해서 이어 갈 스텝] -> ... -> [다음 분기] -> ...
+# 로 읽으면 됩니다. 실제 스텝 인덱스(~/goto_step에 쓰는 번호)는 routes가 뒤에 붙으므로
+# yaml 순서와 다릅니다 -- `ros2 topic echo /mission_manager/steps --once`로 보세요.
+steps:
+  # [0] 출발 갈래. 표지가 아니라 차의 현재 위치로 고릅니다: start_left.csv의 첫 점과
+  # start_right.csv의 첫 점 중 가까운 쪽입니다(두 출발선은 약 3 m 떨어져 있습니다).
+  # cases를 남겨 둔 이유는 /perception/sign으로 손수 밀어 넣어 갈래를 강제할 수 있게
+  # 하기 위해서입니다(위치 판정이 이기므로 평소에는 쓰이지 않습니다).
+  # tf를 못 읽으면 timeout 뒤 default로 갑니다.
+  - type: branch
+    select_by: position
+    default: start_right_route
+    timeout_s: 5.0
+    # debounce_frames도 vote_window_s도 적지 않습니다 -- 위치로 고르는 분기는 신호를
+    # 아예 안 보므로 둘 다 쓰이지 않습니다.
+    prearm_distance_m: 0.0      # 앞에 drive 스텝이 없습니다. 미리 볼 것도 없습니다.
+    cases:
+      - {value: "start_left",  goto: start_left_route}
+      - {value: "start_right", goto: start_right_route}
+
+  # [1~2] 합류 뒤 첫 신호등.
+  - {type: drive, course: common_1, until: light_1, controller: FRPP,
+     goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
+     prearm_distance_m: 12.0}
+  # [3~5] s자 구간. 여기만 MPPI입니다 -- 연속 회피가 필요한 유일한 곳입니다.
+  # 앞뒤 경계에서 서지 않도록 handoff_m으로 골을 갈아끼웁니다(컨트롤러 전환).
+  # 이 세 스텝에 decel_profile_a / cancel_on_arrival_m이 없는 것은 실수가 아닙니다:
+  # 둘 다 "라벨에서 선다"는 뜻이라 handoff와 같이 쓸 수 없습니다.
+  - {type: drive, course: common_1, until: s_curve_start, controller: FRPP, handoff_m: 6.0}
+  - {type: drive, course: common_1, until: s_curve_end, controller: MPPI, handoff_m: 6.0}
+
+  - {type: drive, course: common_1, until: light_2, controller: FRPP,
+     goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
+     prearm_distance_m: 12.0}
+     
+  - {type: drive, course: common_1, until: park_t_entry, controller: FRPP,
+     goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+  - type: branch
+    select_by: clearance
+    default: t_right_route
+    # 3.0 -> 6.0. 코스트맵이 2 Hz라 3초면 여섯 장뿐이고, 그중 앞 몇 장은 차가 막 선
+    # 직후라 콘이 덜 쌓여 있습니다.
+    timeout_s: 6.0
+    # 콘을 관측해 모으는 창. 표지 분기의 투표 창과 같은 필드를 씁니다(timeout_s보다
+    # 작아야 합니다). 2 Hz x 2초 = 네 장이고, 갈래별로 그중 **최대** 셀 수를 씁니다 --
+    # 한 장에서 못 본 콘이 다음 장에서 보이는 일이 있기 때문입니다.
+    vote_window_s: 2.0
+    prearm_distance_m: 0.0
+    cases:
+      - {value: "t_left",  goto: t_left_route,  cone: {x: -3, y: 21.02, radius: 1.0}}   
+      - {value: "t_right", goto: t_right_route, cone: {x: -5, y: 22.05, radius: 1.0}}  
+
+  # [8~9] 합류(common_2) 뒤 두 번째 신호등
+  # [10~11] 가속 구간. 여기는 원래부터 RPP여야 하는 곳입니다 -- 장애물 앞에서 비켜 가지
+  # 않고 반드시 서야 합니다. obstacle_hold_s가 그 정지를 미션 실패가 아니라 대기로
+  # 다룹니다(1초마다 같은 골을 다시 보내고, 30초 넘게 막혀 있으면 그때 실패).
+  - {type: drive, course: common_2, until: light_3, controller: FRPP,
+     goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  - {type: wait_signal, value: green, timeout_s: 120.0, debounce_frames: 3,
+     prearm_distance_m: 12.0}
+  - {type: drive, course: common_2, until: accel_start, controller: FRPP,
+     goal_checker: precise_goal_checker, handoff_m: 6.0}
+  - {type: drive, course: common_2, until: accel_end, controller: FRPP,
+     goal_checker: precise_goal_checker, obstacle_hold_s: 30.0,
+     handoff_m: 6.0}
+
+  # [12] 평행 주차 갈림길까지. common_2는 여기서 끝납니다(park_p_entry = last).
+  - {type: drive, course: common_2, until: park_p_entry, controller: FRPP,
+     goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+
+  # [13] 평행 주차 갈래. [7]과 같이 콘이 막지 않은 칸으로 들어갑니다 -- 규칙도 주의할
+  # 점도 [7]의 주석과 같습니다. cone 좌표는 여기도 PLACEHOLDER입니다.
+  #
+  # 다만 이쪽은 두 칸이 코스트맵 x 방향으로 6 m쯤 떨어져 있습니다(p_up_spot과
+  # p_down_spot의 거리). 분기 지점에서 먼 쪽 콘이 20 x 20 m 창 안에는 들어오지만,
+  # 반지름이 창 경계에 걸리면 노드가 WARN을 냅니다 -- 그 줄이 보이면 콘이 잘려서
+  # "비어 보이는" 것이므로 그대로 믿으면 안 됩니다.
+  - type: branch
+    select_by: clearance
+    default: p_down_route
+    timeout_s: 6.0
+    vote_window_s: 2.0
+    prearm_distance_m: 0.0
+    cases:
+      - {value: "p_up",   goto: p_up_route,   cone: {x: -20, y: 24.46, radius: 1.0}}  
+      - {value: "p_down", goto: p_down_route, cone: {x: -15.24, y: 23.03, radius: 1.0}}  
+
+  # [14] 합류(common_3) -- 마지막 차선 갈림길까지.
+  - {type: drive, course: common_3, until: common_3_end, controller: FRPP,
+     goal_checker: precise_goal_checker, handoff_m: 6.0}
+
+  # [15] 마지막 차선 갈래. 나란히 선 표지판 세 장 중 **왼쪽 두 장**을 object_detection이
+  # 읽어 allow_left / allow_right로 냅니다(publish_lane_fork_sign). 표지판은 깜빡이지만
+  # 한 칸이 꺼져 있어도(blank) 나머지 한 칸이 allow/ban이면 답이 정해지고, 판단은 아래
+  # vote_window_s 동안 모은 표의 다수결이라 깜빡임에 끊기지 않습니다. 여기는 두 갈래 모두
+  # 전진이고 컨트롤러도 앞 스텝과 같으므로 prearm이 걸립니다 -- 서지 않고 그대로
+  # 갈래로 들어갑니다.
+  - type: branch
+    default: end_right_route
+    timeout_s: 8.0
+    vote_window_s: 3.0          # 이 시간 동안 모아 다수결. timeout_s보다 작아야 합니다.
+    prearm_distance_m: 12.0
+    cases:
+      - {value: "allow_left",  goto: end_left_route}
+      - {value: "allow_right", goto: end_right_route}
+
+routes:
+  # 출발 갈래: 정지선에서 5초 정차한 뒤 코스 끝까지. 끝나면 [1]로 합류합니다.
+  start_left_route:
+    - {type: drive, course: start_left, until: stopline_left, controller: FRPP,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+    - {type: stop, duration_s: 5.0}
+    - {type: drive, course: start_left, until: start_left_end, controller: FRPP, handoff_m: 6.0}
+  start_right_route:
+    - {type: drive, course: start_right, until: stopline_right, controller: FRPP,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+    - {type: stop, duration_s: 5.0}
+    - {type: drive, course: start_right, until: start_right_end, controller: FRPP, handoff_m: 6.0}
+
+  # T자 주차: 분기 지점에서 곧바로 후진 입고 -> 정차 -> 전진 출차. 출차가 별도 갈래
+  # 스텝인 이유는 RPP가 한 경로 안의 방향 전환을 처리하지 못하기 때문입니다.
+  # 후진 스텝에는 cancel_on_arrival_m을 켜지 마세요 -- 짧게 서면 칸에 덜 들어갑니다.
+  t_left_route:
+    - {type: drive, course: t_left, until: t_left_spot, controller: RRPP,
+       reverse: true, goal_checker: park_goal_checker}
+    - {type: stop, duration_s: 3.0}
+    - {type: drive, course: t_left, until: t_left_end, controller: FRPP}
+  t_right_route:
+    - {type: drive, course: t_right, until: t_right_spot, controller: RRPP,
+       reverse: true, goal_checker: park_goal_checker}
+    - {type: stop, duration_s: 3.0}
+    - {type: drive, course: t_right, until: t_right_end, controller: FRPP}
+
+  # 평행 주차. p_up만 진입 스텝이 하나 더 있습니다(녹화가 전진 -> 후진 -> 전진).
+  # 진입 스텝의 cancel_on_arrival_m는 정지선(0.4)보다 작게 잡습니다: 진입에서 덜 간
+  # 거리가 그대로 칸 안 정지 오차에 더해집니다.
+  p_up_route:
+    - {type: drive, course: p_up, until: p_up_entry, controller: FRPP,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.15, decel_profile_a: 1.5}
+    - {type: drive, course: p_up, until: p_up_spot, controller: RRPP,
+       reverse: true, goal_checker: park_goal_checker}
+    - {type: stop, duration_s: 3.0}
+    - {type: drive, course: p_up, until: p_up_end, controller: FRPP}
+  p_down_route:
+    - {type: drive, course: p_down, until: p_down_spot, controller: RRPP,
+       reverse: true, goal_checker: park_goal_checker}
+    - {type: stop, duration_s: 3.0}
+    - {type: drive, course: p_down, until: p_down_end, controller: FRPP}
+
+  # 마지막 차선. 여기서 끝나면 미션 종료입니다([15]가 main의 마지막 스텝입니다).
+  end_left_route:
+    - {type: drive, course: end_left, until: end_left_end, controller: FRPP,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+  end_right_route:
+    - {type: drive, course: end_right, until: end_right_end, controller: FRPP,
+       goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}

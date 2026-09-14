@@ -15,8 +15,11 @@
 // 라벨이 CSV를 따라 단조 증가해야 하기 때문입니다. 그래서 갈래마다 CSV를 따로 녹화하고
 // (Course), branch 스텝이 신호를 보고 그중 하나(routes의 한 갈래)를 고릅니다.
 //
-// courses:를 안 쓰면 코스는 waypoint_csv 파라미터가 가리키는 "main" 하나뿐이고, 미션
-// 파일의 동작은 분기 기능이 없던 때와 완전히 같습니다(mission.yaml/simple.yaml 그대로).
+// 코스는 미션 파일의 courses:가 정합니다. 이름은 자유이고, `main`만 특별합니다 --
+// 있으면 course:를 안 적은 스텝의 기본 코스이자 최상위 labels:의 임자입니다(simple.yaml처럼
+// 코스가 하나뿐인 미션이 이 모양입니다). 조각을 이어 붙이는 미션(mission_track)에는 "그
+// 미션이 달리는 코스" 하나가 없으므로 main을 두지 않고, 스텝마다 course:를 적습니다.
+// 상대 경로는 resolve_csv_path가 풉니다.
 
 #include <algorithm>
 #include <cmath>
@@ -63,13 +66,34 @@ struct Course
   std::unordered_map<std::string, std::size_t> label_index;
 };
 
-// branch 스텝의 갈래 하나. accepted 중 하나가 debounce_frames 연속으로 확인되면
-// target 스텝으로 갑니다.
+// branch 스텝이 무엇을 보고 갈래를 고르는가 (mission.yaml의 `select_by`).
+enum class BranchSelect
+{
+  kSign,        // 기본. 차선 안내 표지를 vote_window_s 동안 모아 다수결.
+  kPosition,    // 차의 현재 위치에서 가장 가까운 갈래.
+  kClearance,   // 갈래마다 정해 둔 콘 자리의 local costmap을 보고, 막히지 않은 쪽.
+};
+
+// branch 스텝의 갈래 하나. vote_window_s 동안 모은 표에서 accepted가 가장 많은 표를
+// 받으면 target 스텝으로 갑니다.
 struct BranchCase
 {
   std::vector<std::string> accepted;
   std::string route;                    // mission.yaml의 `goto`
   std::size_t target{kEndOfMission};    // 그 route의 첫 스텝 (resolve_routes가 채웁니다)
+
+  // `select_by: clearance`에서 이 갈래를 막는 콘의 자리(mission.yaml의 `cone: {x, y}`).
+  // 코스 프레임(보통 map) 좌표이고, 여기 lethal 셀이 쌓이면 이 갈래는 탈락합니다.
+  //
+  // 라벨이 아니라 생좌표인 이유: 라벨은 최근접 웨이포인트로 스냅되고
+  // label_snap_tolerance_m를 넘으면 미션이 거부되는데, 콘은 녹화 경로 위가 아니라
+  // 그 옆(칸 입구)에 서 있습니다.
+  bool has_cone{false};
+  double cone_x{0.0};
+  double cone_y{0.0};
+  // 0이면 노드의 cone_radius_m 파라미터를 씁니다. 칸 입구가 좁아 옆 갈래의 콘까지
+  // 들어오는 자리에서만 개별로 줄이세요.
+  double cone_radius_m{0.0};
 };
 
 struct Step
@@ -114,6 +138,13 @@ struct Step
   // 다시 보내, 장애물이 치워지면 스스로 이어서 갑니다. 이 시간(초) 동안 계속 막혀 있으면
   // 그때는 실패로 끝냅니다. 0 = 끔(그때는 goal_retry_limit이 소진되면 바로 실패).
   double obstacle_hold_s{0.0};
+  // 0보다 크면, 골까지 남은 거리가 이 값 이하로 들어왔을 때 서지 않고 다음 drive 스텝의
+  // 골로 갈아끼웁니다(prearm과 같은 preemption이지만 신호를 보지 않습니다). 컨트롤러를
+  // 바꾸는 유일한 방법이 새 골이므로, RPP <-> MPPI 전환을 정차 없이 하려면 이것이
+  // 필요합니다. link_handoff_steps가 handoff_enabled/handoff_merge_step를 채웁니다.
+  double handoff_m{0.0};
+  bool handoff_enabled{false};
+  std::size_t handoff_merge_step{0};
   // 라벨(end_index) 뒤로 덧붙일 직선 꼬리의 길이(0 = 없음). resolve_decel_tails가 정합니다.
   // 보낸 경로 위에서 라벨이 어디인지 찾을 때도 이 값을 씁니다 -- 좌표로 최근접점을 찾으면
   // 같은 길을 되짚는 구간에서 엉뚱한 점에 붙을 수 있지만, "경로 끝에서 남은 길이"로 찾으면
@@ -128,10 +159,28 @@ struct Step
   double timeout_s{120.0};
   int debounce_frames{3};
 
-  // branch. timeout_s / debounce_frames / prearm_distance_m를 wait_signal과 같이 씁니다.
+  // branch. timeout_s / prearm_distance_m를 wait_signal과 같이 씁니다. 다만 판정 방법이
+  // 달라 debounce_frames가 아니라 아래 vote_window_s를 봅니다.
   std::vector<BranchCase> cases;
   std::string default_route;
   std::size_t default_target{kEndOfMission};
+  // 무엇을 보고 갈래를 고르는가.
+  //
+  //   kPosition  -- 표지가 아니라 차의 현재 위치. 갈래마다 그 CSV의 첫 점
+  //                 (check_branch_seams가 재는 그 점)까지의 거리를 비교해 가까운 쪽입니다.
+  //                 출발 위치가 곧 어느 코스인지를 정하는 스타트 분기용입니다.
+  //   kClearance -- 갈래마다 적어 둔 콘 자리(BranchCase::cone_x/y)의 local costmap을 보고,
+  //                 정확히 한 갈래만 비어 있으면 그리로 갑니다. 주차 칸 입구를 콘이
+  //                 막고 있는 분기용입니다.
+  //
+  // 둘 다 판정을 못 하면(tf를 못 읽음 / 코스트맵이 없음 / 애매함) 아무 일도 일어나지 않고
+  // timeout 뒤 default로 갑니다 -- 신호 분기와 같은 실패 방식입니다.
+  BranchSelect select{BranchSelect::kSign};
+
+  // branch 전용. 이 시간 동안 들어온 신호를 모아 다수결로 갈래를 고릅니다. 갈림길 표지는
+  // 세 장이 나란히 깜빡여서 "같은 값이 N프레임 연속"이 거의 성립하지 않기 때문입니다.
+  // timeout_s보다 작아야 합니다 -- 아니면 창이 차기 전에 무조건 default로 갑니다.
+  double vote_window_s{3.0};
 
   // 두 종류가 같이 쓰는 필드. Step은 종류별로 나뉘지 않은 평평한 구조체입니다.
   //   wait_signal/branch에서: mission.yaml이 적어 준 값. 0보다 크면 prearm을 켭니다.
@@ -181,11 +230,32 @@ inline std::vector<std::string> split_values(const std::string & text)
   return values;
 }
 
+// branch가 갈 수 있는 스텝 전부(각 case + default), 중복 없이. default가 어느 case와
+// 같은 갈래를 가리키는 것은 흔하고 정상입니다.
+//
+// 클래스 밖에 있는 이유: 로드 시점의 검사(check_branch_seams, link_branch_prearm)와
+// 주행 중의 위치 분기(mission_manager_node의 tick_branch)가 "이 분기가 갈 수 있는 곳"을
+// 똑같이 세어야 하기 때문입니다.
+inline std::vector<std::size_t> branch_targets(const Step & branch)
+{
+  std::vector<std::size_t> targets;
+  const auto add = [&targets](std::size_t target) {
+      if (std::find(targets.begin(), targets.end(), target) == targets.end()) {
+        targets.push_back(target);
+      }
+    };
+  for (const auto & branch_case : branch.cases) {
+    add(branch_case.target);
+  }
+  add(branch.default_target);
+  return targets;
+}
+
 // 로더가 파라미터 전체(mission_manager::Params) 대신 받는 값들. 로드에 실제로 쓰이는
 // 것만 추려 두었으므로, 여기 없는 파라미터는 주행 중에만 쓰인다는 뜻입니다.
 struct MissionLoadConfig
 {
-  std::string waypoint_csv;         // main 코스의 CSV (courses.main.csv가 덮어씁니다)
+  std::string waypoints_dir;        // mission.yaml의 상대 CSV 경로를 푸는 기준 디렉터리
   double min_spacing_m{0.0};
   std::string frame_id;             // CSV에 frame_id가 없을 때의 기본값
   std::string mission_yaml;
@@ -278,6 +348,7 @@ private:
 
     resolve_decel_tails();
     link_prearm_steps();
+    link_handoff_steps();
     if (!check_branch_seams(seam_tolerance_m)) {
       return false;
     }
@@ -292,12 +363,18 @@ private:
 
   // mission.yaml에 적힌 CSV 경로를 실제 파일로 풉니다.
   //
-  // 절대 경로면 그대로 씁니다. 상대 경로는 (1) main CSV가 있는 디렉터리, (2) mission.yaml이
-  // 있는 디렉터리, (3) 준 그대로(현재 작업 디렉터리) 순으로 찾습니다.
+  // 절대 경로면 그대로 씁니다. 상대 경로는 (1) main CSV가 있는 디렉터리, (2) waypoints_dir
+  // 파라미터, (3) mission.yaml이 있는 디렉터리, (4) 준 그대로(현재 작업 디렉터리)
+  // 순으로 찾습니다.
   //
-  // (1)이 먼저인 이유: 갈래 CSV는 녹화 코스와 같은 곳(hyper_waypoint/waypoints/)에 둡니다.
-  // 그러면 파일 이름만 적으면 되고, waypoint_csv:=.../real.csv로 실차 코스를 실을 때
-  // 갈래 CSV도 같이 real 쪽으로 따라갑니다 -- 미션 파일을 안 고쳐도 됩니다.
+  // (2)가 기본 규칙입니다 -- 미션 파일에는 `track/common_1.csv`처럼 waypoints/ 아래
+  // 상대 경로를 적습니다. main도 이 규칙으로 풉니다((1)이 아직 비어 있습니다 -- 자기
+  // 자신을 기준으로 삼을 수 없습니다).
+  //
+  // (1)은 main이 있는 미션의 편의입니다: 갈래 CSV를 main과 같은 폴더에 두면 파일 이름만
+  // 적으면 되고, courses.main.csv 한 줄을 다른 폴더로 바꾸면 갈래도 통째로 따라갑니다
+  // (simple.yaml이 이렇게 씁니다). main이 없는 미션에는 이 후보가 없으므로 코스마다
+  // waypoints_dir 기준 경로를 적습니다.
   std::string resolve_csv_path(const std::string & given) const
   {
     namespace fs = std::filesystem;
@@ -307,8 +384,11 @@ private:
     }
 
     std::vector<fs::path> candidates;
-    if (!config_.waypoint_csv.empty()) {
-      candidates.push_back(fs::path(config_.waypoint_csv).parent_path() / path);
+    if (!main_csv_path_.empty()) {
+      candidates.push_back(fs::path(main_csv_path_).parent_path() / path);
+    }
+    if (!config_.waypoints_dir.empty()) {
+      candidates.push_back(fs::path(config_.waypoints_dir) / path);
     }
     if (!config_.mission_yaml.empty()) {
       candidates.push_back(fs::path(config_.mission_yaml).parent_path() / path);
@@ -370,52 +450,89 @@ private:
   bool load_courses(const YAML::Node & root, double snap_tolerance_m)
   {
     const YAML::Node courses_node = root["courses"];
-    if (courses_node && !courses_node.IsMap()) {
-      RCLCPP_ERROR(logger_, "'courses' must be a map of <name>: {csv: ..., labels: ...}.");
+    if (!courses_node || !courses_node.IsMap() || courses_node.size() == 0) {
+      RCLCPP_ERROR(
+        logger_,
+        "'%s' has no 'courses' -- name the course(s) this mission drives:\n"
+        "  courses:\n"
+        "    common1: {csv: track/common_1.csv, labels: {...}}   # 상대 경로는 '%s' 기준입니다\n"
+        "미션이 CSV 하나만 돌면 그 하나를 'main'이라 부르면 됩니다 -- 그러면 스텝의 course:를"
+        " 생략할 수 있고 라벨은 최상위 labels:에 둡니다.",
+        config_.mission_yaml.c_str(), config_.waypoints_dir.c_str());
       return false;
     }
 
-    // main 코스는 항상 존재합니다. CSV는 courses.main.csv가 있으면 그것, 없으면
-    // waypoint_csv 파라미터입니다(= 분기를 안 쓰는 미션의 예전 동작).
-    std::string main_csv = config_.waypoint_csv;
-    if (courses_node && courses_node["main"] && courses_node["main"]["csv"]) {
-      main_csv = resolve_csv_path(courses_node["main"]["csv"].as<std::string>());
-    }
-    if (!add_course("main", main_csv)) {
-      return false;
+    // main은 선택입니다. 있으면 세 가지를 겸합니다: course:를 안 적은 스텝의 기본 코스,
+    // 최상위 labels:의 임자, 그리고 나머지 코스의 상대 경로 기준 디렉터리. 코스가 하나뿐인
+    // 미션(simple.yaml)과 갈래만 따로 녹화한 미션이 이 모양입니다.
+    //
+    // 조각을 이어 붙이는 미션(mission_track.yaml)에는 "그 미션이 달리는 코스" 하나가
+    // 없습니다. 그런 미션은 main을 두지 않고 코스마다 waypoints_dir 기준 경로를 적으며,
+    // 모든 스텝이 course:를 명시합니다.
+    //
+    // main을 먼저 싣는 이유는 기준 디렉터리(main_csv_path_)를 나머지보다 먼저 정해야 하기
+    // 때문입니다. main 자신은 자기 자신을 기준으로 풀 수 없으므로 main_csv_path_가 비어
+    // 있는 상태에서(= waypoints_dir 기준) 풉니다.
+    if (courses_node["main"]) {
+      if (!courses_node["main"].IsMap() || !courses_node["main"]["csv"]) {
+        RCLCPP_ERROR(logger_, "Course 'main' has no 'csv'.");
+        return false;
+      }
+      const std::string main_csv =
+        resolve_csv_path(courses_node["main"]["csv"].as<std::string>());
+      if (!add_course("main", main_csv)) {
+        return false;
+      }
+      main_csv_path_ = main_csv;
     }
 
-    if (courses_node) {
-      for (const auto & entry : courses_node) {
-        const auto name = entry.first.as<std::string>();
-        if (name == "main") {
-          continue;   // 위에서 이미 실었습니다.
-        }
-        if (!entry.second.IsMap() || !entry.second["csv"]) {
-          RCLCPP_ERROR(logger_, "Course '%s' has no 'csv'.", name.c_str());
-          return false;
-        }
-        if (!add_course(name, resolve_csv_path(entry.second["csv"].as<std::string>()))) {
-          return false;
-        }
+    for (const auto & entry : courses_node) {
+      const auto name = entry.first.as<std::string>();
+      if (name == "main") {
+        continue;   // 위에서 이미 실었습니다.
+      }
+      if (!entry.second.IsMap() || !entry.second["csv"]) {
+        RCLCPP_ERROR(logger_, "Course '%s' has no 'csv'.", name.c_str());
+        return false;
+      }
+      if (!add_course(name, resolve_csv_path(entry.second["csv"].as<std::string>()))) {
+        return false;
       }
     }
 
     // 라벨 스냅. 최상위 labels:는 main 코스의 것입니다 -- label_waypoints.py가 그 블록을
-    // 통째로 재작성하므로 위치를 바꾸지 않습니다. 갈래 코스는 courses.<이름>.labels를 씁니다.
-    if (!root["labels"] || !root["labels"].IsMap() || root["labels"].size() == 0) {
-      RCLCPP_ERROR(
-        logger_,
-        "'%s' has no 'labels'. Place them first:\n"
-        "  python3 src/planning/hyper_waypoint/scripts/label_waypoints.py %s",
-        config_.mission_yaml.c_str(), courses_.front().csv_path.c_str());
-      return false;
-    }
-    if (!snap_labels(courses_.front(), root["labels"], snap_tolerance_m)) {
-      return false;
+    // 통째로 재작성하므로 위치를 바꾸지 않습니다. 나머지 코스는 courses.<이름>.labels를 씁니다.
+    const YAML::Node top_labels = root["labels"];
+    const bool has_top_labels = top_labels && top_labels.IsMap() && top_labels.size() > 0;
+    if (main_csv_path_.empty()) {
+      // main이 없으면 최상위 labels:는 임자가 없습니다. 조용히 무시하면 "라벨을 적었는데
+      // 스텝이 못 찾는다"로 나타나므로 여기서 거부합니다(빈 블록은 그냥 둡니다).
+      if (has_top_labels) {
+        RCLCPP_ERROR(
+          logger_,
+          "'%s' has a top-level 'labels' block but no course named 'main' to own it. Labels "
+          "belong to one course -- move each one under courses.<name>.labels.",
+          config_.mission_yaml.c_str());
+        return false;
+      }
+    } else {
+      if (!has_top_labels) {
+        RCLCPP_ERROR(
+          logger_,
+          "'%s' has no 'labels' for course 'main'. Place them first:\n"
+          "  python3 src/planning/hyper_waypoint/scripts/label_waypoints.py %s",
+          config_.mission_yaml.c_str(), courses_.front().csv_path.c_str());
+        return false;
+      }
+      if (!snap_labels(courses_.front(), top_labels, snap_tolerance_m)) {
+        return false;
+      }
     }
 
-    for (std::size_t i = 1; i < courses_.size(); ++i) {
+    for (std::size_t i = 0; i < courses_.size(); ++i) {
+      if (courses_[i].name == "main") {
+        continue;   // 위에서 최상위 labels:로 실었습니다.
+      }
       const YAML::Node labels = courses_node[courses_[i].name]["labels"];
       if (!labels || !labels.IsMap() || labels.size() == 0) {
         RCLCPP_ERROR(
@@ -497,23 +614,6 @@ private:
   }
 
   // ------------------------------------------------------------------ 스텝 파싱
-
-  // branch가 갈 수 있는 스텝 전부(각 case + default), 중복 없이. default가 어느 case와
-  // 같은 갈래를 가리키는 것은 흔하고 정상입니다.
-  static std::vector<std::size_t> branch_targets(const Step & branch)
-  {
-    std::vector<std::size_t> targets;
-    const auto add = [&targets](std::size_t target) {
-        if (std::find(targets.begin(), targets.end(), target) == targets.end()) {
-          targets.push_back(target);
-        }
-      };
-    for (const auto & branch_case : branch.cases) {
-      add(branch_case.target);
-    }
-    add(branch.default_target);
-    return targets;
-  }
 
   bool find_course(const std::string & name, std::size_t & id) const
   {
@@ -599,12 +699,20 @@ private:
     }
     step.label = node["until"].as<std::string>();
 
+    // course:를 생략하면 'main'입니다. main이 없는 미션에서는 생략할 수 없습니다.
     const auto course_name = node["course"]
       ? node["course"].as<std::string>() : std::string("main");
     if (!find_course(course_name, step.course_id)) {
-      RCLCPP_ERROR(
-        logger_, "Step %zu references course '%s', which is not in 'courses'.",
-        index, course_name.c_str());
+      if (!node["course"]) {
+        RCLCPP_ERROR(
+          logger_,
+          "Step %zu has no 'course', and this mission has no course named 'main' to fall back "
+          "to. Name the course this step drives: {course: <name>, ...}.", index);
+      } else {
+        RCLCPP_ERROR(
+          logger_, "Step %zu references course '%s', which is not in 'courses'.",
+          index, course_name.c_str());
+      }
       return false;
     }
     const Course & course = courses_[step.course_id];
@@ -647,6 +755,7 @@ private:
       ? node["decel_profile_a"].as<double>() : config_.decel_profile_a;
     step.obstacle_hold_s = node["obstacle_hold_s"]
       ? node["obstacle_hold_s"].as<double>() : 0.0;
+    step.handoff_m = node["handoff_m"] ? node["handoff_m"].as<double>() : 0.0;
 
     // reverse 플래그가 녹화된 실제 주행 방향과 맞는지 확인합니다. 틀리면 RPP가
     // 엉뚱한 방향으로 당기므로 바로 알아채는 편이 낫습니다.
@@ -682,9 +791,40 @@ private:
   {
     step.type = StepType::kBranch;
     step.timeout_s = node["timeout_s"] ? node["timeout_s"].as<double>() : 10.0;
-    step.debounce_frames = node["debounce_frames"] ? node["debounce_frames"].as<int>() : 3;
+    step.vote_window_s = node["vote_window_s"] ? node["vote_window_s"].as<double>() : 3.0;
     step.prearm_distance_m = node["prearm_distance_m"]
       ? node["prearm_distance_m"].as<double>() : 0.0;
+
+    // debounce_frames는 wait_signal의 것입니다. 분기는 연속 프레임이 아니라 투표로 고르므로
+    // 여기서는 쓰이지 않습니다. 조용히 무시하면 "적어 뒀는데 왜 안 듣지"가 되므로 한 줄
+    // 남깁니다(prearm을 못 거는 경우와 같은 방식입니다).
+    if (node["debounce_frames"]) {
+      RCLCPP_WARN(
+        logger_,
+        "Step %zu (branch) sets 'debounce_frames: %d', which branches no longer use -- the "
+        "majority vote over vote_window_s (%.1f s) decides instead. Remove the key; it is "
+        "ignored here (wait_signal still uses it).",
+        index, node["debounce_frames"].as<int>(), step.vote_window_s);
+    }
+
+    // 무엇을 보고 고르는가. 기본은 표지("sign"), "position"이면 차의 현재 위치에서 가장
+    // 가까운 갈래, "clearance"면 갈래마다 적어 둔 콘 자리의 코스트맵을 보고 비어 있는
+    // 쪽입니다. 오타를 기본값으로 조용히 흘려보내면 분기가 말없이 default로만 가므로
+    // 여기서 거부합니다.
+    if (node["select_by"]) {
+      const auto select_by = node["select_by"].as<std::string>();
+      if (select_by == "position") {
+        step.select = BranchSelect::kPosition;
+      } else if (select_by == "clearance") {
+        step.select = BranchSelect::kClearance;
+      } else if (select_by != "sign") {
+        RCLCPP_ERROR(
+          logger_,
+          "Step %zu (branch): select_by '%s' is not understood (expected 'sign', 'position' or "
+          "'clearance').", index, select_by.c_str());
+        return false;
+      }
+    }
 
     if (!node["default"]) {
       RCLCPP_ERROR(
@@ -714,6 +854,24 @@ private:
       BranchCase branch_case;
       branch_case.accepted = split_values(entry["value"].as<std::string>());
       branch_case.route = entry["goto"].as<std::string>();
+      if (entry["cone"]) {
+        const YAML::Node & cone = entry["cone"];
+        if (!cone["x"] || !cone["y"]) {
+          RCLCPP_ERROR(
+            logger_, "Step %zu (branch), case %zu: 'cone' needs both 'x' and 'y'.", index, c);
+          return false;
+        }
+        branch_case.has_cone = true;
+        branch_case.cone_x = cone["x"].as<double>();
+        branch_case.cone_y = cone["y"].as<double>();
+        branch_case.cone_radius_m = cone["radius"] ? cone["radius"].as<double>() : 0.0;
+        if (branch_case.cone_radius_m < 0.0) {
+          RCLCPP_ERROR(
+            logger_, "Step %zu (branch), case %zu: cone radius must be >= 0 (got %.2f).",
+            index, c, branch_case.cone_radius_m);
+          return false;
+        }
+      }
       if (branch_case.accepted.empty()) {
         RCLCPP_ERROR(
           logger_, "Step %zu (branch), case %zu has an empty 'value'.", index, c);
@@ -730,6 +888,45 @@ private:
         }
       }
       step.cases.push_back(std::move(branch_case));
+    }
+
+    // clearance 분기는 갈래마다 콘 자리가 있어야 합니다. 하나라도 빠지면 그 갈래는 늘
+    // "비어 있음"으로 보여 -- 셀 수가 0이므로 -- 말없이 그쪽으로만 가게 됩니다. 라벨
+    // 스냅이나 이음매 검사와 같은 이유로 주행 전에 거부합니다.
+    if (step.select == BranchSelect::kClearance) {
+      for (std::size_t c = 0; c < step.cases.size(); ++c) {
+        if (!step.cases[c].has_cone) {
+          RCLCPP_ERROR(
+            logger_,
+            "Step %zu (branch) selects by clearance, but case %zu ('%s') has no 'cone: {x, y}'. "
+            "Every case needs the cone position that disqualifies it -- without one that route "
+            "always looks clear.", index, c, step.cases[c].route.c_str());
+          return false;
+        }
+      }
+    }
+
+    // 위치로 고르는 분기는 관측을 모을 것이 없습니다(tf 한 번이면 끝). 거기까지 검사하면
+    // 쓰지도 않는 값 때문에 스타트 분기가 거부됩니다. 표지 분기는 표를, clearance 분기는
+    // 셀 수를 이 창 동안 모읍니다.
+    if (step.select != BranchSelect::kPosition) {
+      if (step.vote_window_s <= 0.0) {
+        // 0이면 표 한 장(또는 코스트맵 한 장)으로 정해집니다. 그건 이 창이 없애려던
+        // 바로 그 동작입니다.
+        RCLCPP_ERROR(
+          logger_, "Step %zu (branch): vote_window_s must be > 0 (got %.2f).",
+          index, step.vote_window_s);
+        return false;
+      }
+      if (step.vote_window_s >= step.timeout_s) {
+        RCLCPP_ERROR(
+          logger_,
+          "Step %zu (branch): vote_window_s (%.1f s) is not shorter than timeout_s (%.1f s), so "
+          "the decision can never finish before the branch gives up -- this branch would always "
+          "take the default route '%s'. Make vote_window_s smaller (or timeout_s larger).",
+          index, step.vote_window_s, step.timeout_s, step.default_route.c_str());
+        return false;
+      }
     }
     return true;
   }
@@ -950,7 +1147,16 @@ private:
     const std::vector<std::size_t> targets = branch_targets(branch);
 
     const char * reason = nullptr;
-    if (drive.reverse) {
+    if (branch.select == BranchSelect::kPosition) {
+      // 위치로 고르는 분기는 볼 표지가 없습니다. prearm의 preemption은 "확인되면 서지 않고
+      // 간다"인데, 위치 판정은 분기 지점에 도착해서야 의미가 있으므로 이어 줄 것이 없습니다.
+      reason = "the branch selects by position, so there is no sign to watch ahead of time";
+    } else if (branch.select == BranchSelect::kClearance) {
+      // 콘 판정도 마찬가지입니다. 멀리서는 콘이 코스트맵 창 밖이거나 라이다에 안 잡히고,
+      // 애초에 이 분기가 쓰이는 주차 갈래는 둘 다 후진으로 시작해 골을 하나로 못 잇습니다.
+      reason = "the branch selects by clearance, which is only meaningful once the vehicle is "
+        "standing at the branch point";
+    } else if (drive.reverse) {
       reason = "the drive step before the branch is a reverse segment";
     } else {
       for (const std::size_t target : targets) {
@@ -989,6 +1195,71 @@ private:
       "by the label).",
       drive.label.c_str(), config_.sign_topic.c_str(), drive.prearm_distance_m,
       branch.default_route.c_str());
+  }
+
+  // drive 스텝의 handoff_m을 그 다음 drive 스텝에 이어 줍니다.
+  //
+  // 왜 필요한가: 컨트롤러(controller_id)는 follow_path 골에 실려 나가므로, RPP에서 MPPI로
+  // 바꾸는 유일한 방법은 새 골입니다. 그런데 보통의 스텝 전환은 골 판정(goal checker)을
+  // 기다리므로 차가 라벨에서 한 번 섰다가 다시 출발합니다 -- s자 구간 앞뒤로 두 번.
+  //
+  // handoff는 prearm과 같은 preemption을 신호 조건 없이 씁니다. 골까지 handoff_m가
+  // 남으면 그 자리에서 "지금 위치 -> 다음 drive 스텝의 끝"을 새 골로 보내고, 이전 골은
+  // 취소하지 않고 갈아끼웁니다(nav2 controller_server가 제어 주기 안에서 바꿔치므로
+  // /cmd_vel이 끊기지 않습니다). 새 골에는 *다음* 스텝의 controller_id가 실리므로,
+  // 그 순간 컨트롤러가 바뀝니다.
+  //
+  // prearm과 달리 controller_id가 서로 다른지는 보지 않습니다 -- 다른 것이 목적입니다.
+  //
+  // 조건이 안 맞으면 경고만 남기고 그 자리의 handoff를 끕니다. 꺼진 결과는 "라벨에서 한 번
+  // 서고 다음 스텝으로"라 안전하기 때문입니다(prearm과 같은 취지).
+  void link_handoff_steps()
+  {
+    for (std::size_t i = 0; i < steps_.size(); ++i) {
+      Step & drive = steps_[i];
+      if (drive.type != StepType::kDrive || drive.handoff_m <= 0.0) {
+        continue;
+      }
+
+      const std::size_t merge = drive.next_index;
+      const char * reason = nullptr;
+      if (drive.prearm_enabled) {
+        // 둘 다 골을 갈아끼웁니다. 신호를 보는 쪽(prearm)이 이깁니다 -- 그쪽은 "서지 않고
+        // 통과"라는 판단이 붙어 있고, handoff는 아무 조건 없이 갈아끼우므로 prearm이 볼
+        // 신호를 지나쳐 버립니다.
+        reason = "this step already prearms a signal/branch, which owns the goal swap";
+      } else if (drive.decel_profile_a > 0.0 || drive.cancel_on_arrival_m > 0.0) {
+        // 둘 다 "라벨에서 선다"는 뜻입니다. cancel-on-arrival이 먼저 골을 취소해 버리면
+        // 갈아끼울 골이 없습니다. 애초에 설 스텝이라면 handoff가 할 일도 없습니다.
+        reason = "the step stops at its label (decel_profile_a / cancel_on_arrival_m are set)";
+      } else if (merge >= steps_.size()) {
+        reason = "there is no step after it to hand off to";
+      } else if (steps_[merge].type != StepType::kDrive) {
+        reason = "the next step is not a drive step";
+      } else if (drive.reverse || steps_[merge].reverse) {
+        // 두 세그먼트가 한 골 안에 들어가므로 방향 전환이 생깁니다. RPP는 이를 처리하지
+        // 못합니다(link_wait_signal_prearm과 같은 이유).
+        reason = "handing off would put a direction change inside a single goal";
+      }
+      if (reason != nullptr) {
+        RCLCPP_WARN(
+          logger_,
+          "Step %zu (until '%s') has handoff_m %.1f, but %s. Handoff is off here: the vehicle "
+          "will stop at the label and the next step sends its own goal.",
+          i, drive.label.c_str(), drive.handoff_m, reason);
+        drive.handoff_m = 0.0;
+        continue;
+      }
+
+      drive.handoff_enabled = true;
+      drive.handoff_merge_step = merge;
+      RCLCPP_INFO(
+        logger_,
+        "Handoff: %.1f m before '%s', roll straight on to '%s' without stopping "
+        "(controller '%s' -> '%s').",
+        drive.handoff_m, drive.label.c_str(), steps_[merge].label.c_str(),
+        drive.controller_id.c_str(), steps_[merge].controller_id.c_str());
+    }
   }
 
   // 갈래 CSV의 첫 점이 실제 분기 지점에 붙어 있는지 봅니다.
@@ -1060,6 +1331,12 @@ private:
 
   rclcpp::Logger logger_;
   MissionLoadConfig config_;
+
+  // main 코스가 풀린 절대 경로. 나머지 코스의 상대 경로를 이 디렉터리 기준으로 먼저
+  // 풉니다(resolve_csv_path). main을 풀 때는 아직 비어 있고 -- 자기 자신이 기준일 수
+  // 없습니다 -- main이 없는 미션에서는 끝까지 비어 있습니다("main이 있는가"의 판정도
+  // 이 값으로 합니다).
+  std::string main_csv_path_;
 
   std::vector<Course> courses_;
   std::vector<Step> steps_;

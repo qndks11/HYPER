@@ -15,12 +15,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'world', default_value=default_world_path,
             description='Specify the world file for Gazebo'),
-        DeclareLaunchArgument('x', default_value='41.0866', description='Initial X position'),
-        DeclareLaunchArgument('y', default_value='-45.6842', description='Initial Y position'),
+        DeclareLaunchArgument('x', default_value='35.5508', description='Initial X position'),
+        DeclareLaunchArgument('y', default_value='16.6373', description='Initial Y position'),
         DeclareLaunchArgument('z', default_value='0.36', description='Initial Z position'),
         DeclareLaunchArgument('R', default_value='0.00', description='Initial Roll'),
         DeclareLaunchArgument('P', default_value='0.00', description='Initial Pitch'),
-        DeclareLaunchArgument('Y', default_value='1.64', description='Initial Yaw'),
+        DeclareLaunchArgument('Y', default_value='2.8461', description='Initial Yaw'),
         DeclareLaunchArgument(
             'headless', default_value='false',
             description='Run Gazebo without the 3D GUI window (sensors still render offscreen)'),

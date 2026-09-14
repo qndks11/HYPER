@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # Real-car equivalent of simulation.launch.py: sensors replace Gazebo, but the
@@ -52,12 +52,12 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_rviz')),
     )
 
-    # GPS 정확도 모니터. /ublox_gps_node/navpvt의 hAcc/vAcc를 큰 글씨로 띄우고,
-    # WitMotion WT901BLE의 BLE 링크 상태(/imu/raw 수신 여부와 Hz)도 같이 보여줍니다.
+    # GPS 정확도 모니터. /ublox_gps_node_base/navpvt의 hAcc/vAcc를 큰 글씨로 띄우고,
+    # IMU(E2BOX EBIMU-9DOFV5) 링크 상태(/imu 수신 여부와 Hz)도 같이 보여줍니다.
     # 조건 없이 항상 뜹니다 -- 어떤 토픽도 publish하지 않는 순수 구독자라 nav2든
     # 조이스틱이든 아무것과도 충돌하지 않고, 실차에서 "지금 GPS를 믿어도 되는가"는
-    # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node)보다 먼저
-    # 떠도 무방합니다: NavPVT가 안 오는 동안은 NO DATA (stale)로 표시됩니다.
+    # 항상 봐야 하는 값이기 때문입니다. sensors 스테이지(ublox_gps_node_base/_rover)보다
+    # 먼저 떠도 무방합니다: NavPVT가 안 오는 동안은 NO DATA (stale)로 표시됩니다.
     gps_accuracy_gui = Node(
         package='hyper_localization',
         executable='gps_accuracy_gui.py',
@@ -80,10 +80,29 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_panel')),
     )
 
+    # 조이스틱 버튼 비상정지. joystick.launch.py와 달리 /velocity +
+    # /steering_angle을 전혀 publish하지 않고 /estop(Bool, latched)만 내보내므로,
+    # 미션 스택과 같은 트리에 있어도 cmd_vel_to_ackermann_node와 충돌하지 않습니다.
+    #
+    # estop.launch.py는 기본적으로 joy_node를 띄우지 않으므로(그 파일 주석 참고)
+    # 여기서는 켜 줍니다 -- 미션 모드에는 joystick.launch.py가 없어서 /joy를
+    # 내보내는 노드가 달리 없고, 그러면 비상정지 버튼이 조용히 죽습니다.
+    estop = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('hyper_control'),
+            'launch', 'estop.launch.py')),
+        launch_arguments={'launch_joy_node': 'true'}.items(),
+    )
+
     return LaunchDescription([
-        # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
+        # 어떤 미션을 실을지. hyper_planner/mission/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
-        DeclareLaunchArgument('mission', default_value='mission'),
+        #
+        # 실차에서는 mission:=mission_track을 반드시 주세요. 미션 파일이 자기가 달릴
+        # 코스를 정하므로(courses:), 엉뚱한 미션으로 띄우면 그 미션의 코스가
+        # 그대로 실립니다:
+        #   ros2 launch hyper_launch real.launch.py mission:=mission_track
+        DeclareLaunchArgument('mission', default_value='mission_track'),
         # navsat_transform의 GPS 원점. hyper_localization/config/datums.yaml의 키입니다.
         # 스테이지 기본값은 시뮬레이션 원점(sim)이라 실차 진입점에서는 여기서 덮어써야
         # 합니다 -- 대회장이 아닌 곳에서 돌릴 때는 datum_site:=school 처럼 바꾸세요.
@@ -96,17 +115,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_panel', default_value='true',
             description='Launch the hyper_rqt HYPER Panel (mission start/cancel)'),
-        # 미션이 실제로 따라갈 코스 CSV. 기본값이 sim.csv라는 점이 중요합니다 --
-        # 실차에서는 반드시 녹화한 파일로 덮어쓰세요:
-        #   ros2 launch hyper_launch real.launch.py waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/real.csv
-        # 이 인자를 여기서 선언하고 behavior 스테이지로 넘겨주지 않으면, 넘긴 값이
-        # 조용히 무시된 채 시뮬레이션 코스가 실차에 실립니다.
-        DeclareLaunchArgument(
-            'waypoint_csv',
-            default_value=PathJoinSubstitution([
-                EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-                'waypoints', 'sim.csv']),
-            description='미션이 따를 웨이포인트 CSV (실차는 real.csv로 덮어쓰세요)'),
         robot_state_publisher,
         rviz,
         gps_accuracy_gui,
@@ -118,16 +126,15 @@ def generate_launch_description():
             stage('odometry.launch.py',
                   datum_site=LaunchConfiguration('datum_site'),
                   use_sim_time='false')]),
-        # Real vehicle: hyper_camera owns both physical cameras and publishes plain image
-        # topics -- the ELP publisher loads into the same component container as
+        # Real vehicle: hyper_camera owns the one physical camera (Logitech C920) and publishes
+        # a plain image topic. Its publisher component loads into the same container as
         # lane_detection_node for zero-copy intra-process delivery (lane_input_backend
-        # intra_process); the Logitech publisher just feeds object_detection_node's ordinary
-        # subscription (object_input_backend usb_camera). See perception.launch.py.
+        # intra_process); object_detection_node picks the same frames off that topic as an
+        # ordinary out-of-process subscriber. See perception.launch.py.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage(
                 'perception.launch.py',
-                lane_input_backend='intra_process',
-                object_input_backend='usb_camera')]),
+                lane_input_backend='intra_process')]),
         # interface.launch.py (hyper_interface's Arduino serial bridge) starts alongside
         # behavior since it only needs /velocity + /steering_angle to exist -- late subscriber
         # join works fine with ROS 2 discovery either way. It subscribes to those topics
@@ -136,11 +143,13 @@ def generate_launch_description():
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             stage('behavior.launch.py',
                   mission=LaunchConfiguration('mission'),
-                  waypoint_csv=LaunchConfiguration('waypoint_csv'),
                   # 위와 같은 이유. 이쪽은 nav2_controller.launch.py가 RewrittenYaml로
                   # nav2_controller.yaml의 use_sim_time을 덮어쓰므로 인자만 넘기면 됩니다.
                   use_sim_time='false'),
             stage('interface.launch.py'),
+            # 미션 취소 서비스(mission_manager/cancel)를 부르므로 behavior와 같은
+            # 시점에 띄웁니다. 서비스가 아직 없더라도 정지 자체는 동작합니다.
+            estop,
             mission_panel,
         ]),
     ])

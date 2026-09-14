@@ -1,0 +1,15 @@
+# /usr/lib/udev/rules.d/60-ros-humble-rplidar-ros.rules 무력화용 빈 파일.
+#
+# rplidar_ros(apt: ros-humble-rplidar-ros)가 깔아 놓은 원본은 이렇다:
+#
+#   KERNEL=="ttyUSB*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE:="0666", SYMLINK+="rplidar"
+#
+# CP210x이기만 하면 무조건 /dev/rplidar를 붙인다. 그런데 이 차의 EBIMU USB-UART
+# 어댑터도 같은 CP210x(10c4:ea60)라, 둘을 같이 꽂으면 어댑터에도 /dev/rplidar가
+# 붙고 나중에 열거된 쪽이 이름을 가져간다 -- 부팅마다 라이다와 IMU가 자리를 바꾼다.
+#
+# udev는 같은 파일 이름이 /etc/udev/rules.d와 /usr/lib/udev/rules.d에 둘 다 있으면
+# /etc 쪽만 읽는다. 그래서 이 파일을 같은 이름으로 /etc에 깔아 원본을 가리고,
+# /dev/rplidar는 99-hyper-serial.rules 5)번에서 ATTRS{serial}까지 보고 붙인다.
+#
+# 규칙 없음 -- 주석뿐인 게 의도된 것이다. 지우지 말 것.

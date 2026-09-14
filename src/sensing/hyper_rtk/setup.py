@@ -31,6 +31,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'push_uart2_config = hyper_rtk.push_uart2_config:main',
         ],
     },
 )

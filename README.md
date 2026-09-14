@@ -55,7 +55,7 @@ rosdep install --from-paths src --ignore-src -r -y
 
 ### 5. pip 의존성 설치
 
-`ultralytics`(YOLO, `hyper_object_detection`)와 `bleak`(BLE, `hyper_imu`)는 rosdep으로 해석되지 않는 순수 pip 패키지라 별도로 설치해야 합니다. 저장소 루트의 `requirements.txt`에 정리되어 있습니다:
+`ultralytics`(YOLO, `hyper_object_detection`)는 rosdep으로 해석되지 않는 순수 pip 패키지라 별도로 설치해야 합니다. 저장소 루트의 `requirements.txt`에 정리되어 있습니다:
 
 ```bash
 pip install -r ~/HYPER/requirements.txt
@@ -94,35 +94,70 @@ source ~/.bashrc
 
 ## 센서 설치 (실차)
 
-시뮬레이션만 쓴다면 이 절은 건너뛰어도 됩니다. 실차에서 GPS(RTK), LiDAR, USB 카메라를 쓰려면 아래를 순서대로 진행합니다.
+시뮬레이션만 쓴다면 이 절은 건너뛰어도 됩니다. 실차에서 GPS(RTK), IMU, LiDAR, USB 카메라를 쓰려면 아래를 순서대로 진행합니다.
 
-### GPS (RTK)
+### USB 시리얼 포트 고정 (udev)
 
-`hyper_rtk`(`src/sensing/hyper_rtk`) 패키지가 u-blox GPS 드라이버(`ublox_gps`)와 NTRIP 클라이언트(`ntrip_client`)를 함께 실행해 RTK 보정 위치를 퍼블리시합니다.
+차에는 USB 시리얼 장치가 다섯 물려 있습니다: RTK 수신기 2대(moving-base 헤딩용 base+rover), IMU(EBIMU) USB-UART 어댑터, RPLidar, Arduino 제어 보드. `/dev/ttyUSB*` 번호는 **꽂힌 순서로 정해지므로** 그대로 두면 부팅할 때마다 서로의 포트를 집습니다. 저장소의 `udev/99-hyper-serial.rules`가 다섯 장치에 고정 이름을 붙입니다:
 
-#### 1. GPS 장치 권한 / udev 규칙
+| 심볼릭 링크 | 장치 | 쓰는 곳 |
+|---|---|---|
+| `/dev/tty_ublox_base` | Ardusimple simpleRTK2B (u-blox ZED-F9P), base — 뒤쪽 안테나 | `hyper_rtk/launch/rtk.launch.py` |
+| `/dev/tty_ublox_rover` | Ardusimple simpleRTK2B (u-blox ZED-F9P), rover — 앞쪽 안테나 | `hyper_rtk/launch/rtk.launch.py` |
+| `/dev/tty_ebimu` | EBIMU-9DOFV5 USB-UART 어댑터 (CP210x, USB 시리얼 `HYPER-EBIMU`) | `hyper_ebimu/config/ebimu.yaml` |
+| `/dev/rplidar` | RPLidar (보드에 CP2102 탑재, USB 시리얼 `HYPER-LIDAR`) | `hyper_lidar/config/rplidar_params.yaml` |
+| `/dev/tty_arduino` | Arduino 제어 보드 (CH340) | `hyper_interface/config/parameters.yaml` |
+
+겹치는 칩이 두 쌍 있어서 VID:PID만으로는 갈리지 않습니다.
+
+- **두 RTK 보드**(`1546:01a9`)는 각 보드 Flash에 USB 시리얼 문자열이 이미 기록돼 있어(`HYPER-GNSS-BASE` / `HYPER-GNSS-ROVER`) 규칙이 `ATTRS{serial}`로 바로 갈라냅니다.
+- **EBIMU 어댑터와 RPLidar**는 둘 다 CP210x(`10c4:ea60`)이고, 공장 기본 USB 시리얼이 **양쪽 다 `0001`** 이라 시리얼로도 갈리지 않았습니다. 그래서 RTK 보드와 같은 방식으로 각 CP2102의 EEPROM에 이름을 써 넣었습니다 — 어댑터는 `HYPER-EBIMU`, 라이다는 `HYPER-LIDAR`. 다시 쓰는 방법은 [`udev/cp210x-serial.md`](udev/cp210x-serial.md)에 있습니다.
+
+어느 쪽이든 물리 USB 포트(`KERNELS`)를 뽑아 채워 넣을 필요가 없고, 어느 포트에 꽂아도 링크 이름이 그대로 붙습니다.
+
+`rplidar_ros` 패키지도 `/usr/lib/udev/rules.d/60-ros-humble-rplidar-ros.rules`를 깔아 두는데, 이 규칙은 **CP210x이기만 하면 무조건** `/dev/rplidar`를 붙입니다 — EBIMU 어댑터까지 라이다로 잡습니다. 그래서 같은 이름의 빈 파일(`udev/60-ros-humble-rplidar-ros.rules`)을 `/etc`에 깔아 원본을 가립니다(udev는 같은 파일명이면 `/etc` 쪽만 읽습니다). **두 파일을 반드시 같이 복사하세요.**
 
 ```bash
 sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
-```
-
-launch 파일(`rtk.launch.py`)이 장치를 고정 이름 `/dev/tty_Ardusimple`로 찾으므로, USB 포트 번호가 바뀌어도 안 흔들리도록 udev 규칙을 등록합니다. `/etc/udev/rules.d/99-ardusimple.rules` 생성:
-
-```
-KERNEL=="ttyACM[0-9]*", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK="tty_Ardusimple", GROUP="dialout", MODE="0666"
-```
-
-```bash
+sudo cp ~/HYPER/udev/99-hyper-serial.rules ~/HYPER/udev/60-ros-humble-rplidar-ros.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/tty_ublox_base /dev/tty_ublox_rover /dev/tty_ebimu /dev/rplidar /dev/tty_arduino
 ```
 
-다른 Ardusimple 보드/케이블을 쓴다면 `idVendor`/`idProduct`가 다를 수 있으니, 장치를 연결한 상태에서 아래로 직접 확인 후 값을 맞춰주세요:
+다섯 링크가 다 보이면 끝입니다. 안 보이면 장치의 실제 칩 ID(또는 시리얼 번호)가 규칙과 다른 것이므로, 지금 꽂혀 있는 장치들의 값을 뽑아서 규칙 파일을 고칩니다:
 
 ```bash
-udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct" | head -2
+~/HYPER/udev/show-serial-ids.sh
 ```
 
-#### 2. NTRIP 계정 설정
+EBIMU 어댑터를 다른 것으로 바꿨다면 새 어댑터의 USB 시리얼은 공장 기본값(대개 `0001`)이므로 규칙이 안 잡습니다. [`udev/cp210x-serial.md`](udev/cp210x-serial.md)대로 새 어댑터에 `HYPER-EBIMU`를 써 넣으세요. EEPROM이 잠겨 있어서 못 쓰는 경우에만 두 장치를 같이 꽂고 위 스크립트로 `USB port` 열을 확인해 `KERNELS==`로 가릅니다.
+
+### GPS (RTK) — 듀얼 GNSS moving-base 헤딩
+
+`hyper_rtk`(`src/sensing/hyper_rtk`) 패키지가 u-blox ZED-F9P 보드 2대(base+rover)의 GPS 드라이버(`ublox_gps`)와 NTRIP 클라이언트(`ntrip_client`)를 함께 실행합니다. base가 NTRIP RTK로 절대 위치(`/gps/fix`)를 내고, rover는 base에서 UART2로 받은 보정으로 두 안테나 사이 상대위치를 풀어 절대 헤딩(`imu/heading`)을 낸다 — moving-base RTK 헤딩. 자세한 배선/u-center 설정은 `src/sensing/hyper_rtk/README.md` 참고.
+
+#### 1. 안테나/배선
+
+- 안테나 2개를 차량 세로축에 강체로 고정, 뒤=base·앞=rover (관례)
+- base의 UART2 `TXD2` → rover의 UART2 `RXD2`, `GND` 공통
+- u-center로 base UART2에 RTCM3(1077/1087/1097/1127/1230) + **4072.0**을, rover UART2 input + `UBX-NAV-RELPOSNED`를 켜고 플래시에 저장 (드라이버가 moving-base 경로에서 이 설정을 자동으로 안 밀어줌)
+
+#### 2. GPS 장치 권한 / udev 규칙
+
+위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)에서 규칙을 이미 깔았다면 `/dev/tty_ublox_base`/`/dev/tty_ublox_rover`가 만들어져 있고, `rtk.launch.py`가 그 이름으로 장치를 찾습니다. 확인:
+
+```bash
+ls -l /dev/tty_ublox_base /dev/tty_ublox_rover
+```
+
+두 보드는 idVendor/idProduct가 같으므로 규칙은 보드 Flash에 써 넣은 USB 시리얼 문자열(`HYPER-GNSS-BASE` / `HYPER-GNSS-ROVER`)로 갈라냅니다. 링크가 없으면 시리얼이 안 들어간 것이니 확인하고 다시 써 넣습니다:
+
+```bash
+~/HYPER/udev/ublox-serial.py --list                                # 칩 ID / 현재 시리얼
+~/HYPER/udev/ublox-serial.py /dev/ttyACM0 HYPER-GNSS-ROVER --reset  # 다시 쓰기
+```
+
+#### 3. NTRIP 계정 설정 (base 전용)
 
 `src/sensing/hyper_rtk/config/ntrip_params.yaml`은 NTRIP 캐스터 로그인 정보가 들어있어 `.gitignore` 대상입니다(저장소에는 없음). 없다면 새로 만듭니다:
 
@@ -149,69 +184,71 @@ ntrip_client:
     rtcm_timeout_seconds: 4
 ```
 
-#### 3. 실행
+#### 4. 실행
 
 ```bash
 ros2 launch hyper_rtk rtk.launch.py
 ```
 
-정상 동작하면 `ublox_gps_node`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다.
+정상 동작하면 `ublox_gps_node_base`가 `/gps/fix`(GPS 위치, `hyper_localization`의 `navsat_transform_node`가 구독하는 토픽과 동일)를, `ntrip_client`가 NTRIP 캐스터에서 받은 RTCM 보정 데이터를 퍼블리시합니다. `ublox_gps_node_rover`는 `imu/heading`(`sensor_msgs/Imu`, yaw만 유효)을 냅니다 — `ekf_global`이 이걸 절대 방위로 씁니다(아래 IMU 절 참고).
+
+```bash
+ros2 topic echo /imu/heading                        # 헤딩 (orientation.z/w, yaw만 유효)
+ros2 topic echo /ublox_gps_node_rover/navrelposned  # relPosHeading 원본 확인용
+```
+
+### IMU (EBIMU-9DOFV5)
+
+`hyper_ebimu`(`src/sensing/hyper_ebimu`)가 E2BOX EBIMU-9DOFV5 AHRS 모듈의 UART/ASCII 프로토콜을 직접 파싱해 `/imu`(`sensor_msgs/Imu`, `body_link` 프레임)로 퍼블리시합니다. 모듈에 USB가 없어 USB-UART 어댑터로 물립니다 — 배선표와 센서 설정 명령은 `src/sensing/hyper_ebimu/README.md` 참고.
+
+```bash
+sudo apt install python3-serial     # 또는 pip install pyserial
+ros2 launch hyper_ebimu ebimu.launch.py
+ros2 topic hz /imu                  # 100 Hz 근처 (output_rate_ms=10)
+```
+
+포트는 `config/ebimu.yaml`의 `port`이고 기본값은 udev 규칙이 만드는 `/dev/tty_ebimu`입니다.
+
+**절대 방위(yaw)는 이제 이 IMU가 아니라 위 GPS(RTK) 절의 듀얼 GNSS moving-base 헤딩이 담당합니다**(`dual_ekf_navsat.yaml`의 `ekf_global`, `imu0_config` 인덱스 5 = false / `imu1`(`imu/heading`) 인덱스 5 = true). EBIMU는 roll/pitch(중력 관측)와 자이로 z(연속 odom용)만 여전히 씁니다. 9축 AHRS의 지자기 yaw 자체는 계속 나오므로, GNSS 헤딩 하드웨어가 빠지면 `imu0_config`/`imu1`을 되돌려 폴백으로 쓸 수 있습니다 — 그럴 때는 아래처럼 축 방향을 실차에서 반드시 확인해야 합니다(드라이버는 센서 body frame을 재매핑 없이 내보내므로 REP-103 ENU(0=East, 반시계 +)와 어긋나면 map heading이 통째로 돌아갑니다):
+
+```bash
+ros2 topic echo /imu --field angular_velocity   # 반시계로 돌릴 때 z > 0
+```
 
 ### LiDAR
 
 `hyper_lidar`(`src/sensing/hyper_lidar`) 패키지가 실차에 연결된 RPLidar 등 2D LiDAR 드라이버(`rplidar_ros`, rosdep으로 설치됨)를 실행합니다. 시뮬레이션에서는 사용하지 않으며, Gazebo가 `/scan`을 직접 발행합니다.
 
-장치 포트, 보드레이트, 프레임 이름은 `config/rplidar_params.yaml`에서 실제 장비에 맞게 설정합니다 (기본값은 `/dev/rplidar` — 포트가 바뀌어도 흔들리지 않도록 GPS/카메라와 마찬가지로 idVendor/idProduct 기준 udev 심볼릭 링크를 걸어두는 것을 권장합니다).
+장치 포트, 보드레이트, 프레임 이름은 `config/rplidar_params.yaml`에서 실제 장비에 맞게 설정합니다. 포트 기본값 `/dev/rplidar`는 위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)의 udev 규칙이 만듭니다 — 라이다 보드의 CP2102는 EBIMU 어댑터와 VID:PID가 같으므로 `/dev/ttyUSB*` 번호로 잡으면 안 됩니다.
 
 ```bash
 ros2 launch hyper_lidar rplidar.launch.py
 ```
 
-### USB 카메라
+### USB 카메라 (Logitech C920)
 
-전방 ELP USB 카메라(ELP-USBGS1200P01-KL170, global shutter)는 `hyper_camera`의 `ElpCameraPublisherNode` 컴포넌트(실행 파일 `elp_camera_publisher_node`)가 `/dev/video_elp`를 열어 MJPEG을 캡처·디코드하고 자체적으로 rectify까지 처리한 뒤 `image_raw`로 발행합니다. `hyper_lane_detection`이 `input_backend:=intra_process`일 때 이 컴포넌트를 `lane_detection` 컴포넌트와 같은 `ComposableNodeContainer` 프로세스에 함께 로드해서, 프레임이 직렬화 없이 포인터로 바로 넘어갑니다(zero-copy intra-process) — 실차 전체/단계별 launch(`real.launch.py` → `sensors.launch.py` + `perception.launch.py`)는 기본적으로 이 경로를 씁니다.
+차량 카메라는 C920 **한 대**이고, 차선 인식(BEV)과 객체 인식(YOLO)이 같이 씁니다. `hyper_camera`의 `LogitechCameraPublisherNode`(C++ 컴포넌트, 실행 파일 `logitech_camera_publisher_node`)가 `/dev/video_logitech`를 열어 MJPEG을 640x360@30으로 캡처·디코드하고, rectify 없이 원본 프레임을 그대로 `image_raw`로 발행합니다 — 보정 파일이 없고(일반 약 70도 렌즈), `hyper_lane_detection`의 BEV 호모그래피가 이 카메라를 이상적인 핀홀로 모델링합니다(`config/bev_real.yaml`).
 
-`hyper_camera`(`src/sensing/hyper_camera`) 패키지는 이 노드와 그 보정 파일(`config/ELP-USBGS1200P01-KL170.yaml`)의 배포처입니다. `usb_cam`은 이 저장소에서 완전히 제거되었습니다.
-
-#### 1. 장치 udev 규칙
-
-`video_device`가 `/dev/videoN` 고정 번호를 참조하는데, 다른 UVC 장치(내장/외장 웹캠 등)가 함께 연결되어 있으면 부팅·재연결 시 번호가 바뀔 수 있고, 최악의 경우 엉뚱한 카메라를 열어 ELP 캘리브레이션이 잘못된 영상에 적용됩니다. GPS와 동일하게 idVendor/idProduct 기준 udev 심볼릭 링크로 고정합니다. `/etc/udev/rules.d/99-elp-camera.rules` 생성:
-
-```
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="32e4", ATTRS{idProduct}=="0234", ATTR{index}=="0", SYMLINK+="video_elp"
-```
-
-```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
-```
-
-다른 카메라 모듈을 쓴다면 idVendor/idProduct가 다를 수 있으니, 장치를 연결한 상태에서 아래로 직접 확인 후 값을 맞춰주세요:
-
-```bash
-udevadm info -a -n /dev/video2 | grep -E "idVendor|idProduct" | head -2
-```
-
-UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(`ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, RTK의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
-
-규칙 적용 후 `hyper_camera`의 `config/params_elp.yaml`과 `ElpCameraPublisherNode`(파라미터 `video_device`) 둘 다 기본값으로 `/dev/video_elp`를 사용하므로, USB 포트가 바뀌어도 흔들리지 않습니다.
-
-### Logitech C920 (객체 인식용)
-
-객체 인식(YOLO)용 카메라로, `hyper_camera`의 `logitech_camera_publisher_node`가 `/dev/video_logitech`를 직접 열어(MJPEG 캡처) rectify 없이 원본 프레임을 그대로 `image_raw`로 발행합니다 — 별도 캘리브레이션 파일이 없습니다. ELP와 마찬가지로 `usb_cam`을 거치지 않지만, rclpy에는 rclcpp의 intra-process 통신에 해당하는 zero-copy 경로가 없으므로 이 쪽은 일반 ROS 토픽으로 `object_detection_node`에 연결됩니다 (`object_input_backend:=usb_camera`). 실차 전체 launch(`real.launch.py`)는 기본적으로 이 경로를 씁니다; `perception.launch.py` 자체의 기본값은 `ros_raw`(ros_gz_bridge 구독, 시뮬레이션/롤백용)입니다.
+`hyper_lane_detection`이 `input_backend:=intra_process`일 때 이 컴포넌트가 `lane_detection`과 같은 `ComposableNodeContainer`에 함께 로드되어 프레임이 직렬화 없이 포인터로 넘어갑니다(zero-copy intra-process). 같은 발행이 DDS로도 나가므로 별도 프로세스인 `object_detection_node`(rclpy — zero-copy 경로 없음)가 동일한 프레임을 일반 토픽으로 받습니다. 실차 launch(`real.launch.py` → `perception.launch.py`)는 기본적으로 이 경로를 쓰고, `perception.launch.py` 자체의 기본값은 `ros_raw`(ros_gz_bridge 구독, 시뮬레이션/롤백용)입니다. `usb_cam`은 이 저장소에서 완전히 제거되었습니다.
 
 #### 1. 장치 udev 규칙
 
-ELP/GPS와 동일하게 idVendor/idProduct 기준 udev 심볼릭 링크로 고정합니다. `/etc/udev/rules.d/99-logitech-camera.rules` 생성:
-
-```
-SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="08e5", ATTR{index}=="0", SYMLINK+="video_logitech"
-```
+`/dev/videoN` 번호는 다른 UVC 장치(내장/외장 웹캠 등)가 함께 물려 있으면 부팅·재연결 때마다 바뀌므로, 카메라도 시리얼 장치와 같은 규칙 파일에서 심볼릭 링크로 고정합니다 — 위 [USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요)에서 `udev/99-hyper-serial.rules`를 이미 깔았다면 `/dev/video_logitech`가 만들어져 있습니다:
 
 ```bash
-sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/video_logitech
 ```
 
-다른 Logitech 모델을 쓴다면 idVendor/idProduct가 다를 수 있으니 `lsusb`와 `udevadm info -a -n /dev/videoN | grep -E "idVendor|idProduct"`로 직접 확인 후 값을 맞춰주세요. 규칙 적용 후 `object_detection_node`의 `video_device` 파라미터가 기본값으로 `/dev/video_logitech`를 사용하므로 USB 포트가 바뀌어도 흔들리지 않습니다. 해상도·프레임레이트는 `image_width`/`image_height`/`framerate` 파라미터로 조정합니다 (기본값은 `hyper_camera`의 `config/params_logitech.yaml`과 동일).
+UVC 카메라는 보통 `/dev/videoN`을 두 개(캡처 노드 + 메타데이터 노드) 만드는데, `v4l2-ctl --list-devices`로 카메라 이름 아래 첫 번째로 뜨는 노드가 캡처 노드입니다(규칙의 `ATTR{index}=="0"`). video4linux 장치는 로그인 세션에 대해 보통 자동으로 접근 권한(ACL)이 부여되므로, 시리얼 장치의 `dialout` 그룹과 달리 별도 그룹 설정은 필요 없습니다.
+
+다른 카메라 모델로 바꾸면 idVendor/idProduct가 달라지니 확인해서 규칙을 고칩니다:
+
+```bash
+lsusb
+udevadm info -a -n /dev/video0 | grep -E "idVendor|idProduct" | head -2
+```
+
+해상도·프레임레이트는 노드의 `image_width`/`image_height`/`framerate` 파라미터로 조정합니다(기본값은 `hyper_camera`의 `config/params_logitech.yaml`과 동일). **캡처 해상도를 바꾸면 `hyper_lane_detection/config/bev_real.yaml`도 같이 고쳐야 합니다** — 가로 폭에서 초점거리를, 세로 높이에서 BEV 근거리 경계를 유도하기 때문입니다.
 
 ## 차량 제어 보드 설치 (실차)
 
@@ -224,10 +261,10 @@ sudo usermod -aG dialout $USER   # 적용하려면 재로그인 필요
 sudo apt install python3-serial  # 또는 pip install pyserial
 ```
 
-Arduino를 연결한 상태에서 포트를 확인합니다. GPS/카메라처럼 고정 심볼릭 링크를 만들어도 되지만, USB 시리얼 장치가 이거 하나뿐이면 `ls /dev/serial/by-id/`로 안정적인 이름을 바로 쓸 수 있습니다:
+포트는 udev 규칙이 만드는 `/dev/tty_arduino`입니다([USB 시리얼 포트 고정](#usb-시리얼-포트-고정-udev--먼저-하세요) 참고). 이 보드는 CH340 칩이라 `/dev/ttyUSB*`로 잡히는데, IMU 어댑터(CP210x)도 같은 `/dev/ttyUSB*` 번호를 나눠 쓰므로 번호로 잡으면 안 됩니다:
 
 ```bash
-ls /dev/serial/by-id/
+ls -l /dev/tty_arduino
 ```
 
 ### 2. 펌웨어 업로드
@@ -237,7 +274,7 @@ Arduino IDE로 `src/interface/hyper_interface/arduino/hyper_motor_interface/hype
 ### 3. 실행
 
 ```bash
-ros2 launch hyper_interface interface.launch.py serial_port:=/dev/ttyACM0
+ros2 launch hyper_interface interface.launch.py     # 기본 포트 /dev/tty_arduino
 ```
 
 `real.launch.py`가 기본으로 이걸 포함하므로(behavior 단계와 함께 시작) 보통 따로 실행할 필요는 없습니다. `hyper_control`/`hyper_planner`의 `max_velocity`/`max_steering_angle`과 `hyper_interface/config/parameters.yaml`의 동일 파라미터가 어긋나면 Arduino가 튜닝 범위 밖의 명령을 받을 수 있으니 값을 맞춰둡니다.
@@ -262,7 +299,7 @@ ros2 launch hyper_launch simulation.launch.py
 ros2 launch hyper_launch real.launch.py
 ```
 
-`sim` 대신 `sensors`(WitMotion IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라 둘(전방 ELP, 객체 인식용 Logitech C920)은 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
+`sim` 대신 `sensors`(EBIMU-9DOFV5 IMU + RPLidar + RTK)가 먼저 뜨고, 이후 `odometry`/`perception`/`behavior`는 시뮬레이션과 동일하게 staggered로 이어집니다. 카메라(Logitech C920)는 `sensors`가 아니라 `perception` 단계에서 열리므로 `sensors.launch.py`에는 포함되지 않습니다.
 
 스택을 끄려면 `Ctrl-C` 한 번으로 전체 트리가 종료됩니다.
 
@@ -282,16 +319,17 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 센서 | 패키지 | 최종 토픽 |
 |------|--------|-----------|
-| WitMotion WT901BLE | `witmotion_ros2` | `/imu` (EKF) |
+| E2BOX EBIMU-9DOFV5 | `hyper_ebimu` | `/imu` (EKF roll/pitch + gyro) |
 | RPLidar | `hyper_lidar` | `/scan` |
-| u-blox + NTRIP | `hyper_rtk` | `/gps/fix` |
+| u-blox base + NTRIP | `hyper_rtk` | `/gps/fix` |
+| u-blox rover (moving-base) | `hyper_rtk` | `/imu/heading` (EKF 절대 yaw) |
 
-카메라는 둘 다 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 전방 ELP와 `lane_detection`을 함께 로드하고, 객체 인식용 Logitech C920만 별도 프로세스로 띄웁니다:
+카메라는 여기 포함되지 않습니다 — `perception.launch.py`가 `lane_detection_container` 하나에 카메라 드라이버와 `lane_detection`을 함께 로드하고, `object_detection_node`는 같은 발행을 별도 프로세스에서 구독합니다. 카메라는 한 대이고 두 인지 노드가 같은 `/camera/image_raw`를 먹습니다:
 
-| 카메라 | 노드 | 토픽 | 전달 방식 |
+| 소비자 | 노드 | 토픽 | 전달 방식 |
 |--------|------|------|-----------|
-| 전방 ELP | `hyper_camera`의 `ElpCameraPublisherNode` (자체 rectify) | `/camera/image_raw` | intra-process (zero-copy) |
-| 객체 인식 Logitech C920 | `hyper_camera`의 `logitech_camera_publisher_node` (rectify 없음) | `/camera_object/image_raw` | 일반 토픽 (rclpy에는 zero-copy 경로 없음) |
+| 차선 인식 | `hyper_camera`의 `LogitechCameraPublisherNode` + `lane_detection` (한 컨테이너) | `/camera/image_raw` | intra-process (zero-copy) |
+| 객체 인식 | `hyper_object_detection`의 `object_detection_node` (별도 프로세스) | `/camera/image_raw` | 일반 토픽 (rclpy에는 zero-copy 경로 없음) |
 
 ## 패키지 구성
 
@@ -304,9 +342,9 @@ ros2 launch hyper_launch behavior.launch.py
 | `hyper_localization` | dual EKF + navsat_transform (robot_localization 래핑, GPS 융합 오도메트리) |
 | `hyper_lane_detection` | 카메라 영상 기반 차선/정지선 감지 + OpenCV 디버그 대시보드 |
 | `hyper_object_detection` | YOLO 기반 객체/신호등 감지 + OpenCV 디버그 대시보드 |
-| `hyper_rtk` | u-blox GPS 드라이버 + NTRIP 클라이언트 실행 (RTK 보정 위치) |
+| `hyper_rtk` | u-blox GPS 드라이버 두 대(moving base) + NTRIP 클라이언트 실행 (RTK 보정 위치 + 절대 방위) |
 | `hyper_lidar` | 실차 RPLidar 등 2D LiDAR 드라이버 실행 (시뮬레이션에서는 미사용) |
-| `hyper_camera` | 실차 ELP/Logitech USB 카메라 드라이버 노드(`ElpCameraPublisherNode` C++ 컴포넌트, `logitech_camera_publisher_node` rclpy 노드) + 설정 파일(보정 파일 + 참고용 파라미터 yaml) 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
+| `hyper_camera` | 실차 Logitech C920 USB 카메라 드라이버 노드(`LogitechCameraPublisherNode` C++ 컴포넌트) + 참고용 파라미터 yaml 배포처 — `usb_cam`은 이 저장소에서 완전히 제거됨 |
 | `hyper_interface` | 실차 ROS 2 ↔ Arduino 시리얼 브릿지 (`arduino_interface_node`) — `/velocity`, `/steering_angle`을 구독해 Arduino(`hyper_motor_interface.ino`)로 전달, BTS7960/L298N 모터드라이버를 닫힌 루프로 구동 |
 ---
 
@@ -314,19 +352,17 @@ ros2 launch hyper_launch behavior.launch.py
 
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
-| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → hyper_lane_detection (실차) | 전방 카메라 영상 (차선 인식이 구독). 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `ElpCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서는 같은 `ComposableNodeContainer` 안에서 zero-copy로 전달되므로 이 토픽이 DDS까지 나가지 않음 |
-| `/camera_object/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → object_detection_node (실차) | 객체 인식용 카메라 영상 (`object_detection_node`가 항상 구독). 시뮬레이션은 ros_gz_bridge, 실차 기본 경로(`object_input_backend:=usb_camera`)는 `hyper_camera`의 `logitech_camera_publisher_node`가 일반 토픽으로 발행 |
+| `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → lane_detection + object_detection_node (실차) | 전방 카메라 영상 — 차량의 유일한 카메라이고 차선·객체 인식이 같이 구독합니다. 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `LogitechCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서 `lane_detection`은 같은 `ComposableNodeContainer` 안에서 zero-copy로 받고, 같은 발행이 DDS로도 나가 별도 프로세스인 `object_detection_node`가 일반 구독으로 받습니다 |
 | `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |
-| `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `none` |
+| `/perception/sign` | `std_msgs/String` | hyper_object_detection → | `red` / `green` / `left_arrow` / `ban` / `allow` / `allow_left` / `allow_right` / `none` |
 | `/steering_angle` | `std_msgs/Float64` | → vehicle_controller_node (시뮬레이션) / arduino_interface_node (실차) | 목표 조향각 [rad] (teleop / planner / waypoint_tracker가 발행) |
 | `/velocity` | `std_msgs/Float64` | → vehicle_controller_node (시뮬레이션) / arduino_interface_node (실차) | 목표 속도 [m/s] (teleop / planner / waypoint_tracker가 발행) |
 | `/forward_position_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 앞바퀴 조향각 (Ackermann 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
 | `/forward_velocity_controller/commands` | `std_msgs/Float64MultiArray` | vehicle_controller_node → ros2_control | 좌우 뒷바퀴 각속도 (차동 변환, 시뮬레이션 전용 — Gazebo의 `gz_ros2_control` 플러그인이 소비) |
 | `/velocity_actual`, `/steering_angle_actual` | `std_msgs/Float64` | arduino_interface_node → | Arduino의 인코더/조향각 센서로 측정한 실제 값 (실차 전용, 닫힌 루프 피드백) |
 | `/odom` | `nav_msgs/Odometry` | Gazebo → ROS (시뮬레이션) / arduino_interface_node → ROS (실차, bicycle-model dead reckoning) | 오도메트리 |
-| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `witmotion_ros2` → ROS (실차, WT901BLE) | IMU |
-| `/imu/raw` | `sensor_msgs/Imu` | `witmotion_ros2` → `imu_enu_relay` | 실차 전용. 드라이버 원본(나침반식 yaw). relay가 ENU로 고쳐 `/imu`로 다시 발행 |
-| `/imu/heading` | `sensor_msgs/Imu` | `gps_heading` → `ekf_global` | yaw 전용 절대 방위. 정지 중에는 `datums.yaml`의 `initial_heading_deg`, 주행 중에는 GPS 진행방향. 지자기 yaw는 어느 EKF도 안 쓰며, 이 토픽이 유일한 방위 기준 |
+| `/imu` | `sensor_msgs/Imu` | Gazebo → ROS (시뮬레이션) / `hyper_ebimu` → ROS (실차, EBIMU-9DOFV5) | IMU. roll/pitch(중력 관측)와 자이로 z를 `ekf_global`/`ekf_local`이 씀. yaw는 더 이상 절대 방위로 쓰지 않음(`imu0_config` 인덱스 5 = false) — 아래 `/imu/heading` 참고. 실차 축이 REP-103 ENU와 어긋나면 `odometry.launch.py`의 `imu_enu_relay` 주석을 참고해 보정 |
+| `/imu/heading` | `sensor_msgs/Imu` (yaw만 유효) | `ublox_gps_node_rover`(`hyper_rtk`) → `ekf_global` | 듀얼 GNSS moving-base RTK 헤딩(NAV-RELPOSNED9의 relPosHeading을 드라이버가 직접 ENU로 변환). `ekf_global`의 절대 방위 기준(`imu1`, 인덱스 5 = true). 정지 상태에서도 유효, 지자기 교란 영향 없음. EBIMU 지자기 yaw로 되돌리려면 `dual_ekf_navsat.yaml`에서 `imu0_config` 인덱스 5를 true로, `imu1` 블록을 지운다 |

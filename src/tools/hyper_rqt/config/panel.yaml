@@ -47,10 +47,21 @@ groups:
         service: /mission_manager/start
         style: go
         tooltip: 첫 스텝부터 미션 주행을 시작합니다 (auto_start=false라 이걸 눌러야 출발).
+      - label: Pause
+        service: /mission_manager/pause
+        style: warn
+        tooltip: |
+          미션을 지금 스텝의 지금 자리에 세워 둡니다. 취소가 아니라 일시정지라서
+          스텝도, 그 스텝에 남은 시간도 그대로 있습니다 (Resume으로 이어서 갑니다).
+          조이스틱의 정지 버튼이 부르는 것과 같은 서비스입니다.
+      - label: Resume
+        service: /mission_manager/resume
+        style: go
+        tooltip: 일시정지를 풀고 멈춘 자리에서 이어 갑니다 (경로는 현재 위치에서 다시 잘립니다).
       - label: Cancel
         service: /mission_manager/cancel
         style: stop
-        tooltip: 실행 중인 골을 취소하고 미션을 멈춥니다.
+        tooltip: 실행 중인 골을 취소하고 미션을 멈춥니다 (스텝 처음이 아니라 그 스텝에서 대기).
       - label: Skip step
         service: /mission_manager/skip
         style: warn
@@ -127,15 +138,36 @@ groups:
           맞바꿉니다. 지금 시뮬레이터에 있는 pose를 읽어 교환하므로, GUI에서
           표지판을 옮겨 놓았어도 그 자리 기준으로 바뀝니다. 두 번 누르면 원위치.
 
-  - name: 카메라 캡처 (image_saver_service)
+  - name: 카메라 캡처 / 데이터 수집 (카메라 1대)
     buttons:
-      - label: Save frame
+      - label: 사진 한 장
         service: /image_saver_service/save
         style: go
         tooltip: |
-          지금 /camera_object/image_raw 의 최신 프레임을 ~/Pictures/object_detection
-          에 PNG로 저장합니다. 파일 이름은 objdet_날짜_시각.png 로 자동으로 붙고,
-          같은 초에 여러 번 눌러도 _001, _002 … 가 붙어 겹치지 않습니다.
+          지금 /camera/image_raw 의 최신 프레임을 images/ 폴더에 PNG 한 장으로
+          저장합니다. 이름은 shot_날짜_시각.png 로 자동으로 붙고, 같은 초에 여러 번
+          눌러도 _001, _002 … 가 붙어 겹치지 않습니다. 저장된 절대 경로는 아래
+          로그에 그대로 찍힙니다.
+      - label: REC 시작
+        service: /lane_detection/image_saving
+        type: std_srvs/srv/SetBool
+        request: {data: true}
+        style: go
+        tooltip: |
+          카메라 원본 프레임을 2 fps로 계속 저장하기 시작합니다 (BEV도 YOLO를 그린
+          그림도 아닌 입력 원본입니다 -- 학습 데이터로 쓰려는 것이니까요).
+          차량에 카메라가 하나뿐이라 lane_detection 쪽에서만 저장합니다.
+          object_detection이 보는 프레임과 같은 프레임입니다.
+          저장 위치는 위 '사진 한 장'과 같은 images/ 폴더이고 이름만 rec_날짜_시각_밀리초
+          .png 로 다릅니다(lane_detection의 image_save_dir 파라미터). 상대 경로라
+          런치를 실행한 작업 디렉터리 기준으로 풀리고, 실제 절대 경로는 누른 뒤 아래
+          로그에 찍힙니다.
+      - label: REC 정지
+        service: /lane_detection/image_saving
+        type: std_srvs/srv/SetBool
+        request: {data: false}
+        style: stop
+        tooltip: 프레임 저장을 멈춥니다. 이미 꺼져 있어도 눌러서 문제 없습니다.
 
 # 서비스를 새로 만들면 위와 같은 그룹을 하나 더 적으면 됩니다. 코드는 건드리지
 # 않습니다.

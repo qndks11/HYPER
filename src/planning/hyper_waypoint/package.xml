@@ -13,7 +13,7 @@
   <depend>diagnostic_msgs</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>python3-pyqt5</exec_depend>
+  <!-- record.launch.py가 녹화 조작판으로 이 패키지의 노드를 띄웁니다. -->
+  <exec_depend>hyper_waypoint_studio</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

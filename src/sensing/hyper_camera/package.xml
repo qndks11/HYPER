@@ -4,30 +4,23 @@
   <name>hyper_camera</name>
   <version>0.0.0</version>
   <description>
-    USB camera driver nodes for HYPER's two physical USB cameras: the front ELP
-    (rectified, C++ rclcpp component) and the Logitech C920 used for object
-    detection (Python node). Each publishes a plain sensor_msgs/Image topic
-    instead of the consumer node opening the device itself, so lane_detection
-    can load the ELP publisher into the same component container for
-    zero-copy intra-process delivery. Also the distribution point for every
-    real camera's calibration/config files.
+    USB camera driver node for HYPER's one physical camera, the Logitech C920,
+    as a C++ rclcpp component. It publishes a plain sensor_msgs/Image topic
+    instead of each consumer opening the device itself, so lane_detection can
+    load it into the same component container for zero-copy intra-process
+    delivery while object_detection_node subscribes to the same frames over
+    DDS. Also the distribution point for the camera's config files.
   </description>
   <maintainer email="qndks11@gmail.com">kim</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
-  <depend>ament_index_cpp</depend>
-  <depend>camera_calibration_parsers</depend>
   <depend>libopencv-dev</depend>
-
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>python3-opencv</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

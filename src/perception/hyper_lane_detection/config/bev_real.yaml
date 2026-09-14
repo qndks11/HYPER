@@ -1,54 +1,37 @@
-# Bird's-eye-view geometry for the REAL vehicle's front camera (input_backend:=intra_process).
+# Bird's-eye-view geometry for the REAL vehicle's camera (input_backend:=intra_process).
 #
-# The node's built-in defaults describe the *simulated* camera, so this file exists to override
-# the one thing that genuinely differs: the lens. Everything else -- the ground region and the
-# metric scale -- is deliberately left at the sim's values, so the BEV raster has identical
-# geometry in sim and on the car and the detectors' pixel-denominated constants (LaneDetector's
+# The vehicle carries one camera -- a Logitech C920 -- and it feeds both this node and
+# object_detection_node. The node's built-in defaults already describe that same camera as the
+# simulator renders it, so this file overrides exactly one field: the height above the ground
+# plane. Everything else (the 70 deg lens, the mount pitch and offset, the ground region and the
+# metric scale) is deliberately identical to the sim's, so the BEV raster has the same geometry
+# in sim and on the car and the detectors' pixel-denominated constants (LaneDetector's
 # kChainStepRadius, StoplineDetector's kMinStoplineAreaPx) keep the same physical meaning in both.
+#
+# There is no fx/fy/cx/cy block here any more. The ELP fisheye this camera replaced needed one --
+# a rectified fisheye has fx != fy and a principal point far off center, and its numbers had to be
+# copied by hand out of its calibration file. The C920 is a normal ~70 deg lens with no
+# calibration file in this repo and no rectification step in front of it (see hyper_camera's
+# LogitechCameraPublisherNode), so it is modelled as an ideal centered pinhole: the node derives
+# fx = (width/2)/tan(hfov/2) from bev.horizontal_fov and the incoming frame's own size, which is
+# also exactly what Gazebo renders. Leaving bev.fx at 0 is what selects that path.
 #
 # See GroundProjection (include/hyper_lane_detection/ground_projection.hpp) for what these mean
 # and how the homography is derived from them.
 /**:
   ros__parameters:
     bev:
-      # Rectified intrinsics of the ELP front camera, derived from the leading 3x3 block of the
-      # projection_matrix in hyper_camera/config/ELP-USBGS1200P01-KL170.yaml -- which is exactly
-      # the camera matrix ElpCameraCapture remaps every frame into (cv::fisheye::
-      # initUndistortRectifyMap with P's 3x3 as newK), so it is the model that describes the
-      # pixels this node actually receives.
+      # 2026-08-30 실측 (지면 -> 광학중심 높이). 이 값만 시뮬레이션과 다릅니다: 시뮬레이션의
+      # body_link는 지면에서 0.3 m 떠 있고(wheel_radius 0.2) 실차의 라이드 하이트는 0.171 m라,
+      # 같은 마운트인데도 지면 기준 높이가 1.412 m(sim) vs 1.283 m(실차)로 갈립니다.
       #
-      # !! Scaled by 0.5. The calibration file is measured at 1280x720, but the camera is now
-      # captured at 640x360 to save power (ElpCameraPublisherNode's image_width/image_height),
-      # and ElpCameraCapture rescales K/P by the capture/calibration ratio before building its
-      # rectify map. These four numbers describe the pixels this node receives, so they carry the
-      # same 0.5. If you ever change the capture resolution, rescale these by the same factor --
-      # a stale copy here silently mis-scales every distance the BEV reports.
-      #
-      # These must be given explicitly rather than as a horizontal_fov, because neither
-      # assumption behind the FOV shortcut holds for this lens: fx != fy, and the principal point
-      # (281.7, 184.5) is nowhere near the image center (320, 180). Setting fx > 0 makes these
-      # win over bev.horizontal_fov.
-      fx: 62.41103050
-      fy: 62.39412225
-      cx: 281.71746988
-      cy: 184.49891651
-
-      # 2026-08-30 실측 반영 (지면 -> 광학중심 높이, 하향각 직접 측정).
-      #
-      # camera_longitudinal_offset은 직접 잰 값이 아니라 변환값입니다: 실측은 "차량 앞단
-      # (범퍼)에서 카메라까지 뒤로 간 거리"(= hyper_control/parameters.yaml의 camera_setback
-      # 정의와 동일, 실측 0.64 m)이고, 이 필드는 body_link 원점 기준 전방 거리라 아래 식으로
-      # 변환했습니다 (body_length는 실측 1.33 m, camera_box_size는 아직 실측 전 placeholder
-      # 0.05 m -- 나중에 하우징 크기를 실측하면 이 계산도 다시 해야 합니다):
+      # 나머지 외부 파라미터는 노드 기본값과 같아서 여기 다시 적지 않습니다 -- 참고로 그 값들은
+      # camera_pitch 0.087 rad(실측, 약 5도 하향)이고, camera_longitudinal_offset 0.113 m는
+      # 직접 잰 값이 아니라 변환값입니다: 실측은 "차량 앞단(범퍼)에서 카메라까지 뒤로 간
+      # 거리"(= hyper_control/parameters.yaml의 camera_setback 정의와 동일, 실측 0.527 m)이고,
+      # 노드가 쓰는 필드는 body_link 원점 기준 전방 거리라 아래 식으로 변환했습니다
+      # (body_length 실측 1.33 m, camera_box_size는 아직 실측 전 placeholder 0.05 m --
+      # 나중에 하우징 크기를 실측하면 이 계산도 다시 해야 합니다):
       #   offset = body_length/2 - camera_box_size/2 - camera_setback
-      #          = 1.33/2 - 0.05/2 - 0.64 = 0.0 m
-      camera_height: 1.27             # [m] optical center above the ground (실측)
-      camera_pitch: 0.192             # [rad] downward tilt (실측, 약 11도)
-      camera_longitudinal_offset: 0.0   # [m] ahead of body_link's origin (위 변환식 참고)
-
-      # Ground patch to render, in meters ahead of / either side of body_link, and the scale to
-      # render it at. Same values the sim front camera uses -- see this file's header.
-      near: 0.3
-      far: 7.6
-      half_width: 9.0
-      meters_per_pixel: 0.028125
+      #          = 1.33/2 - 0.05/2 - 0.527 = 0.113 m
+      camera_height: 1.283            # [m] optical center above the ground (실측)

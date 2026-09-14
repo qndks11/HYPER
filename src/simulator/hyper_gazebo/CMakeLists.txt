@@ -28,6 +28,7 @@ install(PROGRAMS
   scripts/model_service.py
   scripts/teleport_service.py
   scripts/lane_sign_service.py
+  scripts/sim_heading.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

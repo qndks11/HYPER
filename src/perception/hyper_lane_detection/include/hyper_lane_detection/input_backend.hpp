@@ -14,13 +14,14 @@ namespace hyper_lane_detection
 enum class InputBackend
 {
   /// Real vehicle: plain sensor_msgs/Image subscription, same as kRosRaw, but fed by
-  /// hyper_camera's ElpCameraPublisherNode component loaded into the same
+  /// hyper_camera's LogitechCameraPublisherNode component loaded into the same
   /// ComposableNodeContainer as this node -- rclcpp's intra-process manager hands the frame
-  /// straight to the subscription callback instead of serializing it over the topic. Selects the
-  /// real-ELP RoiConfig (see lane_detection_node.cpp).
+  /// straight to the subscription callback instead of serializing it over the topic. That same
+  /// publish still goes out over DDS, which is how object_detection_node -- a separate rclpy
+  /// process -- gets the very same frames off the very same camera.
   kIntraProcess,
   /// Gazebo simulation: plain sensor_msgs/Image subscription on the raw topic, fed by
-  /// ros_gz_bridge. Selects the sim-camera RoiConfig.
+  /// ros_gz_bridge. No camera driver is launched at all.
   kRosRaw,
 };
 

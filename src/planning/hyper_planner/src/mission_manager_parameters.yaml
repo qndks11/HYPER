@@ -19,11 +19,14 @@ mission_manager:
       일부러 not_empty 검증을 걸지 않았습니다 -- 비어 있으면 load_mission이 훨씬 친절한
       메시지를 남기고, 노드는 살아남아 launch 로그에서 이유를 볼 수 있습니다.
 
-  waypoint_csv:
+  waypoints_dir:
     type: string
     default_value: ""
     read_only: true
-    description: "hyper_waypoint가 녹화한 코스 CSV 경로. 시작 시 한 번만 읽습니다."
+    description: |
+      mission.yaml에 상대 경로로 적힌 CSV(courses.<이름>.csv)를 푸는 기준 디렉터리.
+      보통 hyper_waypoint/waypoints이고, mission.launch.py가 채웁니다. 어느 코스를
+      달릴지는 이 파라미터가 아니라 미션 파일의 courses:가 정합니다.
 
   frame_id:
     type: string
@@ -79,7 +82,7 @@ mission_manager:
 
   controller_id:
     type: string
-    default_value: "FollowPath"
+    default_value: "MPPI"
     read_only: true
     description: "mission.yaml의 drive 스텝이 controller를 안 적었을 때 쓰는 기본값. 로드 시점에 각 스텝으로 구워집니다."
     validation:
@@ -282,7 +285,7 @@ mission_manager:
     type: double
     default_value: 1.0
     description: |
-      nav2_controller.yaml의 FollowPath.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
+      nav2_controller.yaml의 MPPI.vx_max와 같아야 합니다. MPPI의 setSpeedLimit은
       ratio = speed_limit / vx_max로 vx_max/vx_min/wz를 한꺼번에 곱하므로, vx_max보다 큰
       값을 실어 보내면 설정한 vx_max를 오히려 올려 버립니다. 그래서 여기서 잘라 보내고,
       잘릴 만큼 빠른 구간에서는 아예 제한을 해제(0.0)합니다.
@@ -298,3 +301,97 @@ mission_manager:
       차가 정지선을 그냥 지나갑니다.
     validation:
       gt<>: [0.0]
+
+  # --------------------------------------------------------------- '~/goto_step'의 인자
+  #
+  # 인자 없는 Trigger 서비스에 인자를 주는 방법이 이 스택의 관례입니다 --
+  # set_parameters로 값을 밀어 넣고 Trigger를 부릅니다(teleport_service의 label,
+  # model_service의 모델 이름, hyper_rqt 패널의 select가 전부 같은 방식입니다).
+  #
+  # 그래서 이 둘은 read_only가 아닙니다. read_only: true는 "런타임에 바꿔도 소용없다"는
+  # 뜻이고, 여기서는 런타임에 바꾸는 것이 곧 사용법입니다.
+  step_index:
+    type: int
+    default_value: -1
+    description: |
+      '~/goto_step'이 고를 스텝의 인덱스(0부터). -1 = 미설정.
+      step_label이 비어 있을 때만 씁니다.
+
+  step_label:
+    type: string
+    default_value: ""
+    description: |
+      '~/goto_step'이 고를 drive 스텝의 until 라벨. 비어 있지 않으면 step_index보다
+      우선합니다 -- 스텝을 넣고 빼면 인덱스는 밀리지만 라벨은 그대로이기 때문입니다.
+      같은 라벨을 여러 drive 스텝이 쓰면 가장 앞선 것을 고릅니다.
+
+  # ------------------------------------------------- 콘 판정 (branch의 select_by: clearance)
+  #
+  # 주차 갈림길에서 "어느 칸 입구에 콘이 서 있는가"를 로컬 코스트맵으로 봅니다. 콘 자리는
+  # 미션 파일이 갈래마다 적어 주고(cases의 cone: {x, y}), 여기 있는 값은 어떻게 셀지입니다.
+  # 자세한 규칙은 mission_manager_node.cpp의 "콘 자리로 갈래 고르기"를 보세요.
+  costmap_topic:
+    type: string
+    default_value: "/local_costmap/costmap_raw"
+    read_only: true
+    description: |
+      lethal 셀을 셀 로컬 코스트맵 토픽(nav2_msgs/Costmap). 생성자에서 구독합니다.
+      '_raw'가 붙은 쪽이어야 합니다 -- /local_costmap/costmap(OccupancyGrid)은 0~255를
+      0~100으로 다시 스케일하면서 254(LETHAL)와 253(팽창)을 100과 99로 뭉갭니다.
+    validation:
+      not_empty<>: []
+
+  costmap_timeout_sec:
+    type: double
+    default_value: 1.0
+    description: |
+      코스트맵이 이보다 오래되면 없는 것으로 칩니다. 오래된 장을 그대로 쓰면 이미 치운
+      콘이 계속 보입니다. local_costmap의 publish_frequency(2 Hz)보다 넉넉해야 합니다.
+    validation:
+      gt<>: [0.0]
+
+  cone_radius_m:
+    type: double
+    default_value: 0.5
+    description: |
+      콘 자리를 중심으로 이 반지름 안의 셀을 셉니다. ~0.3 m짜리 콘에 비해 일부러 넉넉한
+      값입니다 -- 콘을 놓는 자리의 편차와 측위 오차를 함께 흡수해야 하고, 5 cm 격자에서는
+      어차피 400셀 남짓이라 넓혀도 공짜입니다. 옆 갈래의 콘까지 들어올 만큼 칸 사이가
+      좁으면 미션 파일에서 cone: {radius: ...}로 그 자리만 줄이세요.
+    validation:
+      gt<>: [0.0]
+
+  cone_min_cells:
+    type: int
+    default_value: 3
+    description: |
+      반지름 안의 lethal 셀이 이 수 이상이면 그 갈래는 막힌 것으로 봅니다. 콘 하나는
+      거리와 빔 밀도에 따라 대여섯 셀부터 잡히므로 바닥값은 낮게 둡니다. 0이면 셀이
+      한 개도 없어야 '비어 있음'이 되어 노이즈 한 점에 길이 갈립니다.
+    validation:
+      gt<>: [0]
+
+  lethal_cost:
+    type: int
+    default_value: 254
+    description: |
+      이 코스트 이상인 셀만 셉니다. 254(LETHAL_OBSTACLE)가 기본인 것은 InflationLayer가
+      253 이하만 쓰기 때문입니다 -- 254만 세면 팽창 후광이 저절로 빠집니다.
+      DrivableAreaLayer의 차선 코스트(200)도 같은 이유로 안 걸립니다. 다만 그 레이어의
+      cost_value도 254이므로, drivable_area:=true로 돌릴 때 노면이 아닌 지면이 콘으로
+      보이면 여기가 첫 번째 확인 지점입니다.
+    validation:
+      gt<>: [0]
+      lt_eq<>: [255]
+
+  # ------------------------------------------------------------ '~/probe_costmap'의 인자
+  #
+  # step_index/step_label과 같은 방식입니다 -- 값은 파라미터로 넣고 인자 없는 Trigger를
+  # 부릅니다. 그래서 read_only가 아닙니다(런타임에 바꾸는 것이 곧 사용법입니다).
+  probe_points:
+    type: double_array
+    default_value: []
+    description: |
+      '~/probe_costmap'이 들여다볼 좌표 목록(x1, y1, x2, y2, ... / 코스 프레임, 보통 map).
+      각 점에서 cone_radius_m 안의 lethal 셀 수와 그중 어디가 가장 비었는지를 응답
+      메시지로 돌려줍니다. 콘을 놓은 자리가 정말 그 좌표인지 확인할 때 씁니다.

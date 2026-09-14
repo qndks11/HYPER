@@ -4,9 +4,8 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
-from launch.conditions import LaunchConfigurationEquals, LaunchConfigurationNotEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # Stages are staggered to give Gazebo time to come up before the nodes that
@@ -55,12 +54,10 @@ def generate_launch_description():
     # 대상이 없습니다.
     # GPS 정확도 + 위치/방위 모니터. real.launch.py와 같은 노드입니다. 시뮬에서도
     # /odometry/gps(navsat_transform)와 /odometry/filtered_map이 나오므로 그대로
-    # 쓸모가 있고, 특히 "초기 yaw 캘리브레이션" 버튼 -- 차를 앞으로 0.5 m 굴려 GPS
-    # 변위로 ENU yaw를 재고 되돌아오는 -- 을 실차에 쓰기 전에 여기서 검증할 수 있습니다.
-    # 이 버튼은 /velocity, /steering_angle을 잠깐 publish하고, 측정한 yaw를
-    # /imu/heading으로 1회 주입하므로 미션(nav2) 주행 중에는 누르지 마세요.
+    # 쓸모가 있습니다(hAcc/vAcc, GPS vs EKF 좌표 차이, EKF yaw 나침반, IMU 링크 Hz).
+    # 아무 토픽도 publish하지 않는 순수 구독자라 미션 주행 중에 띄워도 안전합니다.
     # use_gps_gui:=false로 끌 수 있습니다(헤드리스 CI 등).
-    # use_sim_time=true: 주입하는 /imu/heading 스탬프가 sim 시계여야 ekf_global이 받습니다.
+    # use_sim_time=true: 구독하는 토픽 스탬프가 sim 시계이므로 맞춰 줍니다.
     gps_accuracy_gui = Node(
         package='hyper_localization',
         executable='gps_accuracy_gui.py',
@@ -78,36 +75,26 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('use_panel')),
         )
 
-    # waypoint_csv:=real.csv 처럼 파일명만 준 경우 hyper_waypoint/waypoints/ 아래로 풀어 줍니다.
-    waypoint_csv_resolved = PathJoinSubstitution([
-        EnvironmentVariable('HOME'), 'HYPER', 'src', 'planning', 'hyper_waypoint',
-        'waypoints', LaunchConfiguration('waypoint_csv')])
-
     def behavior_stage(**extra):
         return stage('behavior.launch.py',
                      mission=LaunchConfiguration('mission'), **extra)
 
     return LaunchDescription([
-        # 어떤 미션을 실을지. hyper_planner/config/<이름>.yaml로 풀립니다.
+        # 어떤 미션을 실을지. hyper_planner/mission/<이름>.yaml로 풀립니다.
         # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
-        DeclareLaunchArgument('mission', default_value='mission'),
-        # 차량 스폰 위치/방위(map 프레임). 기본은 sim.csv 시작점입니다. real.csv처럼
-        # 다른 곳에서 녹화한 경로를 시뮬에서 따라가려면 그 CSV의 0번 행 x/y/yaw로
-        # 스폰시켜야 리드인이 코스 전체를 가로지르는 직선으로 안 잡힙니다.
-        # 예: real.csv 시작점 -> x:=-18.7494 y:=27.8460 Y:=-1.8681
-        DeclareLaunchArgument('x', default_value='41.0866', description='Initial X position'),
-        DeclareLaunchArgument('y', default_value='-45.6842', description='Initial Y position'),
-        DeclareLaunchArgument('Y', default_value='1.64', description='Initial Yaw (rad)'),
+        DeclareLaunchArgument('mission', default_value='mission_track'),
+        # 차량 스폰 위치/방위(map 프레임). 기본은 track/start_left.csv 0번 행,
+        # 즉 실차가 출발선에 섰던 자리입니다. 다른 코스를 시뮬에서 따라가려면 그
+        # CSV의 0번 행 x/y/yaw로 스폰시켜야 리드인이 코스 전체를 가로지르는
+        # 직선으로 안 잡힙니다.
+        DeclareLaunchArgument('x', default_value='35.5508', description='Initial X position'),
+        DeclareLaunchArgument('y', default_value='16.6373', description='Initial Y position'),
+        DeclareLaunchArgument('Y', default_value='2.8461', description='Initial Yaw (rad)'),
         # navsat_transform 원점. hyper_localization/config/datums.yaml의 키
-        # (sim | school | track). 기본값 sim은 track.world의 <spherical_coordinates>와
-        # 맞는 시뮬 원점입니다. datum_site:=track이면 실차 트랙 좌표로 시뮬을 돌립니다.
-        DeclareLaunchArgument('datum_site', default_value='sim'),
-        # behavior 스테이지가 mission_manager에 넘길 웨이포인트 CSV. 기본은
-        # hyper_waypoint/waypoints/sim.csv (behavior.launch.py의 기본값). 절대 경로로도,
-        # waypoints/ 아래 파일명(real.csv 등)으로도 넘길 수 있게 아래에서 풀어 줍니다.
-        DeclareLaunchArgument(
-            'waypoint_csv', default_value='',
-            description='웨이포인트 CSV. 파일명만 주면 hyper_waypoint/waypoints/ 아래에서 찾습니다'),
+        # (school | track). track.world가 용인 트랙의 map 좌표를 그대로 쓰므로
+        # 시뮬도 실차와 같은 track 원점을 씁니다 -- 월드의
+        # <spherical_coordinates>와 반드시 같은 값이어야 합니다.
+        DeclareLaunchArgument('datum_site', default_value='track'),
         # headless:=true면 Gazebo 3D 창을 띄우지 않습니다. 센서 렌더링은 오프스크린으로
         # 그대로 돌아가므로 카메라/라이다 토픽은 동일하게 나오고, 시각화는 rviz로 하면 됩니다.
         DeclareLaunchArgument(
@@ -149,20 +136,16 @@ def generate_launch_description():
             stage('odometry.launch.py',
                   datum_site=LaunchConfiguration('datum_site'))]),
         # Gazebo bridges plain sensor_msgs/Image already (see ros_gz_bridge.yaml), so
-        # lane_detection_node runs input_backend ros_raw here -- no rectification, no
-        # image_transport/compressed subscription. object_detection_node's own default is
-        # already ros_raw, so no override needed for it.
+        # lane_detection_node runs input_backend ros_raw here and no camera driver is launched.
+        # object_detection_node subscribes to that same bridged /camera/image_raw -- the sim has
+        # one camera, matching the car.
         TimerAction(period=PERCEPTION_DELAY_S, actions=[
             stage('perception.launch.py', lane_input_backend='ros_raw',
                   drivable_area=LaunchConfiguration('drivable_area'))]),
-        # waypoint_csv 미지정: behavior.launch.py 기본값(sim.csv)을 씁니다.
+        # 어느 코스를 달릴지는 mission이 고른 mission/<이름>.yaml의 courses:가
+        # 정합니다(예: mission_track -> track/*.csv).
         TimerAction(period=BEHAVIOR_DELAY_S, actions=[
             behavior_stage(),
             mission_panel(),
-        ], condition=LaunchConfigurationEquals('waypoint_csv', '')),
-        # waypoint_csv 지정: waypoints/ 아래로 풀어 넘깁니다.
-        TimerAction(period=BEHAVIOR_DELAY_S, actions=[
-            behavior_stage(waypoint_csv=waypoint_csv_resolved),
-            mission_panel(),
-        ], condition=LaunchConfigurationNotEquals('waypoint_csv', '')),
+        ]),
     ])

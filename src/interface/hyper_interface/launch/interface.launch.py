@@ -12,9 +12,9 @@ def generate_launch_description():
         get_package_share_directory('hyper_interface'), 'config', 'parameters.yaml')
 
     params_file_arg = DeclareLaunchArgument('params_file', default_value=default_params)
-    # CH340-based board -- shows up as /dev/ttyUSB*, not /dev/ttyACM* (see
-    # parameters.yaml's serial_port comment).
-    serial_port_arg = DeclareLaunchArgument('serial_port', default_value='/dev/ttyUSB0')
+    # Fixed symlink from udev/99-hyper-serial.rules -- see parameters.yaml's
+    # serial_port comment for why the raw /dev/ttyUSB* number is not usable here.
+    serial_port_arg = DeclareLaunchArgument('serial_port', default_value='/dev/tty_arduino')
 
     arduino_interface_node = Node(
         package='hyper_interface',

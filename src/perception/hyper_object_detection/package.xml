@@ -18,7 +18,7 @@
        reads its bev_real.yaml from that package's share directory. -->
   <exec_depend>hyper_lane_detection</exec_depend>
 
-  <!-- lane_input_backend:=intra_process loads hyper_camera's ELP publisher into this launch
+  <!-- lane_input_backend:=intra_process loads hyper_camera's Logitech publisher into this launch
        file's container. -->
   <exec_depend>hyper_camera</exec_depend>
 

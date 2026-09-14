@@ -16,12 +16,13 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(OpenCV REQUIRED)
 
 include_directories(include)
 
 # Built as a component (see rclcpp_components_register_node below) so it can be loaded into the
-# same ComposableNodeContainer as hyper_camera's ElpCameraPublisherNode for zero-copy
+# same ComposableNodeContainer as hyper_camera's LogitechCameraPublisherNode for zero-copy
 # intra-process delivery under input_backend:=intra_process -- see
 # hyper_object_detection/launch/perception.launch.py. rclcpp_components_register_node also
 # generates the plain `lane_detection_node` executable used for input_backend:=ros_raw.
@@ -38,7 +39,7 @@ target_include_directories(lane_detection_component PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(lane_detection_component
-  rclcpp rclcpp_components std_msgs sensor_msgs nav_msgs cv_bridge OpenCV)
+  rclcpp rclcpp_components std_msgs sensor_msgs nav_msgs cv_bridge std_srvs OpenCV)
 rclcpp_components_register_node(lane_detection_component
   PLUGIN "LaneDetection"
   EXECUTABLE lane_detection_node)
