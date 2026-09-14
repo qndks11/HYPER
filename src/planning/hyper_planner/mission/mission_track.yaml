@@ -3,6 +3,11 @@ label_snap_tolerance_m: 1.0
 # 실제 최악 이음매는 end_left의 1.04 m입니다(common_3 끝 -> end_left 첫 점).
 branch_seam_tolerance_m: 2.0
 
+# waypoint studio가 배경으로 까는 항공사진입니다. mission_manager는 이 키를 읽지 않습니다.
+# 파일 이름만 적으면 스튜디오가 (1) 이 yaml의 폴더, (2) ~/HYPER, (3) hyper_gazebo의
+# meshes/ 순으로 찾습니다. 배치(중심/가로 폭/회전)는 옆의 <이미지>.align.yaml에 있습니다.
+background: real_course.png
+
 # 이 미션에는 main 코스가 없습니다 -- 트랙이 조각으로 녹화되어 있어 "이 미션이 달리는
 # 코스" 하나를 고를 수 없기 때문입니다. 그래서 최상위 labels: 블록도 없고(그건 main의
 # 것입니다), 라벨은 코스마다 courses.<이름>.labels에, CSV 경로는 코스마다 waypoints/

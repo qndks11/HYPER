@@ -2,6 +2,11 @@ label_snap_tolerance_m: 1.0
 
 branch_seam_tolerance_m: 2.0
 
+# waypoint studio가 배경으로 까는 항공사진입니다. mission_manager는 이 키를 읽지 않습니다.
+# 파일 이름만 적으면 스튜디오가 (1) 이 yaml의 폴더, (2) ~/HYPER, (3) hyper_gazebo의
+# meshes/ 순으로 찾습니다. 배치(중심/가로 폭/회전)는 옆의 <이미지>.align.yaml에 있습니다.
+background: school.png
+
 courses:
   start_left:
     csv: school/start_left.csv

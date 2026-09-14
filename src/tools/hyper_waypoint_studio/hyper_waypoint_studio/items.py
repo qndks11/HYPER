@@ -32,16 +32,13 @@ Z_VEHICLE = 4
 class OverlayItem(QGraphicsPixmapItem):
     """배경 이미지. 픽셀을 다시 샘플링하지 않고 affine으로만 놓습니다.
 
-    지오레퍼런싱은 두 가지입니다.
-      extent 모드: ground.obj에서 읽은 [x0,x1,y0,y1]. x/y 축척이 따로입니다 --
-                   Gazebo가 텍스처를 쿼드에 늘려 붙이므로 같은 비율로 늘려야
-                   녹화한 웨이포인트가 차선 위에 얹힙니다.
-      align  모드: 중심 + 가로 폭(m) + 회전. 항공사진처럼 지오레퍼런스가 아예
-                   없는 이미지를 손으로 맞춘 값이고 .align.yaml에 있습니다.
+    지오레퍼런싱은 한 가지입니다: 중심 + 가로 폭(m) + 회전. 항공사진에는 지오레퍼런스가
+    아예 없으므로 손으로 맞춘 값이고, <이미지>.align.yaml에 있습니다.
 
-    Gazebo 코스 텍스처는 이제 두 가지가 다 필요합니다 -- 쿼드가 용인 트랙에 맞춰
-    69.8도 돌아가 있으면서(align) 텍스처는 여전히 쿼드 종횡비로 늘어나 있어서
-    (extent) sy_ratio를 같이 넘깁니다.
+    원본 종횡비는 그대로 지킵니다. 예전에는 Gazebo가 코스 텍스처를 쿼드에 늘려 붙이는
+    만큼 세로를 따로 늘리는 길이 하나 더 있었는데, 지금 쓰는 real_course.png는
+    1039x864(0.831569)로 ground.obj 쿼드 121.2454x100.8238 m(0.831568)와 여섯 자리까지
+    같습니다 -- 늘릴 것이 없습니다.
     """
 
     def __init__(self, rgb_bytes, width_px, height_px):
@@ -58,33 +55,16 @@ class OverlayItem(QGraphicsPixmapItem):
         self.cx = self.cy = 0.0
         self.width_m = 1.0
         self.rot_deg = 0.0
-        self._sy_ratio = 1.0     # extent 모드에서 세로/가로 축척 비
 
     @property
     def aspect(self):
         return self.height_px / self.width_px
 
-    def set_extent(self, extent):
-        """[x0, x1, y0, y1]로 놓습니다(회전 없음, 축척은 축마다 따로)."""
-        x0, x1, y0, y1 = extent
-        self.cx, self.cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-        self.width_m = abs(x1 - x0)
-        self.rot_deg = 0.0
-        # 이미지 종횡비가 아니라 쿼드 종횡비를 따릅니다 -- 그게 Gazebo가 하는 일입니다.
-        self._sy_ratio = (abs(y1 - y0) / self.width_m) / self.aspect
-        self.apply()
-
-    def set_alignment(self, cx, cy, width_m, rot_deg, sy_ratio=1.0):
-        """중심/가로 폭/회전으로 놓습니다.
-
-        sy_ratio는 세로/가로 축척 비입니다. 항공사진처럼 원본 종횡비를 지켜야 하는
-        이미지는 기본값 1.0이고, 쿼드에 늘려 붙인 텍스처는 set_extent와 같은 식으로
-        구한 값을 넘깁니다.
-        """
+    def set_alignment(self, cx, cy, width_m, rot_deg):
+        """중심/가로 폭/회전으로 놓습니다."""
         self.cx, self.cy = float(cx), float(cy)
         self.width_m = float(width_m)
         self.rot_deg = float(rot_deg)
-        self._sy_ratio = float(sy_ratio)
         self.apply()
 
     def apply(self):
@@ -95,10 +75,9 @@ class OverlayItem(QGraphicsPixmapItem):
         +y 아래인데 씬은 +y 위이기 때문입니다(matplotlib은 origin='upper'로 공짜였습니다).
         """
         sx = self.width_m / self.width_px
-        sy = sx * self._sy_ratio
         self.setTransform(
             QTransform().translate(self.cx, self.cy).rotate(self.rot_deg)
-            .scale(sx, -sy))
+            .scale(sx, -sx))
 
     def nudge(self, dx=0.0, dy=0.0, scale=1.0, rot=0.0):
         self.cx += dx

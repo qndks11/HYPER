@@ -74,17 +74,17 @@ ros2 run hyper_waypoint waypoint_recorder_node --ros-args -p output_csv:=$HOME/H
 전부 [hyper_waypoint_studio](../../tools/hyper_waypoint_studio/README.md)로 옮겼습니다.
 예전의 `label_waypoints.py`(라벨링)와 `waypoint_record_gui.py`(녹화 조작판)는 없습니다.
 
-```bash
-# 코스를 시뮬 텍스처 위에 올리고 미션 라벨을 찍기
-ros2 run hyper_waypoint_studio waypoint_studio \
-  src/planning/hyper_waypoint/waypoints/track/common_1.csv \
-  --mission src/planning/hyper_planner/mission/mission_track.yaml \
-  --overlay gazebo --mode edit
+여는 것은 **미션 하나**입니다. 그 미션의 코스 CSV(`courses.<이름>.csv`)와 배경 항공사진
+(`background:`)이 전부 같이 올라옵니다 -- CSV를 하나씩 고르거나 배경을 따로 열 일이 없습니다.
 
-# 실차 코스를 항공사진 위에 (정렬값은 real_course.align.yaml)
+```bash
+# 트랙 미션을 열고 라벨 찍기 (코스 11개 + real_course.png가 같이 뜹니다)
 ros2 run hyper_waypoint_studio waypoint_studio \
-  src/planning/hyper_waypoint/waypoints/track/full_track.csv \
-  --overlay src/simulator/hyper_gazebo/worlds/models/driving_course/meshes/real_course.png
+  src/planning/hyper_planner/mission/mission_track.yaml --mode edit
+
+# 학교 미션
+ros2 run hyper_waypoint_studio waypoint_studio \
+  src/planning/hyper_planner/mission/mission_school.yaml --mode edit
 ```
 
 여러 코스를 한 화면에 겹쳐 볼 수 있으므로, 분기 코스(`t_left.csv` / `t_right.csv`)의

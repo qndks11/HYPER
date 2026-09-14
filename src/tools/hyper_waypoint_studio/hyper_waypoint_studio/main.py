@@ -24,11 +24,11 @@ import sys
 def _parse_args(argv):
     parser = argparse.ArgumentParser(
         description='HYPER waypoint studio -- 코스 보기/편집/녹화/주행')
-    parser.add_argument('courses', nargs='*',
-                        help='열어 둘 웨이포인트 CSV (여러 개 가능)')
-    parser.add_argument('--mission', help='열어 둘 mission.yaml')
-    parser.add_argument('--overlay',
-                        help="배경 이미지 경로, 또는 'gazebo'(시뮬 코스 텍스처)")
+    # 여는 것은 미션 하나뿐입니다 -- 코스 CSV도 배경 이미지도 그 안에 적혀 있습니다.
+    parser.add_argument('mission', nargs='?',
+                        help='열어 둘 mission.yaml (코스와 배경이 같이 올라옵니다)')
+    parser.add_argument('--mission', dest='mission_opt',
+                        help='mission을 옵션으로 주는 예전 표기')
     parser.add_argument('--mode', default='view', choices=('view', 'edit', 'record', 'drive'),
                         help='시작 모드 (기본: view)')
     parser.add_argument('--destination', default='',
@@ -42,6 +42,8 @@ def _parse_args(argv):
     # launch가 붙이는 --ros-args 뭉치는 여기서 볼 일이 없습니다.
     known, _ = parser.parse_known_args(
         [a for a in argv[1:] if a != '--ros-args'])
+    # launch는 늘 --mission을 붙이므로(비었으면 빈 문자열) 옵션 쪽을 우선합니다.
+    known.mission = known.mission_opt or known.mission
     return known
 
 
@@ -66,8 +68,8 @@ def main(argv=None):
             teleport=args.teleport, pose_topic=args.pose_topic)
 
     window = StudioWindow(
-        link, initial_mode=args.mode, courses=args.courses, mission=args.mission,
-        overlay=args.overlay, destination=args.destination)
+        link, initial_mode=args.mode, mission=args.mission,
+        destination=args.destination)
     window.show()
 
     signal.signal(signal.SIGTERM, signal.SIG_DFL)

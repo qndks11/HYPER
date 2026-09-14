@@ -64,8 +64,8 @@ class MissionModel:
         main은 선택입니다(mission_loader.hpp). 있으면 course:를 생략한 스텝의 기본
         코스이자 최상위 labels:의 임자이고, 없으면(mission_track처럼 조각을 이어 붙이는
         미션) 모든 라벨이 courses.<이름>.labels에 있습니다. 없는데도 목록에 넣으면
-        유령 항목이 생기고, _auto_bind가 거기에 코스를 묶어 최상위 labels:를 새로
-        써 버립니다 -- 로더가 임자 없는 블록이라며 미션을 거부합니다.
+        코스 목록과 save()에 유령 항목이 생기고, 저장이 임자 없는 최상위 labels:
+        블록을 만들어 냅니다 -- 로더가 그걸 보고 미션 전체를 거부합니다.
         """
         if "main" in (self.doc.get("courses") or {}):
             return True
@@ -82,6 +82,29 @@ class MissionModel:
         """
         others = sorted(n for n in (self.doc.get("courses") or {}) if n != "main")
         return (["main"] + others) if self.has_main else others
+
+    @property
+    def background(self):
+        """최상위 `background:`에 적힌 배경 이미지. 없으면 빈 문자열입니다.
+
+        여기서는 풀지 않습니다 -- 어느 폴더를 뒤질지는 경로 상수를 들고 있는
+        app_window가 정하고(formats.resolve_asset), 이 모델은 파일을 모릅니다.
+        """
+        return str(self.doc.get("background") or "")
+
+    def course_csvs(self):
+        """[(코스 이름, 미션이 적은 csv 경로)] -- course_names 순서 그대로.
+
+        `csv:`가 없는 코스는 건너뜁니다(mission_loader도 그런 코스는 거부합니다).
+        """
+        courses = self.doc.get("courses") or {}
+        out = []
+        for name in self.course_names:
+            entry = courses.get(name)
+            csv = (entry or {}).get("csv") if isinstance(entry, dict) else None
+            if csv:
+                out.append((name, str(csv)))
+        return out
 
     def labels_for_course(self, course_name):
         """그 코스에 붙는 라벨 이름들. 배치해야 할 것(required)이 먼저이고,

@@ -83,8 +83,7 @@ class UnsavedDialog(QDialog):
 
 class StudioWindow(QMainWindow):
 
-    def __init__(self, link, initial_mode='view', courses=(), mission=None,
-                 overlay=None, destination=''):
+    def __init__(self, link, initial_mode='view', mission=None, destination=''):
         super().__init__()
         self.setWindowTitle('waypoint studio')
         self.setStyleSheet(theme.WINDOW_STYLE)
@@ -100,7 +99,6 @@ class StudioWindow(QMainWindow):
         self._mission = None
         self._overlay_item = None
         self._overlay_path = None
-        self._overlay_alignable = False
         self._overlay_dirty = False
         self._active_row = None
         self._selected_point = None
@@ -144,14 +142,9 @@ class StudioWindow(QMainWindow):
         self._status_label = QLabel('')
         self.statusBar().addPermanentWidget(self._status_label)
 
-        for path in courses:
-            self._add_course(path, frame=False)
+        # 미션 하나가 코스와 배경까지 전부 데려옵니다(_open_mission).
         if mission:
             self._open_mission(mission)
-        if overlay == 'gazebo':
-            self._load_gazebo_overlay()
-        elif overlay:
-            self._load_image_overlay(overlay)
         if destination:
             self._record.set_destination(destination)
             self._sync_previous()
@@ -174,15 +167,12 @@ class StudioWindow(QMainWindow):
     # ================================================================== 구성
     def _build_panels(self):
         self._layers_panel = LayersPanel()
-        self._layers_panel.add_requested.connect(self._browse_course)
         self._layers_panel.remove_requested.connect(self._remove_course)
         self._layers_panel.active_changed.connect(self._set_active_row)
         self._layers_panel.visibility_changed.connect(self._set_visibility)
         self._layers_panel.binding_changed.connect(self._set_binding)
 
         self._overlay_panel = OverlayPanel()
-        self._overlay_panel.load_gazebo.connect(self._load_gazebo_overlay)
-        self._overlay_panel.load_image.connect(self._browse_overlay)
         self._overlay_panel.clear_overlay.connect(self._clear_overlay)
         self._overlay_panel.save_alignment.connect(self._save_alignment)
         self._overlay_panel.nudged.connect(self._nudge_overlay)
@@ -240,15 +230,11 @@ class StudioWindow(QMainWindow):
 
     def _build_menus(self):
         file_menu = self.menuBar().addMenu('파일')
-        for caption, slot, shortcut in (
-                ('코스 추가…', self._browse_course, QKeySequence.Open),
-                ('미션 열기…', self._browse_mission, None),
-                ('배경 이미지…', self._browse_overlay, None)):
-            action = QAction(caption, self)
-            if shortcut:
-                action.setShortcut(shortcut)
-            action.triggered.connect(slot)
-            file_menu.addAction(action)
+        # 여는 것은 미션 하나뿐입니다 -- 코스도 배경도 미션이 데려옵니다.
+        open_mission = QAction('미션 열기…', self)
+        open_mission.setShortcut(QKeySequence.Open)
+        open_mission.triggered.connect(self._browse_mission)
+        file_menu.addAction(open_mission)
         file_menu.addSeparator()
         save = QAction('코스 저장', self)
         save.setShortcut(QKeySequence.Save)
@@ -379,23 +365,23 @@ class StudioWindow(QMainWindow):
         self._color_cursor += 1
         return color
 
-    def _browse_course(self):
-        start = WAYPOINT_DIR if os.path.isdir(WAYPOINT_DIR) else os.path.expanduser('~')
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, '웨이포인트 CSV 열기', start, 'CSV (*.csv);;모든 파일 (*)')
-        for path in paths:
-            self._add_course(path)
+    def _add_course(self, path, bind, frame=True):
+        """코스 하나를 캔버스에 올립니다. bind는 이 CSV가 맡는 미션 코스 이름입니다.
 
-    def _add_course(self, path, frame=True):
+        코스는 전부 미션의 `courses:`에서 오므로 어느 이름인지 짐작할 일이 없습니다 --
+        예전에는 손으로 연 CSV를 파일 이름으로 미션 코스에 짝지어 주었고, 그게 틀리면
+        라벨 거리를 엉뚱한 CSV에 대고 쟀습니다.
+
+        실패는 올리지 않고 이유를 돌려줍니다. 코스 열한 개짜리 미션에서 파일마다
+        모달을 띄우면 열한 번 눌러야 하므로, 부르는 쪽이 모아서 한 번에 보여 줍니다.
+        """
         path = os.path.abspath(path)
         if any(os.path.abspath(c.path) == path for c in self._courses):
-            self.statusBar().showMessage(f'{os.path.basename(path)}는 이미 열려 있습니다.', 4000)
-            return
+            return f'{os.path.basename(path)}: 이미 열려 있습니다'
         try:
             course = CourseModel.load(path, self._next_color())
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, '열 수 없음', str(exc))
-            return
+            return f'{bind or os.path.basename(path)}: {exc}'
 
         item = CourseItem(course.color)
         heading = HeadingItem(course.color)
@@ -403,7 +389,7 @@ class StudioWindow(QMainWindow):
         self._scene.addItem(heading)
         self._courses.append(course)
         self._layers.append({'course': item, 'heading': heading})
-        self._auto_bind(course)
+        course.mission_course = bind
         # 편집 대상은 먼저 연 코스로 둡니다 -- 보통 그게 main 코스이고, 갈래를
         # 추가로 올렸다고 편집 대상이 조용히 갈래로 옮겨 가면 안 됩니다.
         if self._active_row is None:
@@ -412,56 +398,20 @@ class StudioWindow(QMainWindow):
         self._refresh_layers()
         if frame:
             self._frame_all()
+        return None
 
-    def _auto_bind(self, course):
-        """파일 이름으로 미션 코스를 짐작합니다. 틀리면 목록에서 바꾸면 됩니다.
-
-        미션의 `csv:`는 waypoints_dir 기준 상대 경로일 수 있고(`track/common_1.csv`),
-        스튜디오는 그 waypoints_dir을 모릅니다 -- 연 파일의 절대 경로만 압니다. 그래서
-        경로를 통째로 맞추지 않고 꼬리부터 맞춥니다.
-        """
-        if self._mission is None:
-            return
-        path = os.path.abspath(course.path)
-        stem = os.path.splitext(course.name)[0]
-        by_name = None
-        for name in self._mission.course_names:
-            entry = (self._mission.doc.get('courses') or {}).get(name) or {}
-            csv = str(entry.get('csv') or '')
-            if not csv:
-                continue
-            # 1순위: 미션이 적은 경로가 연 파일의 꼬리와 그대로 맞는 것. 폴더까지 같으므로
-            # 이름만 같은 다른 폴더의 CSV(school/common_1.csv <-> track/common_1.csv)와 헷갈리지
-            # 않습니다.
-            tail = csv.lstrip('./')
-            if path == csv or path.endswith(os.sep + tail):
-                self._claim_course(course, name)
-                return
-            # 2순위: 파일 이름만 같은 것. 다른 데로 복사해 둔 CSV도 잡습니다.
-            if by_name is None and os.path.splitext(os.path.basename(csv))[0] == stem:
-                by_name = name
-        if by_name is not None:
-            self._claim_course(course, by_name)
-            return
-        # 이름으로 못 찾았습니다. 갈래가 아니면서 아직 main이 없으면 main으로 둡니다.
-        # main이 없는 미션(mission_track처럼 조각을 이어 붙이는 것)에서는 묶을 곳이
-        # 없으므로 그대로 둡니다 -- 목록에서 손으로 고르면 됩니다.
-        if not self._mission.has_main:
-            return
-        if not any(c.mission_course == 'main' for c in self._courses):
-            course.mission_course = 'main'
-
-    def _claim_course(self, course, name):
-        """파일 이름이 맞은 코스에 미션 코스를 묶습니다.
-
-        같은 이름을 이미 물고 있는 코스가 있으면 뺏습니다 -- 그쪽은 위의 main 추정처럼
-        이름이 맞아서가 아니라 자리가 비어서 묶인 것이고, `_course_for`는 먼저 묶인
-        쪽을 돌려주므로 그대로 두면 라벨 거리를 엉뚱한 CSV에 대고 재게 됩니다.
-        """
-        for other in self._courses:
-            if other is not course and other.mission_course == name:
-                other.mission_course = None
-        course.mission_course = name
+    def _close_all_courses(self):
+        """캔버스를 비웁니다. 저장 여부는 부르는 쪽이 이미 물어봤습니다."""
+        for layer in self._layers:
+            self._scene.removeItem(layer['course'])
+            self._scene.removeItem(layer['heading'])
+        self._courses = []
+        self._layers = []
+        self._active_row = None
+        # 색을 처음으로 되감습니다 -- 같은 미션은 늘 같은 색으로 보여야, 어제 본
+        # 화면과 오늘 본 화면에서 같은 갈래를 같은 색으로 찾을 수 있습니다.
+        self._color_cursor = 0
+        self._rebuild_handles()
 
     def _remove_course(self, row):
         if not 0 <= row < len(self._courses):
@@ -780,7 +730,7 @@ class StudioWindow(QMainWindow):
         self._status_label.setText(
             f'x {x:8.2f}   y {y:8.2f} m      {self._view.meters_per_pixel():.3f} m/px')
 
-    # ================================================================== 라벨
+    # ================================================================== 미션
     def _browse_mission(self):
         start = MISSION_DIR if os.path.isdir(MISSION_DIR) else os.path.expanduser('~')
         path, _ = QFileDialog.getOpenFileName(
@@ -789,23 +739,64 @@ class StudioWindow(QMainWindow):
             self._open_mission(path)
 
     def _open_mission(self, path):
-        if self._mission is not None and self._mission.dirty:
-            answer = QMessageBox.question(
-                self, '저장하지 않은 라벨',
-                f'{self._mission.name}의 라벨이 저장되지 않았습니다. 버릴까요?',
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if answer != QMessageBox.Yes:
-                return
+        """미션 하나를 엽니다 -- 코스도 배경도 이 한 번에 같이 올라옵니다.
+
+        열려 있던 것은 전부 내립니다. 이전 미션의 코스를 남겨 두면 캔버스에 지금 미션이
+        모르는 선이 섞이고, 라벨 스냅 거리를 그 선에 대고 재게 됩니다. 미션이 곧
+        작업 공간입니다.
+        """
+        if not self._flush_dirty_documents(f'{os.path.basename(path)}을(를) 열기 전에'):
+            return
         try:
-            self._mission = MissionModel.load(path)
+            mission = MissionModel.load(path)
         except Exception as exc:              # noqa: BLE001 -- 이유를 보여 줍니다
             QMessageBox.warning(self, '미션을 열 수 없음', str(exc))
             return
-        for course in self._courses:
-            if course.mission_course is None:
-                self._auto_bind(course)
+
+        self._mission = mission
+        mission_dir = os.path.dirname(os.path.abspath(path))
+        problems = []
+
+        # 1) 코스. 미션이 적은 순서 그대로 올립니다(main이 있으면 main이 먼저이므로
+        #    편집 대상도 main이 됩니다).
+        self._close_all_courses()
+        for name, csv in mission.course_csvs():
+            resolved = formats.resolve_asset(csv, [WAYPOINT_DIR, mission_dir])
+            if resolved is None:
+                problems.append(f'{name}: {csv} 를 찾을 수 없습니다')
+                continue
+            failure = self._add_course(resolved, bind=name, frame=False)
+            if failure:
+                problems.append(failure)
+
+        # 2) 배경. 코스보다 **뒤에** 올립니다 -- 사이드카가 아직 없는 이미지는
+        #    formats.load_alignment가 올라와 있는 코스의 bbox에서 자리를 추정합니다.
+        self._clear_overlay()
+        if mission.background:
+            resolved = formats.resolve_asset(
+                mission.background, [mission_dir, HYPER, COURSE_MESHES])
+            if resolved is None:
+                problems.append(
+                    f'background: {mission.background} 를 찾을 수 없습니다')
+            else:
+                self._load_image_overlay(resolved)
+
         self._drive.set_steps_from_mission(self._mission)
         self._refresh_layers()
+        self._refresh_labels()
+        self._refresh_cones()
+        self._update_title()
+        self._frame_all()
+
+        # 못 연 것은 한 번에 모아 보여 줍니다 -- 파일마다 모달을 띄우면 코스 열한
+        # 개짜리 미션에서 열한 번 눌러야 합니다.
+        if problems:
+            QMessageBox.warning(
+                self, '미션의 일부를 열지 못했습니다',
+                f'{mission.name}:\n\n' + '\n'.join(f'  - {p}' for p in problems))
+        self.statusBar().showMessage(
+            f'{mission.name}: 코스 {len(self._courses)}개'
+            + (f', 못 연 것 {len(problems)}개' if problems else ''), 8000)
 
     def _course_for(self, name):
         for course in self._courses:
@@ -930,47 +921,13 @@ class StudioWindow(QMainWindow):
         self._update_title()
 
     # ================================================================== 배경
-    def _load_gazebo_overlay(self):
-        texture = os.path.join(COURSE_MESHES, 'course.png')
-        quad = os.path.join(COURSE_MESHES, 'ground.obj')
-        for required in (texture, quad):
-            if not os.path.exists(required):
-                QMessageBox.warning(self, '배경 없음', f"'{required}'가 없습니다.")
-                return
-        try:
-            extent = formats.read_obj_extent(quad)
-            # 쿼드는 이제 용인 트랙에 맞춰 돌아가 있습니다. 크기(그리고 텍스처가
-            # 늘어난 비율)는 ground.obj가, 그 쿼드를 map 어디에 어떤 각도로 놓을지는
-            # course.align.yaml이 들고 있습니다 -- 둘 다 fit_to_track.py가 만듭니다.
-            cx, cy, width_m, rot_deg = formats.load_alignment(texture, [], [])
-            data, width, height = formats.load_background(texture)
-        except Exception as exc:              # noqa: BLE001
-            QMessageBox.warning(self, '배경을 못 읽었습니다', str(exc))
-            return
-        self._install_overlay(texture, data, width, height)
-        x0, x1, y0, y1 = extent
-        quad_w, quad_h = abs(x1 - x0), abs(y1 - y0)
-        # set_extent와 같은 계산입니다: 이미지 종횡비가 아니라 쿼드 종횡비를 따릅니다.
-        sy_ratio = (quad_h / quad_w) / self._overlay_item.aspect
-        # 폭은 사이드카 값을 씁니다. 정렬을 저장했지만 아직 fit_to_track.py
-        # --apply-alignment로 반영하지 않았으면 ground.obj 폭과 다르고, 그때 보여야
-        # 하는 것은 맞춘 자리입니다. 반영한 뒤에는 둘이 같습니다.
-        self._overlay_item.set_alignment(cx, cy, width_m, rot_deg, sy_ratio)
-        # 시뮬 코스도 맞출 수 있습니다 -- 맞춘 값은 월드에 반영해야 시뮬이 따라갑니다.
-        self._overlay_alignable = True
-        self._overlay_dirty = abs(width_m - quad_w) > 1e-3
-        self._push_overlay_readout()
-        self._frame_all()
-
-    def _browse_overlay(self):
-        start = COURSE_MESHES if os.path.isdir(COURSE_MESHES) else os.path.expanduser('~')
-        path, _ = QFileDialog.getOpenFileName(
-            self, '배경 이미지 열기', start,
-            '이미지 (*.png *.jpg *.jpeg *.tif *.tiff);;모든 파일 (*)')
-        if path:
-            self._load_image_overlay(path)
-
     def _load_image_overlay(self, path):
+        """배경 이미지를 올립니다. 부르는 쪽은 _open_mission 하나뿐입니다.
+
+        어느 이미지인지는 mission.yaml의 `background:`가 정합니다 -- 손으로 고르는
+        길을 두면 캔버스가 편집 중인 미션과 다른 그림을 깔 수 있고, 그러면 라벨을
+        찍은 자리를 눈으로 믿을 수 없게 됩니다.
+        """
         try:
             data, width, height = formats.load_background(path)
         except Exception as exc:              # noqa: BLE001
@@ -981,7 +938,6 @@ class StudioWindow(QMainWindow):
         cx, cy, width_m, rot = formats.load_alignment(path, xs, ys)
         self._install_overlay(path, data, width, height)
         self._overlay_item.set_alignment(cx, cy, width_m, rot)
-        self._overlay_alignable = True
         self._overlay_dirty = not os.path.exists(formats.alignment_path(path))
         self._push_overlay_readout()
         self._frame_all()
@@ -998,12 +954,11 @@ class StudioWindow(QMainWindow):
             self._scene.removeItem(self._overlay_item)
         self._overlay_item = None
         self._overlay_path = None
-        self._overlay_alignable = False
         self._overlay_dirty = False
-        self._overlay_panel.set_overlay(None, alignable=False)
+        self._overlay_panel.set_overlay(None)
 
     def _nudge_overlay(self, dx, dy, scale, rot):
-        if self._overlay_item is None or not self._overlay_alignable:
+        if self._overlay_item is None:
             return
         self._overlay_item.nudge(dx, dy, scale, rot)
         self._overlay_dirty = True
@@ -1016,11 +971,11 @@ class StudioWindow(QMainWindow):
     def _push_overlay_readout(self):
         item = self._overlay_item
         self._overlay_panel.set_overlay(
-            self._overlay_path, self._overlay_alignable,
-            item.cx, item.cy, item.width_m, item.rot_deg, self._overlay_dirty)
+            self._overlay_path, item.cx, item.cy, item.width_m, item.rot_deg,
+            self._overlay_dirty)
 
     def _save_alignment(self):
-        if self._overlay_item is None or not self._overlay_alignable:
+        if self._overlay_item is None:
             return
         item = self._overlay_item
         try:
@@ -1319,7 +1274,7 @@ class StudioWindow(QMainWindow):
             documents.append((
                 self._mission.name,
                 lambda: self._mission.save(self._bound_courses())))
-        if self._overlay_dirty and self._overlay_alignable:
+        if self._overlay_dirty and self._overlay_item is not None:
             item = self._overlay_item
             documents.append((
                 os.path.basename(formats.alignment_path(self._overlay_path)),
@@ -1327,21 +1282,32 @@ class StudioWindow(QMainWindow):
                     self._overlay_path, item.cx, item.cy, item.width_m, item.rot_deg)))
         return documents
 
-    def closeEvent(self, event):
+    def _flush_dirty_documents(self, occasion):
+        """저장 안 한 것을 한 번에 묻습니다. 계속해도 되면 True.
+
+        미션을 바꾸는 것도 창을 닫는 것만큼 확실하게 작업을 버리는 일이라(코스가
+        통째로 내려갑니다) 같은 대화상자를 씁니다.
+        """
         documents = self._dirty_documents()
-        if documents:
-            dialog = UnsavedDialog(self, [name for name, _ in documents])
-            result = dialog.exec_()
-            if result == 0:
-                event.ignore()
-                return
-            if result == 1:
-                for index in dialog.checked():
-                    try:
-                        documents[index][1]()
-                    except Exception as exc:      # noqa: BLE001
-                        QMessageBox.warning(self, '저장 실패', str(exc))
-                        event.ignore()
-                        return
+        if not documents:
+            return True
+        dialog = UnsavedDialog(self, [name for name, _ in documents])
+        dialog.setWindowTitle(f'{occasion} -- 저장하지 않은 변경')
+        result = dialog.exec_()
+        if result == 0:
+            return False
+        if result == 1:
+            for index in dialog.checked():
+                try:
+                    documents[index][1]()
+                except Exception as exc:          # noqa: BLE001
+                    QMessageBox.warning(self, '저장 실패', str(exc))
+                    return False
+        return True
+
+    def closeEvent(self, event):
+        if not self._flush_dirty_documents('끝내기 전에'):
+            event.ignore()
+            return
         self._link.shutdown()
         event.accept()

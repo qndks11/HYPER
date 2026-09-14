@@ -169,6 +169,31 @@ def split_cone_key(key):
     return ("routes", parts[1]), int(parts[2]), int(parts[3])
 
 
+def resolve_asset(given, bases):
+    """미션이 적은 경로(`track/common_1.csv`, `real_course.png`)를 실제 파일로 풉니다.
+
+    mission_loader.hpp의 resolve_csv_path와 같은 규칙입니다 -- 절대 경로면 그대로 쓰고,
+    상대 경로면 bases를 앞에서부터 붙여 보고 **처음 실재하는 것**을 돌려줍니다. 미션에
+    파일 이름만 적을 수 있어야 하는 이유가 이것입니다: 코스 CSV는 waypoints/ 아래에,
+    배경 이미지는 hyper_gazebo의 meshes/ 아래에 있어 미션 파일과 폴더가 다릅니다.
+
+    아무 데서도 못 찾으면 None입니다 -- 부르는 쪽이 어느 파일이 없는지 한 번에 모아
+    보여 줍니다(없는 파일마다 모달을 띄우면 코스 열한 개짜리 미션에서 열한 번 뜹니다).
+    """
+    if not given:
+        return None
+    path = os.path.expanduser(str(given))
+    if os.path.isabs(path):
+        return path if os.path.exists(path) else None
+    for base in bases:
+        if not base:
+            continue
+        candidate = os.path.join(base, path)
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+    return None
+
+
 def load_mission(path):
     """mission.yaml -> (raw_text, doc, required, positions, sentinels, cones).
 
@@ -597,25 +622,6 @@ def save_alignment(image_path, cx, cy, width_m, rot_deg):
         handle.write(f"width_m: {width_m:.4f}\n")
         handle.write(f"rotation_deg: {rot_deg:.4f}\n")
     return path
-
-
-def read_obj_extent(obj_path):
-    """텍스처가 붙은 바닥 쿼드의 [x0, x1, y0, y1] 경계.
-
-    ground.obj는 텍스처를 쿼드에 모서리끼리 매핑하므로(vt 0..1) 정점 경계가 곧
-    이미지의 map 프레임 발자국입니다. 텍스처의 픽셀 종횡비는 쿼드와 다른데,
-    Gazebo가 늘려 붙이므로 같은 경계를 그대로 쓰면 같은 방식으로 늘어납니다.
-    """
-    xs, ys = [], []
-    with open(obj_path, encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("v "):
-                parts = line.split()
-                xs.append(float(parts[1]))
-                ys.append(float(parts[2]))
-    if not xs:
-        raise ValueError(f"'{obj_path}'에 정점이 없습니다.")
-    return [min(xs), max(xs), min(ys), max(ys)]
 
 
 def load_background(path, max_px=2500):

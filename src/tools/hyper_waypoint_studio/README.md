@@ -9,23 +9,32 @@
 
 ## 실행
 
+**여는 것은 미션 하나뿐입니다.** 코스 CSV도 배경 항공사진도 mission.yaml에 적혀 있으므로,
+미션을 열면 코스 열한 개와 배경이 한꺼번에 올라옵니다. 코스를 하나씩 고르는 자리도,
+배경 이미지를 따로 여는 자리도 없습니다 -- 캔버스가 편집 중인 미션과 다른 것을 보여 줄 수
+있으면 라벨을 찍은 자리를 눈으로 믿을 수 없기 때문입니다.
+
 ```bash
 colcon build --packages-select hyper_waypoint_studio
 source install/setup.bash
 
-# 그냥 띄우기 (ROS 없어도 뜹니다)
+# 미션 하나 (ROS 없어도 뜹니다)
+ros2 run hyper_waypoint_studio waypoint_studio \
+  src/planning/hyper_planner/mission/mission_track.yaml --mode edit
+
+# 인자 없이 띄우면 빈 창입니다 -- 파일 ▸ 미션 열기(Ctrl-O)로 고르세요
 ros2 run hyper_waypoint_studio waypoint_studio
 
-# 코스와 미션을 열고 시뮬 코스 텍스처를 배경으로
-ros2 run hyper_waypoint_studio waypoint_studio \
-  src/planning/hyper_waypoint/waypoints/track/common_1.csv \
-  --mission src/planning/hyper_planner/mission/mission_track.yaml \
-  --overlay gazebo --mode edit
-
-# launch로
-ros2 launch hyper_waypoint_studio studio.launch.py mode:=drive \
-  mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_track.yaml
+# launch는 mission_track.yaml이 기본값이라 그냥 띄우면 다 차려집니다
+ros2 launch hyper_waypoint_studio studio.launch.py mode:=drive
+ros2 launch hyper_waypoint_studio studio.launch.py \
+  mission_yaml:=$HOME/HYPER/src/planning/hyper_planner/mission/mission_school.yaml
 ```
+
+미션을 바꾸면 **작업 공간이 통째로 바뀝니다** -- 열려 있던 코스는 전부 내려가고 새 미션의
+코스와 배경이 올라옵니다. 이전 미션의 코스를 남겨 두면 지금 미션이 모르는 선이 캔버스에
+섞이고, 라벨 스냅 거리를 그 선에 대고 재게 됩니다. 저장하지 않은 편집이 있으면 창을 닫을
+때와 같은 대화상자로 먼저 묻습니다.
 
 > **이 머신의 VSCode 통합 터미널에서는** snap이 주입하는 `GTK_PATH` 때문에 GUI가 즉시
 > 죽습니다. 앞에 다음을 붙이세요:
@@ -38,8 +47,9 @@ ros2 launch hyper_waypoint_studio studio.launch.py mode:=drive \
 
 | | 보기 | 편집 | 녹화 | 주행 |
 | --- | :-: | :-: | :-: | :-: |
-| 코스 추가/제거, 색, 표시 | O | O | O | O |
-| 배경 이미지 + 정렬 | O | O | 잠김 | 잠김 |
+| 미션 열기 (코스 + 배경) | O | O | O | O |
+| 코스 색, 표시, 화면에서 빼기 | O | O | O | O |
+| 배경 정렬 | O | O | 잠김 | 잠김 |
 | 점 끌기 / 삽입 / 삭제 | - | O | - | - |
 | 라벨 배치 / 이동 / 삭제 | - | O | - | - |
 | 차량 실시간 위치 | ROS 있으면 | ROS 있으면 | O | O |
@@ -141,9 +151,7 @@ CSV의 `yaw`는 EKF가 준 실제 **차체 헤딩**이고, `path_loader.hpp`의 
 있어도 됩니다.
 
 `main`은 선택입니다 -- `mission_track.yaml`처럼 코스가 전부 조각인 미션에는 없고, 그때는
-최상위 `labels:`도 없습니다. 그런 미션에서는 코스 목록에 `main` 항목이 나오지 않으므로,
-연 CSV는 파일 이름으로 자동으로 묶이거나(`courses.<이름>.csv`와 같으면) 목록에서 손으로
-골라야 합니다.
+최상위 `labels:`도 없습니다. 그런 미션에서는 코스 목록에 `main` 항목이 나오지 않습니다.
 
 스튜디오도 그대로 따라갑니다.
 
@@ -153,9 +161,11 @@ CSV의 `yaw`는 EKF가 준 실제 **차체 헤딩**이고, `path_loader.hpp`의 
   아닙니다 -- 갈래 라벨을 고른 채 main을 클릭했다고 라벨이 main으로 옮겨 붙으면
   `mission_loader`가 그 라벨을 엉뚱한 CSV에서 찾게 됩니다.
 - 그래서 어떤 라벨을 옮기려면 **그 코스의 CSV가 열려 있어야** 합니다. 안 열려 있으면
-  배치를 거부하고 어느 CSV를 열어야 하는지 알려 줍니다.
-- 코스와 미션 코스의 짝은 파일 이름으로 자동으로 맞춥니다(`courses.<n>.csv`와 비교).
-  틀리면 레이어 목록에서 바꾸세요.
+  배치를 거부하고 어느 CSV를 열어야 하는지 알려 줍니다(보통은 화면에서 뺀 코스입니다 --
+  미션을 다시 열면 돌아옵니다).
+- 코스와 미션 코스의 짝은 **짐작하지 않습니다.** 코스가 전부 미션의 `courses:`에서 오므로
+  어느 이름인지 처음부터 알고 올립니다. 레이어 목록의 `미션 코스` 칸은 그래도 손으로
+  바꿀 수 있게 남겨 두었습니다(같은 CSV를 다른 코스로 대 보고 싶을 때).
 
 ### `last` 라벨
 
@@ -202,35 +212,34 @@ CSV의 `yaw`는 EKF가 준 실제 **차체 헤딩**이고, `path_loader.hpp`의 
 분기 케이스를 새로 추가하거나 지우는 것은 여기서 지원하지 않습니다 -- YAML을 손으로
 고치세요.
 
-## 배경 이미지
+## 배경 이미지 -- 미션이 정합니다
 
-`label_waypoints.py`가 하던 세 가지를 그대로 옮겼습니다.
+**이미지를 고르는 자리는 없습니다.** 어떤 그림을 깔지는 mission.yaml의 최상위
+`background:` 한 줄이 정하고, 미션을 열 때 코스와 같이 올라옵니다.
 
-- **시뮬 코스**: `hyper_gazebo`의 `course.png`. 배치는 하드코딩이 아니라 같은 폴더의
-  `ground.obj` 쿼드 정점에서 읽으므로, 메시를 다시 생성해도 오버레이가 시뮬레이터와
-  어긋나지 않습니다. 텍스처 종횡비(3937×4492)와 쿼드 종횡비(102.5×122.5 m)가 약 5% 다른데,
-  Gazebo가 늘려 붙이므로 스튜디오도 같은 범위를 그대로 써서 동일하게 늘립니다.
-- **항공사진**: 지오레퍼런스가 전혀 없으므로 배치는 `<이미지>.align.yaml`에 있습니다 --
-  이미지 중심의 map 좌표, **이미지 가로 폭(m)**, 반시계 회전각(도). 축척을 픽셀당 미터가
-  아니라 가로 폭으로 저장하는 이유는 배경이 다운샘플되기 때문입니다. 픽셀 기준이면
-  다운샘플 배율만 바뀌어도 배경이 조용히 어긋납니다.
-- **정사영상**: 이미 지오레퍼런스된 이미지 + map 프레임 경계.
-
-정렬 패널에서 맞춘 뒤 **정렬 저장**을 눌러야 사이드카에 남습니다.
-
-### 시뮬 코스를 실차 기록에 맞추기
-
-`--overlay gazebo`로 연 시뮬 코스도 정렬 패널로 옮기고/키우고/돌릴 수 있습니다(쿼드
-종횡비 그대로 -- `course.png`를 이미지 열기로 따로 열면 약 5% 세로로 덜 늘어나 보입니다).
-**정렬 저장**은 `hyper_gazebo`의 `meshes/course.align.yaml`에 쓰지만, 그것만으로는 시뮬이
-바뀌지 않습니다. 월드/메시에 반영하려면:
-
-```bash
-src/simulator/hyper_gazebo/worlds/models/driving_course/fit_to_track.py --apply-alignment
+```yaml
+# mission_track.yaml
+background: real_course.png      # mission_school.yaml은 school.png
 ```
 
-그러면 `track.world`의 코스와 소품 위치, `ground.obj`/`hill.obj`, `model.sdf`가 새 변환으로
-다시 쓰입니다. 저장만 하고 반영하지 않은 동안에는 오버레이의 폭 옆에 `*`가 남습니다.
+파일 이름만 적으면 (1) 그 yaml의 폴더, (2) `~/HYPER`, (3) `hyper_gazebo`의 `meshes/` 순으로
+찾습니다. 절대 경로도 됩니다. `mission_manager`는 이 키를 읽지 않습니다 -- 로더가 모르는
+최상위 키는 그냥 지나칩니다.
+
+배치는 **`<이미지>.align.yaml` 사이드카**에 있습니다: 이미지 중심의 map 좌표, **이미지
+가로 폭(m)**, 반시계 회전각(도). 항공사진에는 지오레퍼런스가 전혀 없어서 손으로 맞춘
+값입니다. 축척을 픽셀당 미터가 아니라 가로 폭으로 저장하는 이유는 배경이 다운샘플되기
+때문입니다 -- 픽셀 기준이면 다운샘플 배율만 바뀌어도 배경이 조용히 어긋납니다.
+사이드카가 아직 없으면 올라와 있는 코스의 bbox에서 자리를 추정합니다(그래서 배경은 늘
+코스보다 **나중에** 올립니다).
+
+정렬 패널에서 옮기고/키우고/돌린 뒤 **정렬 저장**을 눌러야 사이드카에 남습니다.
+`없애기`는 배경만 내립니다 -- 미션을 다시 열면 돌아옵니다.
+
+> 예전에 있던 **시뮬 코스** 버튼은 없습니다. 그 버튼이 열던 `course.png`는 더 이상 없고
+> (지금 `ground.mtl`이 쓰는 바닥 텍스처가 `real_course.png` 자신입니다), 텍스처를 쿼드
+> 종횡비로 늘려 주던 보정도 필요 없어졌습니다 -- `real_course.png`는 1039×864(0.831569)로
+> `ground.obj` 쿼드 121.2454×100.8238 m(0.831568)와 여섯 자리까지 같습니다.
 
 ## 로컬 코스트맵
 

@@ -263,6 +263,10 @@ routes:
 그 블록을 통째로 재작성하므로 위치를 바꾸지 않았습니다 -- 나머지 코스는
 `courses.<이름>.labels`를 씁니다. `drive` 스텝은 자기 `course:`의 라벨만 찾습니다.
 
+**최상위 `background:`는 waypoint studio 것입니다.** 미션을 열 때 배경으로 깔 항공사진
+(`real_course.png` / `school.png`)이고, 코스 CSV와 마찬가지로 파일 이름만 적으면 스튜디오가
+찾아 줍니다. `mission_manager`는 모르는 최상위 키를 그냥 지나가므로 로드에 영향이 없습니다.
+
 **CSV 경로**는 절대 경로가 아니면 (1) main CSV가 있는 디렉터리, (2) `waypoints_dir` 파라미터
 (기본 `hyper_waypoint/waypoints`), (3) mission.yaml이 있는 디렉터리, (4) 준 그대로 순으로
 찾습니다. 기본은 (2)입니다 -- 코스마다 `track/common_1.csv`처럼 `waypoints/` 아래 상대 경로를

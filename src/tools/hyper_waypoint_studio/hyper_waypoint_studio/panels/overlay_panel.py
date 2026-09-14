@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # =====================================================================
-# 배경 이미지와 그 배치.
+# 배경 이미지의 배치.
 #
-# 지오레퍼런싱은 label_waypoints.py가 하던 세 가지를 그대로 옮겼습니다.
-#   gazebo  : course.png + ground.obj의 쿼드 경계 (맞출 것이 없습니다)
-#   align   : 항공사진 + <이미지>.align.yaml (중심/가로 폭/회전을 손으로 맞춥니다)
-#   extent  : 이미 지오레퍼런스된 정사영상 + map 프레임 경계
+# **이 패널은 이미지를 열지 않습니다.** 어느 이미지를 까는지는 mission.yaml의
+# `background:`가 정하고, app_window가 미션을 열 때 같이 올립니다 -- 캔버스가 편집
+# 중인 미션과 다른 그림을 깔고 있을 수 있으면 라벨 좌표를 눈으로 믿을 수 없습니다.
+#
+# 여기 남은 것은 그 이미지를 코스에 맞추는 일뿐입니다. 항공사진에는 지오레퍼런스가
+# 없으므로 중심/가로 폭/회전을 손으로 맞추고, 그 값은 <이미지>.align.yaml에 남습니다.
 # =====================================================================
 
 import os
@@ -28,8 +30,6 @@ ROT_FINE = 0.05
 
 class OverlayPanel(QWidget):
 
-    load_gazebo = Signal()
-    load_image = Signal()
     clear_overlay = Signal()
     save_alignment = Signal()
     nudged = Signal(float, float, float, float)   # dx, dy, scale, rot
@@ -43,16 +43,11 @@ class OverlayPanel(QWidget):
         root.setContentsMargins(6, 6, 6, 6)
 
         buttons = QHBoxLayout()
-        gazebo = QPushButton('시뮬 코스')
-        gazebo.setToolTip('hyper_gazebo의 course.png. 배치는 ground.obj에서 읽습니다')
-        gazebo.clicked.connect(self.load_gazebo.emit)
-        image = QPushButton('이미지…')
-        image.setToolTip('항공사진/정사영상을 고릅니다. 배치는 .align.yaml 사이드카')
-        image.clicked.connect(self.load_image.emit)
         clear = QPushButton('없애기')
+        clear.setToolTip('배경만 내립니다. 미션을 다시 열면 돌아옵니다')
         clear.clicked.connect(self.clear_overlay.emit)
-        for button in (gazebo, image, clear):
-            buttons.addWidget(button)
+        buttons.addWidget(clear)
+        buttons.addStretch(1)
         root.addLayout(buttons)
 
         self._source = QLabel('배경 없음')
@@ -132,11 +127,10 @@ class OverlayPanel(QWidget):
 
         root.addWidget(self._align_box)
         root.addStretch(1)
-        self.set_overlay(None, alignable=False)
+        self.set_overlay(None)
 
     # ------------------------------------------------------------------ 상태
-    def set_overlay(self, path, alignable, cx=0.0, cy=0.0, width_m=0.0, rot=0.0,
-                    dirty=False):
+    def set_overlay(self, path, cx=0.0, cy=0.0, width_m=0.0, rot=0.0, dirty=False):
         if path is None:
             self._source.setText('배경 없음')
             self._align_box.setEnabled(False)
@@ -144,10 +138,7 @@ class OverlayPanel(QWidget):
             return
         self._source.setText(os.path.basename(path))
         self._source.setToolTip(path)
-        self._align_box.setEnabled(alignable)
-        if not alignable:
-            self._readout.setText('ground.obj가 배치를 정합니다 -- 맞출 것이 없습니다.')
-            return
+        self._align_box.setEnabled(True)
         star = ' *' if dirty else ''
         self._readout.setText(
             f'중심 ({cx:.2f}, {cy:.2f})\n폭 {width_m:.2f} m   회전 {rot:.2f}°{star}')

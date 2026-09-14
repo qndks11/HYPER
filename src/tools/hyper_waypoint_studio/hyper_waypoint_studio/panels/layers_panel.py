@@ -24,7 +24,6 @@ def _swatch(color):
 
 class LayersPanel(QWidget):
 
-    add_requested = Signal()
     remove_requested = Signal(int)
     active_changed = Signal(int)
     visibility_changed = Signal(int, bool)
@@ -42,13 +41,11 @@ class LayersPanel(QWidget):
         root.setContentsMargins(6, 6, 6, 6)
 
         buttons = QHBoxLayout()
-        add = QPushButton('코스 추가…')
-        add.setToolTip('웨이포인트 CSV를 골라 화면에 겹쳐 올립니다')
-        add.clicked.connect(self.add_requested.emit)
         self._remove = QPushButton('화면에서 빼기')
-        self._remove.setToolTip('보기에서만 뺍니다 -- 파일은 건드리지 않습니다')
+        self._remove.setToolTip(
+            '보기에서만 뺍니다 -- 파일은 건드리지 않습니다.\n'
+            '미션을 다시 열면 돌아옵니다.')
         self._remove.clicked.connect(self._on_remove)
-        buttons.addWidget(add)
         buttons.addWidget(self._remove)
         root.addLayout(buttons)
 
