@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <model name="school_course">
+    <static>true</static>
+    <link name="base">
+
+      <!-- flat aerial-photo ground: 94.2045 x 53.1487 m (631 x 356 px).
+           Textured with driving_course/meshes/school.png, registered to the map frame by
+           driving_course/meshes/school.align.yaml (waypoint studio's align tool).
+           The mesh lives next to the PNG so the studio still finds the image there.
+           No transform is baked in - the include <pose> in school.world places it
+           straight from that alignment (rotation 0). -->
+      <visual name="ground_visual">
+        <geometry>
+          <mesh><uri>model://driving_course/meshes/school_ground.obj</uri></mesh>
+        </geometry>
+      </visual>
+      <collision name="ground_collision">
+        <geometry>
+          <plane><normal>0 0 1</normal><size>94.2045 53.1487</size></plane>
+        </geometry>
+        <surface>
+          <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+        </surface>
+      </collision>
+
+    </link>
+  </model>
+</sdf>

@@ -288,8 +288,11 @@ ros2 launch hyper_interface interface.launch.py     # 기본 포트 /dev/tty_ard
 시뮬레이션:
 
 ```bash
-ros2 launch hyper_launch simulation.launch.py
+ros2 launch hyper_launch simulation.launch.py                 # 용인 트랙 (site:=track 기본값)
+ros2 launch hyper_launch simulation.launch.py site:=school   # 학교 빈 월드 + datum school + mission_school
 ```
+
+`site:=track|school`이 Gazebo 월드(`worlds/<site>.world`), `datum_site`, `mission`(`mission_<site>`), 스폰 위치(`<site>/start_left.csv` 0번 행)를 같이 고릅니다. 개별 인자를 직접 주면 그 값이 우선합니다. `sim.launch.py`도 같은 `site:=` 인자를 받습니다.
 
 한 프로세스 트리 안에서 스택 전체를 순서대로 띄웁니다: `sim`(Gazebo + 차량 스폰 + 저수준 컨트롤러) → 5초 뒤 `odometry`(dual EKF + navsat_transform) → 7초 뒤 `perception`(차선/정지선 감지 + 신호등 감지) → 9초 뒤 `behavior`(`hyper_planner` 패키지의 `parking_system_cpp.launch.py` — costmap, hybrid A* 플래너, behavior supervisor, controller를 한 번에 실행하는 C++ 버전).
 

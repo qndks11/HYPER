@@ -2,7 +2,13 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    SetLaunchConfiguration,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -14,6 +20,17 @@ from launch_ros.actions import Node
 ODOMETRY_DELAY_S = 5.0
 PERCEPTION_DELAY_S = 7.0
 BEHAVIOR_DELAY_S = 9.0
+
+
+def _resolve_site_defaults(context, *_args, **_kwargs):
+    """비어 있는 mission/datum_site를 site로 채웁니다 (mission_<site>, <site>)."""
+    site = LaunchConfiguration('site').perform(context)
+    defaults = {'mission': f'mission_{site}', 'datum_site': site}
+    return [
+        SetLaunchConfiguration(name, value)
+        for name, value in defaults.items()
+        if not LaunchConfiguration(name).perform(context)
+    ]
 
 
 def generate_launch_description():
@@ -80,21 +97,27 @@ def generate_launch_description():
                      mission=LaunchConfiguration('mission'), **extra)
 
     return LaunchDescription([
+        # 어느 사이트를 시뮬할지 (track | school). worlds/<site>.world, datum <site>,
+        # 미션 mission_<site>, 스폰 <site>/start_left.csv 0번 행이 한 번에 따라옵니다.
+        # 아래 인자들을 직접 주면 그 값이 이깁니다.
+        DeclareLaunchArgument(
+            'site', default_value='track', choices=['track', 'school'],
+            description='Which site to simulate (track | school)'),
         # 어떤 미션을 실을지. hyper_planner/mission/<이름>.yaml로 풀립니다.
-        # mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
-        DeclareLaunchArgument('mission', default_value='mission_track'),
-        # 차량 스폰 위치/방위(map 프레임). 기본은 track/start_left.csv 0번 행,
-        # 즉 실차가 출발선에 섰던 자리입니다. 다른 코스를 시뮬에서 따라가려면 그
-        # CSV의 0번 행 x/y/yaw로 스폰시켜야 리드인이 코스 전체를 가로지르는
-        # 직선으로 안 잡힙니다.
-        DeclareLaunchArgument('x', default_value='35.5508', description='Initial X position'),
-        DeclareLaunchArgument('y', default_value='16.6373', description='Initial Y position'),
-        DeclareLaunchArgument('Y', default_value='2.8461', description='Initial Yaw (rad)'),
+        # 빈 값이면 mission_<site>. mission:=simple 이면 코스 한 바퀴만 도는 단일 골 미션입니다.
+        DeclareLaunchArgument('mission', default_value=''),
+        # 차량 스폰 위치/방위(map 프레임). 빈 값이면 <site>/start_left.csv 0번 행,
+        # 즉 실차가 출발선에 섰던 자리입니다(hyper_gazebo vehicle.launch.py의 SITE_PRESETS).
+        # 다른 코스를 시뮬에서 따라가려면 그 CSV의 0번 행 x/y/yaw로 스폰시켜야 리드인이
+        # 코스 전체를 가로지르는 직선으로 안 잡힙니다.
+        DeclareLaunchArgument('x', default_value='', description='Initial X position'),
+        DeclareLaunchArgument('y', default_value='', description='Initial Y position'),
+        DeclareLaunchArgument('Y', default_value='', description='Initial Yaw (rad)'),
         # navsat_transform 원점. hyper_localization/config/datums.yaml의 키
-        # (school | track). track.world가 용인 트랙의 map 좌표를 그대로 쓰므로
-        # 시뮬도 실차와 같은 track 원점을 씁니다 -- 월드의
-        # <spherical_coordinates>와 반드시 같은 값이어야 합니다.
-        DeclareLaunchArgument('datum_site', default_value='track'),
+        # (school | track). 빈 값이면 site와 같습니다 -- <site>.world가 그 사이트의
+        # map 좌표를 그대로 쓰므로 월드의 <spherical_coordinates>와 반드시 같은
+        # 값이어야 합니다.
+        DeclareLaunchArgument('datum_site', default_value=''),
         # headless:=true면 Gazebo 3D 창을 띄우지 않습니다. 센서 렌더링은 오프스크린으로
         # 그대로 돌아가므로 카메라/라이다 토픽은 동일하게 나오고, 시각화는 rviz로 하면 됩니다.
         DeclareLaunchArgument(
@@ -117,9 +140,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_gps_gui', default_value='true',
             description='Launch the GPS accuracy / yaw-calibration monitor GUI'),
+        OpaqueFunction(function=_resolve_site_defaults),
         rviz,
         gps_accuracy_gui,
         stage('sim.launch.py',
+              site=LaunchConfiguration('site'),
               headless=LaunchConfiguration('headless'),
               software_rendering=LaunchConfiguration('software_rendering'),
               x=LaunchConfiguration('x'),

@@ -527,6 +527,13 @@ keepout:
 장애물과 똑같이 팽창시킵니다(`inflation_radius` 1.0, `cost_scaling_factor` 3.0). 구역이 없는
 미션도 0 한 칸짜리 마스크를 냅니다 -- 앞 미션의 구역이 레이어에 남지 않게 하려는 것입니다.
 
+**`mission_manager` 없이 코스트맵만 쓸 때는 레이어를 끄세요.** `nav2_controller.launch.py`의
+`use_keepout:=false`가 `keepout_layer.enabled`를 false로 덮어써 코스트맵이 라이다
+(`obstacle_layer` + `inflation_layer`)만 보게 합니다. 안 끄면 마스크를 낼 노드가 없어
+StaticLayer가 `Can't update static costmap layer, no map received`를 반복해서 찍습니다
+(코스트맵 동작 자체에는 지장이 없습니다). `hyper_control`의 `joystick.launch.py`는 이미
+false로 넘깁니다.
+
 **반영 시점: `mission_manager` 재시작.** 마스크는 로드할 때 한 번만 굽고, 기본 `mission_yaml`은
 설치된 share 사본이므로 스튜디오에서 저장한 뒤에는 `colcon build --packages-select hyper_planner`
 후 다시 띄워야 합니다.

@@ -51,4 +51,9 @@ ros2 launch hyper_control estop.launch.py launch_joy_node:=true   # 정지/재�
 `/velocity`를 내는 노드는 여전히 `joystick_controller_node` 하나뿐입니다). 끄려면
 `use_costmap:=false`. 코스트맵이 채워지려면 odometry TF와 `/scan`이 떠 있어야 합니다.
 
+이 코스트맵은 **라이다만** 봅니다(`obstacle_layer` + `inflation_layer`). 진입 금지 구역
+`keepout_layer`는 `use_keepout:=false`로 꺼서 넘깁니다 -- 그 레이어가 읽는 `/keepout_mask`는
+`mission_manager`가 미션을 로드할 때만 내는데 조이스틱 주행에는 미션이 없고, 켜 두면
+`Can't update static costmap layer, no map received` 경고만 반복됩니다.
+
 Gazebo 시뮬레이션은 이 패키지의 모델과 컨트롤러를 사용하며, 실행은 `hyper_gazebo` 또는 `hyper_launch`에서 담당합니다.

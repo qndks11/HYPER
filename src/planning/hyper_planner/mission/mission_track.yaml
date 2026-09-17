@@ -183,10 +183,10 @@ steps:
   # 않고 반드시 서야 합니다. obstacle_hold_s가 그 정지를 미션 실패가 아니라 대기로
   # 다룹니다(1초마다 같은 골을 다시 보내고, 30초 넘게 막혀 있으면 그때 실패).
   - {type: drive, course: common_2, until: accel_start, controller: FRPP,
-     goal_checker: precise_goal_checker, cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+     goal_checker: precise_goal_checker, handoff_m: 6.0}
   - {type: drive, course: common_2, until: accel_end, controller: FRPP,
      goal_checker: precise_goal_checker, obstacle_hold_s: 30.0,
-     cancel_on_arrival_m: 0.4, decel_profile_a: 2.0}
+     handoff_m: 6.0}
 
   # [12] 평행 주차 갈림길까지. common_2는 여기서 끝납니다(park_p_entry = last).
   - {type: drive, course: common_2, until: park_p_entry, controller: FRPP,
@@ -258,12 +258,12 @@ routes:
     - {type: drive, course: p_up, until: p_up_spot, controller: RRPP,
        reverse: true, goal_checker: park_goal_checker}
     - {type: stop, duration_s: 3.0}
-    - {type: drive, course: p_up, until: p_up_end, controller: FRPP}
+    - {type: drive, course: p_up, until: p_up_end, controller: FRPP, handoff_m: 3.0}
   p_down_route:
     - {type: drive, course: p_down, until: p_down_spot, controller: RRPP,
        reverse: true, goal_checker: park_goal_checker}
     - {type: stop, duration_s: 3.0}
-    - {type: drive, course: p_down, until: p_down_end, controller: FRPP}
+    - {type: drive, course: p_down, until: p_down_end, controller: FRPP, handoff_m: 3.0}
 
   # 마지막 차선. 여기서 끝나면 미션 종료입니다([15]가 main의 마지막 스텝입니다).
   end_left_route:

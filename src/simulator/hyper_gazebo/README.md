@@ -10,6 +10,29 @@ ros2 launch hyper_gazebo vehicle.launch.py
 
 `worlds/track.world`가 기본 주행 환경이며, 초기 차량 위치와 자세는 launch 인자로 변경할 수 있습니다. 실차에서는 이 패키지 대신 실제 센서·제어 패키지를 사용합니다.
 
+`site:=track|school`(기본 `track`)이 월드(`worlds/<site>.world`), datum 대조 대상
+(`datums.yaml[<site>]`), 스폰 기본값(`<site>/start_left.csv` 0번 행), teleport_service가 읽는
+미션(`mission_<site>.yaml`)을 한 번에 고릅니다. `world:=`, `x:=` 등을 직접 주면 그 값이 이깁니다.
+
+```bash
+ros2 launch hyper_gazebo vehicle.launch.py site:=school
+ros2 launch hyper_launch simulation.launch.py site:=school   # 전체 스택 (mission_school, datum school)
+```
+
+## 학교 월드 (`school.world`)
+
+학교 실습장의 빈 월드입니다 -- 라바콘, 신호등, 차로 표지판, 주차 차량이 하나도 없고 바닥에
+항공사진만 깔려 있습니다. 트랙과 같은 원리로 실제 학교와 같은 map 좌표를 쓰므로
+`waypoints/school/*.csv`와 `mission_school.yaml`을 그대로 씁니다.
+
+- 바닥: `models/school_course` 모델이 `driving_course/meshes/school_ground.obj`(94.2045 x 53.1487 m)에
+  `school.png`를 입힙니다. PNG를 옮기지 않은 것은 waypoint studio가 그 자리에서 배경을 찾기 때문입니다.
+- 배치: 월드의 include `<pose>`는 `school.align.yaml`의 center(-6.2, 18.6), 회전 0을 그대로 씁니다.
+  스튜디오에서 정렬을 다시 하면 이 pose와 obj 크기(`width_m`)도 같이 고치세요.
+- 원점: `<spherical_coordinates>`는 `datums.yaml`의 `school` 항목과 반드시 같아야 합니다.
+- world name은 `course_world` 그대로입니다(sim 서비스들의 기본값). lane_sign_service의 표지판은
+  이 월드에 없으므로 Swap을 누르면 실패만 합니다.
+
 ## 용인 트랙의 디지털 트윈
 
 **이 월드는 실차 트랙(용인)과 같은 map 좌표를 씁니다.** 그래서 `waypoints/track/*.csv`와

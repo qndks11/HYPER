@@ -471,7 +471,8 @@ local_costmap:
       # 구워 /keepout_mask에 latched로 냅니다. StaticLayer가 100을 254(LETHAL)로 읽고, 마스크는 map,
       # 이 코스트맵은 odom(rolling)이라 매 주기 tf(map->odom)로 옮겨 읽습니다. 즉 GPS/EKF 오차만큼
       # 구역이 같이 흔들립니다. mission_manager가 안 떠 있으면(조이스틱 주행 등) 마스크가 없어
-      # 이 레이어는 아무것도 안 합니다.
+      # 이 레이어는 경고만 찍으므로, 그때는 nav2_controller.launch.py의 use_keepout:=false로
+      # 아래 enabled를 덮어씁니다(joystick.launch.py는 이미 그렇게 넘깁니다).
       keepout_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         enabled: true

@@ -11,7 +11,8 @@ from launch.actions import (
     OpaqueFunction,
     RegisterEventHandler,
     ExecuteProcess,
-    SetEnvironmentVariable
+    SetEnvironmentVariable,
+    SetLaunchConfiguration
 )
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -19,6 +20,33 @@ from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 
 from launch_ros.actions import Node
+
+
+# site:=track|school 가 고르는 기본값. 월드는 worlds/<site>.world, datum은
+# datums.yaml[<site>], 스폰은 <site>/start_left.csv의 0번 행(실차 출발 자리)입니다.
+# x/y/Y/world를 직접 넘기면 그 값이 이깁니다.
+SITE_PRESETS = {
+    'track': {'x': '35.5508', 'y': '16.6373', 'Y': '2.8461'},
+    'school': {'x': '-9.0532', 'y': '23.9772', 'Y': '2.8325'},
+}
+
+
+def _resolve_site_defaults(context, *_args, **_kwargs):
+    """비어 있는 world/x/y/Y를 site 프리셋으로 채웁니다."""
+    site = LaunchConfiguration('site').perform(context)
+    if site not in SITE_PRESETS:
+        raise RuntimeError(
+            f"Unknown site '{site}' -- choices are {sorted(SITE_PRESETS)}")
+
+    defaults = dict(SITE_PRESETS[site])
+    defaults['world'] = os.path.join(
+        get_package_share_directory('hyper_gazebo'), 'worlds', f'{site}.world')
+
+    return [
+        SetLaunchConfiguration(name, value)
+        for name, value in defaults.items()
+        if not LaunchConfiguration(name).perform(context)
+    ]
 
 
 def load_robot_description(robot_description_path, vehicle_params_path):
@@ -51,11 +79,12 @@ def _check_world_datum_matches(context, *_args, **_kwargs):
     import re
 
     world_path = LaunchConfiguration('world').perform(context)
+    site = LaunchConfiguration('site').perform(context)
     try:
         datums_path = os.path.join(
             get_package_share_directory('hyper_localization'), 'config', 'datums.yaml')
         with open(datums_path) as handle:
-            datum = yaml.safe_load(handle)['datums']['track']
+            datum = yaml.safe_load(handle)['datums'][site]
         with open(world_path) as handle:
             world = handle.read()
         lat = float(re.search(r'<latitude_deg>([^<]+)</latitude_deg>', world).group(1))
@@ -69,7 +98,7 @@ def _check_world_datum_matches(context, *_args, **_kwargs):
             or abs(lon - datum['longitude_deg']) > 1e-7):
         print("\n[vehicle.launch] *** 월드와 datums.yaml의 원점이 다릅니다 ***\n"
               f"      {os.path.basename(world_path)}: {lat}, {lon}\n"
-              f"      datums.yaml[track]:  {datum['latitude_deg']}, {datum['longitude_deg']}\n"
+              f"      datums.yaml[{site}]:  {datum['latitude_deg']}, {datum['longitude_deg']}\n"
               "      map 프레임이 Gazebo 월드에서 밀린 채로 돕니다. 한쪽을 맞추세요.\n")
     return []
 
@@ -120,13 +149,6 @@ def generate_launch_description():
 
     vehicle_package_name = "hyper_control"
     vehicle_package_path = get_package_share_directory(vehicle_package_name)
-
-    # 기본 Gazebo world 파일 경로
-    default_world_path = os.path.join(
-        sim_package_path,
-        'worlds',
-        'track.world'
-    )
 
     # Gazebo Sim에서 model:// 경로를 찾을 수 있도록 설정
     gz_resource_path = SetEnvironmentVariable(
@@ -183,10 +205,17 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('software_rendering'))
     )
 
+    site_arg = DeclareLaunchArgument(
+        'site',
+        default_value='track',
+        choices=list(SITE_PRESETS),
+        description='Which site to simulate: picks worlds/<site>.world, its datum and spawn pose'
+    )
+
     world_arg = DeclareLaunchArgument(
         'world',
-        default_value=default_world_path,
-        description='Specify the world file for Gazebo'
+        default_value='',
+        description='World file for Gazebo (empty = worlds/<site>.world)'
     )
 
     # headless:=true는 ign gazebo를 서버 전용(-s)으로 띄우고, 카메라/라이다가 쓰는 오프스크린
@@ -205,19 +234,19 @@ def generate_launch_description():
         "'.lower() in ('true', '1') else ''"
     ])
 
-    # 스폰 기본값은 track/start_left.csv의 0번 웨이포인트, 즉 실차가 실제로
-    # 출발선에 섰던 자리입니다. 월드가 용인 트랙과 같은 map 좌표를 쓰게 된
-    # 뒤로는 sim과 실차가 같은 지점에서 같은 미션을 시작합니다.
+    # 스폰 기본값(빈 값)은 <site>/start_left.csv의 0번 웨이포인트, 즉 실차가 실제로
+    # 출발선에 섰던 자리입니다(SITE_PRESETS). 월드가 실제 사이트와 같은 map 좌표를
+    # 쓰므로 sim과 실차가 같은 지점에서 같은 미션을 시작합니다.
     x_arg = DeclareLaunchArgument(
         'x',
-        default_value='35.5508',
-        description='Initial X position'
+        default_value='',
+        description='Initial X position (empty = site preset)'
     )
 
     y_arg = DeclareLaunchArgument(
         'y',
-        default_value='16.6373',
-        description='Initial Y position'
+        default_value='',
+        description='Initial Y position (empty = site preset)'
     )
 
     z_arg = DeclareLaunchArgument(
@@ -240,8 +269,8 @@ def generate_launch_description():
 
     yaw_arg = DeclareLaunchArgument(
         'Y',
-        default_value='2.8461',
-        description='Initial Yaw'
+        default_value='',
+        description='Initial Yaw (empty = site preset)'
     )
 
     world_file = LaunchConfiguration('world')
@@ -343,6 +372,12 @@ def generate_launch_description():
     teleport_service_node = Node(
         package='hyper_gazebo',
         executable='teleport_service.py',
+        parameters=[{
+            'mission_yaml': [
+                os.path.join(os.path.expanduser('~'), 'HYPER', 'src', 'planning',
+                             'hyper_planner', 'mission', 'mission_'),
+                LaunchConfiguration('site'), '.yaml'],
+        }],
         output='screen'
     )
 
@@ -412,17 +447,19 @@ def generate_launch_description():
             )
         ),
 
+        site_arg,
         world_arg,
-        OpaqueFunction(function=_check_world_datum_matches),
-        headless_arg,
-        gazebo_launch,
-
         x_arg,
         y_arg,
         z_arg,
         roll_arg,
         pitch_arg,
         yaw_arg,
+        # 빈 world/x/y/Y를 site 프리셋으로 채운 뒤에 그 값을 쓰는 액션들이 와야 합니다.
+        OpaqueFunction(function=_resolve_site_defaults),
+        OpaqueFunction(function=_check_world_datum_matches),
+        headless_arg,
+        gazebo_launch,
 
         spawn_model_gazebo_node,
         robot_state_publisher_node,
