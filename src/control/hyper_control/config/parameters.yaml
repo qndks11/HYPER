@@ -21,7 +21,12 @@
     max_steering_angle: 0.5061455 # 최대 조향각 29도 (실측) [rad]
     max_steering_angular_velocity: 2.0 # 고성능 조향 모터/서보 반영으로 상향 [rad/s]
     max_steering_effort: 15.0 # 대형 차체를 돌리기 위한 조향 토크 상향 [Nm]
-    max_velocity: 2.0 
+    max_velocity: 1.8 # 1.8 m/s (2.0 m/s caused motor driver to emit smoke)
+    # 조이스틱 후진 속도 상한(양수 크기). 0.0이면 max_velocity와 동일(기존 대칭 동작).
+    # joystick_controller_node 전용입니다 -- nav2/RRPP 후진 주차는 이 노드를 거치지
+    # 않으므로 영향받지 않습니다. 실차 전체에 걸리는 하드 상한은 hyper_interface의
+    # max_backward_velocity 쪽입니다.
+    max_backward_velocity: 1.0 # [m/s]
     max_effort: 30.0 # 24V 듀얼 모터의 구동력을 반영하여 토크 상향 [Nm]
 
     # Camera and image params (Logitech C920, 일반 70도 hfov 렌즈, 전방)

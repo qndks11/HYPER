@@ -85,3 +85,11 @@ ros2 launch hyper_interface interface.launch.py     # 기본 포트 /dev/tty_ard
   추가하세요.
 - `max_velocity`, `max_steering_angle`은 `hyper_control`/`hyper_planner`의 동일 파라미터와
   값을 맞춰야 Arduino가 명령 범위 밖의 값을 받는 일이 없습니다.
+- `max_backward_velocity`는 `hyper_control`의 같은 이름 파라미터와 역할이 다릅니다. 여기는
+  `/velocity`를 내는 **모든** 노드(조이스틱, nav2, 폰 앱, 수동 topic pub)에 걸리는 하드
+  상한이고, `hyper_control` 쪽은 조이스틱 스틱 감각만 정합니다. 지금은 둘 다 1.0이지만
+  같은 값을 유지해야 하는 건 아닙니다 -- 조이스틱만 더 느리게 하려면 `hyper_control` 쪽만
+  낮추세요.
+- 여기 값은 `hyper_planner`의 `nav2_controller.yaml`에 있는 `RRPP.desired_linear_vel`
+  (후진 주차 속도, 현재 1.0) **이상**이어야 합니다 -- 그보다 낮으면 후진 주차가 경고 없이
+  느려집니다.

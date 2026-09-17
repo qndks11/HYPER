@@ -16,11 +16,13 @@ private:
   /**
    * @brief Callback function to process joystick inputs and update control states.
    * 
-   * @details This function listens to joystick messages and updates the desired steering angle 
+   * @details This function listens to joystick messages and updates the desired steering angle
    * and the desired velocity based on the joystick inputs.
    * - Axis 0 is used to calculate the desired steering angle as a fraction of the maximum steering angle.
-   * - Axis 3 is used to calculate the desired velocity as a fraction of the maximum velocity.
-   * 
+   * - Axis 4 is used to calculate the desired velocity as a fraction of the maximum velocity.
+   *   Pushing the stick back uses max_backward_velocity_ instead of max_velocity_, so reverse
+   *   can be capped lower than forward while still scaling smoothly over the stick's travel.
+   *
    * @param msg Pointer to the received Joy message containing button and axis states.
    */
   void listener_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
@@ -40,6 +42,7 @@ private:
 
   double max_steering_angle_;
   double max_velocity_;
+  double max_backward_velocity_;
 
   double steering_angle_;
   double velocity_;

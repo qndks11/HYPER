@@ -79,91 +79,22 @@ controller_server:
     # (이전 RPP 설정이 필요하면 git history에서 이 파일의 직전 버전을 보세요)
     MPPI:
       plugin: "nav2_mppi_controller::MPPIController"
-
-      # 예측 구간: 56 * 0.05 = 2.8초. model_dt는 controller_frequency(20 Hz)와 맞춥니다.
-      # 거리로는 vx_max에 비례합니다 -- 2.22 m/s면 6.2 m, 지금의 1.0 m/s면 2.8 m입니다.
-      # obstacle_max_range(6.0 m)보다 짧은 건 정상입니다: 지평선이 시야보다 길면 그 구간은
-      # 어차피 빈 공간으로 평가됩니다(6.0 m/s 시절에는 지평선의 2/3가 안 보이는 영역이었습니다).
-      #
-      # 100 -> 56으로 되돌렸습니다. 이 값을 올리면 안 되는 이유가 두 가지 있습니다.
-      #  1. 코너 컷이 커집니다. PathFollow/PathAngle critic의 목표점은
-      #     "궤적 끝점에 가장 가까운 경로 점(= 지평선 도달거리) + offset_from_furthest"이고,
-      #     비용은 그 점까지의 *직선* 거리입니다. 즉 목표는 호(arc) 길이로 앞에 있는데
-      #     점수는 현(chord)으로 매기므로, lookahead가 길수록 "코너를 잘라야 가까워지는" 폭이
-      #     커집니다(nav2 헤더의 shortcutting 서술 그대로). 100스텝에서는 이 lookahead가
-      #     5.0 + 1.5 = 6.5 m였고, 56스텝에서는 2.8 + 0.75 = 3.55 m입니다.
-      #  2. 연산량이 그대로 비례합니다. PathAlignCritic만 해도
-      #     batch(1000) x (time_steps / trajectory_point_step) x 경로 점 개수라
-      #     100스텝에서는 20 Hz를 못 지킬 수 있습니다. 실차에서 `ros2 topic hz /cmd_vel`로
-      #     반드시 확인하세요 -- 20 Hz를 못 지키면 model_dt(0.05) 가정이 깨져서 첫 제어가
-      #     계획보다 오래 적용되고, 계획보다 크고 이르게 돕니다. 시뮬은 use_sim_time이라
-      #     RTF가 떨어지며 자동으로 가려지고 실차에서만 드러납니다.
-      #
-      # 순항 속도에는 영향이 없습니다: 아래 gamma 주석의 식은 PathFollow의 전진 유인과
-      # 제어비용이 둘 다 time_steps에 비례해 상쇄되므로 지평선 길이와 무관합니다.
       time_steps: 100
       model_dt: 0.05
       batch_size: 1000
       iteration_count: 1
       temperature: 0.6
-      # gamma는 제어비용(control cost) 가중치입니다. MPPI에는 "목표 속도" 파라미터가 없고,
-      # 순항 속도는 PathFollowCritic이 앞으로 당기는 힘과 이 항이 억제하는 힘의 균형점으로
-      # 정해집니다. 실측/유도한 근사식:
-      #
-      #     순항속도 = PathFollowCritic.cost_weight * model_dt * vx_std^2 / gamma
-      #
-      # nav2 기본값(cost_weight 5, gamma 0.015)은 vx_max 0.5인 차동구동 로봇 기준이라
-      # 이 식으로 0.67 m/s가 나옵니다 -- 실제로 vx_max를 2.5로 올려도 0.86 m/s로 기어갔습니다.
-      # 현재값(8 * 0.05 * 0.21^2 / 0.0025)은 7.1 m/s입니다.
-      #
-      # vx_max를 2.5로 내린 뒤에도 이 값들은 일부러 그대로 둡니다. 순항 목표(7.1)가 상한
-      # (2.5)보다 한참 위라 MPPI는 직선에서 늘 상한에 붙어 달립니다 -- 위에 적힌 "vx_max
-      # 2.5에서 0.86 m/s로 기어가던" 증상이 바로 이 목표치가 낮아서 생긴 것이므로, 상한을
-      # 내렸다고 gamma를 같이 올리면 그 증상이 그대로 돌아옵니다.
-      # gamma는 vx뿐 아니라 wz의 제어비용도 같이 정합니다. nav2가 실제로 더하는 항은
-      # 각각 gamma/vx_std^2, gamma/wz_std^2 계수를 가진 두 개입니다(Optimizer의
-      # updateControlSequence). 그래서 gamma를 혼자 바꾸면 코너 컷/회피 균형
-      # (PathAlign 14.0 vs PathFollow 8.0)까지 흔들립니다 -- std와 *함께* 바꾸세요.
-      #
-      # 0.010 -> 0.0025 (1/4). vx_std 0.42 -> 0.21, wz_std 0.40 -> 0.20으로 함께 반씩
-      # 줄였으므로 std^2이 1/4이 되어 두 계수가 정확히 그대로입니다:
-      #     gamma/vx_std^2 : 0.010/0.42^2 = 0.0567 -> 0.0025/0.21^2 = 0.0567
-      #     gamma/wz_std^2 : 0.010/0.40^2 = 0.0625 -> 0.0025/0.20^2 = 0.0625
-      # 순항 속도(7.1 m/s)도 vx_std^2/gamma가 불변이라 그대로입니다. 즉 이 세 값은
-      # "제어 균형은 건드리지 않고 샘플링 폭만 절반으로 줄인" 한 묶음이며, 하나만
-      # 따로 바꾸면 안 됩니다.
-      # (이전에는 cost_weight 36 / vx_std 0.2로 7.2 m/s였습니다 -- 순항 속도는 그대로 두고
-      #  코너 컷을 만드는 쪽 항만 줄인 것입니다.)
-      # 즉 직선에서는 vx_max로 달리고, 곡선/장애물에서는 critic들이 알아서 감속시킵니다.
       gamma: 0.0025
       reset_period: 1.0
       regenerate_noises: false
       transform_tolerance: 0.2
-      # MPPI의 유일한 시각화 스위치입니다. false면 /trajectories(후보+최적 궤적)뿐 아니라
-      # /transformed_global_plan(컨트롤러가 실제로 추종 중인 참조 경로)까지 안 나가서
-      # follow_path.rviz가 통째로 비어 보입니다. 마커 생성은 20 Hz마다 도므로 대회 주행에서
-      # CPU가 아깝다면 여기서 끄세요(RViz도 같이 비게 됩니다).
       visualize: false
 
-      vx_max: 2.0
+      vx_max: 1.8
       vx_min: 0.0
       wz_max: 0.77
-      # vx_std/wz_std는 위 gamma 주석의 한 묶음입니다(gamma와 함께만 바꾸세요).
-      #
-      # 0.42 -> 0.21. 0.42는 vx_max 2.22 기준으로 고른 값(19%)인데 vx_max가 1.0으로
-      # 내려가면서 42%가 되어 있었습니다. 이 폭이 넓으면 두 가지가 나빠집니다:
-      #  1. 샘플의 상당수가 vx_max를 넘어 ConstraintCritic(4.0, 지평선 전체 합산)에
-      #     걸리고, 그 벌점이 평균을 상한 아래로 끌어내립니다.
-      #  2. 샘플의 상당수가 0 근처/음수로 갑니다. vx_min(0.0)과 vx_max 클립은
-      #     applyControlSequenceConstraints()에서 *최종 시퀀스에만* 걸리고 샘플에는
-      #     안 걸리며, 막아 주는 건 PreferForwardCritic(2.0 x model_dt)뿐입니다.
-      # vx_max 대비 21%로 되돌리면 원래 설계 의도(19%)와 같아집니다.
-      #
-      # wz_std 0.40 -> 0.20: wz_max를 1.6 -> 0.77로 낮췄으므로 같은 상대 폭(25%)을
-      # 유지한 것입니다. gamma/wz_std^2도 그대로입니다(위 gamma 주석 참고).
       vx_std: 0.21
       wz_std: 0.20
-      # 아커만은 비홀로노믹이라 vy는 모델에서 무시되지만 파라미터는 선언해야 합니다.
       vy_max: 0.5
       vy_std: 0.2
 
@@ -330,7 +261,7 @@ controller_server:
     FRPP:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # MPPI vx_max와 같은 순항 속도. 실제 상한은 /speed_limit이 더 낮게 깎습니다.
-      desired_linear_vel: 2.0
+      desired_linear_vel: 1.8
       # 속도 비례 lookahead (2.22 m/s에서 1.0초 = 2.22 m, min 1.0 / max 6.0 사이).
       use_velocity_scaled_lookahead_dist: true
       lookahead_time: 1.0
@@ -380,7 +311,10 @@ controller_server:
     #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
     RRPP:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 2.0
+      # 이 값을 올리려면 hyper_interface/config/parameters.yaml의 max_backward_velocity
+      # (현재 1.0)도 같이 올리세요. 그쪽이 /velocity 후진 하드 상한이라, 여기만 올리면
+      # 실차에서 후진 주차가 경고 없이 잘립니다.
+      desired_linear_vel: 1.0 # 1.0 m/s because 2.0 m/s caused motor driver to emit smoke
       lookahead_dist: 1.0
       min_lookahead_dist: 0.6
       max_lookahead_dist: 1.2
@@ -420,7 +354,7 @@ controller_server:
     # 확신할 수 있는 구간에서만 쓰세요(호출하는 쪽이 안전 책임을 집니다).
     FRPP_NC:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 2.0
+      desired_linear_vel: 1.8
       use_velocity_scaled_lookahead_dist: true
       lookahead_time: 1.0
       lookahead_dist: 2.0
@@ -549,7 +483,7 @@ cmd_vel_to_ackermann:
     max_steering_angle: 0.5061455
     # MPPI.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
-    max_velocity: 2.0
+    max_velocity: 1.8
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.
