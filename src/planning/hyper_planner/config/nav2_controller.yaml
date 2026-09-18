@@ -90,7 +90,7 @@ controller_server:
       transform_tolerance: 0.2
       visualize: false
 
-      vx_max: 1.8
+      vx_max: 1.6
       vx_min: 0.0
       wz_max: 0.77
       vx_std: 0.21
@@ -261,7 +261,7 @@ controller_server:
     FRPP:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # MPPI vx_max와 같은 순항 속도. 실제 상한은 /speed_limit이 더 낮게 깎습니다.
-      desired_linear_vel: 1.8
+      desired_linear_vel: 1.6
       # 속도 비례 lookahead (2.22 m/s에서 1.0초 = 2.22 m, min 1.0 / max 6.0 사이).
       use_velocity_scaled_lookahead_dist: true
       lookahead_time: 1.0
@@ -354,7 +354,7 @@ controller_server:
     # 확신할 수 있는 구간에서만 쓰세요(호출하는 쪽이 안전 책임을 집니다).
     FRPP_NC:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 1.8
+      desired_linear_vel: 1.6
       use_velocity_scaled_lookahead_dist: true
       lookahead_time: 1.0
       lookahead_dist: 2.0
@@ -483,7 +483,7 @@ cmd_vel_to_ackermann:
     max_steering_angle: 0.5061455
     # MPPI.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
-    max_velocity: 1.8
+    max_velocity: 1.6
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.

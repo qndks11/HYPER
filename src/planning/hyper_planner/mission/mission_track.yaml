@@ -41,7 +41,7 @@ courses:
       light_1: {x: -0.846, y: 1.740}   # wp #68
       s_curve_start: {x: -23.101, y: -23.846}   # wp #136
       s_curve_end: {x: -43.334, y: -1.138}   # wp #183
-      cone_2: {x: 5.037, y: -17.705}   # wp #262
+      cone_2: {x: 4.808, y: -18.261}   # wp #263
       park_t_entry: {x: -2.297, y: -35.820}   # wp #287
       light_2: {x: -12.994, y: -6.010}   # wp #228, orphan: 어떤 step도 참조하지 않음
 

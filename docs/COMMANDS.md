@@ -21,10 +21,6 @@ Terminal 3: Sensors
 ros2 launch hyper_launch sensors.launch.py
 ```
 
-EBIMU(`/imu`), RPLidar(`/scan`)와 함께 `hyper_rtk`(u-blox ZED-F9P 2대)를 띄웁니다. base는
-NTRIP 보정으로 절대 위치를 `/gps/fix`에, rover는 moving-base RTK 헤딩을 `/imu/heading`에
-냅니다.
-
 Terminal 4: Localization
 ```bash
 ros2 launch hyper_launch odometry.launch.py datum_site:=school use_sim_time:=false
@@ -39,23 +35,12 @@ ros2 run hyper_localization gps_accuracy_gui.py      # 절대 위치(base): hAcc
 ros2 run hyper_waypoint_studio waypoint_studio
 ```
 
-Terminal 6: Waypoint View & Recorder (Optional)
-```bash
-ros2 launch hyper_waypoint record.launch.py \
-  waypoint_csv:=$HOME/HYPER/src/planning/hyper_waypoint/waypoints/track.csv \
-  min_spacing_m:=0.5 use_record_gui:=true
-```
-
 ### Real Car Joystick & Waypoint record
 Terminal 7: Joystick
 ```bash
 ros2 launch hyper_control joystick.launch.py joystick_publish_period:=0.0
 ```
 
-로컬 코스트맵(`/local_costmap/costmap`)도 같이 뜹니다 -- 미션 없이 웨이포인트 스튜디오나
-RViz에서 볼 수 있습니다. 끄려면 `use_costmap:=false`. Terminal 2(`/scan`)와
-Terminal 3(odometry TF)이 떠 있어야 코스트맵이 채워집니다(TF가 나올 때까지 기다립니다).
-미션이 없으므로 진입 금지 구역 레이어는 꺼진 채(`use_keepout:=false`) 라이다만 봅니다.
 
 ### Real car Mission
 
@@ -65,22 +50,11 @@ ros2 launch hyper_launch perception.launch.py \
   lane_input_backend:=intra_process
 ```
 
-이미지 수집용(YOLO 없이 카메라 + 차선 인식 + `image_saver_service`만):
-
-```bash
-ros2 launch hyper_launch perception.launch.py \
-  lane_input_backend:=intra_process object_detection:=false
-
-ros2 service call /image_saver_service/save std_srvs/srv/Trigger
-```
 
 Terminal 8: Mission
 ```bash
 ros2 launch hyper_launch behavior.launch.py \
   use_sim_time:=false \
-  mission:=mission_school_s_curve
+  mission:=mission_school
 ```
-
-달릴 코스는 `hyper_planner/mission/<mission>.yaml`의 `courses:`가 정합니다
-(`simple.yaml`은 코스가 하나 -- `main`의 그 한 줄을 바꾸면 다른 코스를 한 바퀴 돕니다).
 

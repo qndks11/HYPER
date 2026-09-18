@@ -4,7 +4,7 @@
     baud_rate: 115200
     send_rate: 50.0 # [Hz]
     command_timeout: 0.3 # [s]
-    max_velocity: 1.8
+    max_velocity: 1.6
     max_backward_velocity: 1.0 # [m/s]
     max_steering_angle: 0.5061455 # 29 deg (실측) [rad]
     wheel_base: 0.72 # [m]

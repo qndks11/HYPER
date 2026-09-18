@@ -1,0 +1,21 @@
+label_snap_tolerance_m: 1.0
+branch_seam_tolerance_m: 2.0
+background: real_course.png
+
+courses:
+  curve_right_angle:
+    csv: track/s_curve_right_angle.csv
+    labels:
+      # 이 블록은 waypoint studio가 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.
+      curve_right_angle_end: last   # wp #64
+
+# --- 미션 시퀀스 ---
+#
+# 갈래(routes)가 끝나면 그 branch 바로 뒤의 스텝으로 합류합니다. 그래서 아래 순서는
+#   [분기] -> [합류해서 이어 갈 스텝] -> ... -> [다음 분기] -> ...
+# 로 읽으면 됩니다. 실제 스텝 인덱스(~/goto_step에 쓰는 번호)는 routes가 뒤에 붙으므로
+# yaml 순서와 다릅니다 -- `ros2 topic echo /mission_manager/steps --once`로 보세요.
+steps:
+  - {type: drive, course: curve_right_angle, until: curve_right_angle_end, controller: FRPP, cancel_on_arrival_m: 0.4, decel_profile_a: 1.0}
+
+routes:
