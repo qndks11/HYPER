@@ -427,7 +427,12 @@ local_costmap:
         # 한 줄 없이 costmap이 계속 0으로 비어 있습니다. 이유는 scan 블록 주석 참고.
         min_obstacle_height: -1.0
         observation_sources: scan
-        # 전방 180도만 옵니다(vehicle.xacro: min/max_angle -pi/2..+pi/2, 360 samples).
+        # 전방 180도만 옵니다. 시뮬레이션은 라이다 자체가 그렇고(vehicle.xacro:
+        # min/max_angle -pi/2..+pi/2, 360 samples), 실차는 360도를 훑는 RPLidar 앞에
+        # hyper_lidar의 scan_front_filter가 붙어 뒤쪽 빔을 NaN으로 지웁니다.
+        # 뒤쪽 빔이 들어오면 이 레이어가 clearing에도 스캔을 쓰기 때문에 차가 지나온
+        # 장애물이 곧바로 레이캐스팅으로 지워집니다 -- 그게 실차에서 "뒤쪽 코스트맵이
+        # 유지되지 않던" 원인이었습니다. 자세한 건 hyper_lidar/README.md 참고.
         scan:
           topic: /scan
           data_type: "LaserScan"
@@ -441,7 +446,7 @@ local_costmap:
           # 레이캐스팅합니다. 12 m는 obstacle_max_range(6.0)보다 멀어 마킹되지 않고,
           # raytrace_max_range(20.0) 안이라 빔 전 구간이 지워집니다.
           # 주의: inf만 처리합니다. 실차 드라이버가 무반사를 0.0으로 내보내면 그 빔은
-          # 여전히 버려지므로, 실차에서는 `ros2 topic echo /scan`으로 확인하세요.
+          # 여전히 버려지므로, 실차에서는 `ros2 topic echo /scan_raw`(드라이버 원본)로 확인하세요.
           inf_is_valid: true
           max_obstacle_height: 2.0
           # 기본값 0.0이면 odom에서 z < 0인 점을 전부 버립니다. EKF가 2D라 body_link는 z=0이고,

@@ -225,6 +225,8 @@ ros2 topic echo /imu --field angular_velocity   # 반시계로 돌릴 때 z > 0
 ros2 launch hyper_lidar rplidar.launch.py
 ```
 
+이 launch는 드라이버(`/scan_raw`, 360도 원본)와 `scan_front_filter`(`/scan`, 전방 180도) 둘을 띄웁니다. 나머지 스택은 예전 그대로 `/scan`만 봅니다. **뒤쪽 빔을 지우는 것이 목적입니다** — 그냥 두면 nav2 `obstacle_layer`가 뒤쪽 빔으로 레이캐스팅을 해서 차가 지나온 장애물을 코스트맵에서 곧바로 지워 버립니다(시뮬레이션 라이다는 애초에 전방 180도라 그런 일이 없습니다). 자세한 건 [`hyper_lidar/README.md`](src/sensing/hyper_lidar/README.md) 참고.
+
 ### USB 카메라 (Logitech C920)
 
 차량 카메라는 C920 **한 대**이고, 차선 인식(BEV)과 객체 인식(YOLO)이 같이 씁니다. `hyper_camera`의 `LogitechCameraPublisherNode`(C++ 컴포넌트, 실행 파일 `logitech_camera_publisher_node`)가 `/dev/video_logitech`를 열어 MJPEG을 640x360@30으로 캡처·디코드하고, rectify 없이 원본 프레임을 그대로 `image_raw`로 발행합니다 — 보정 파일이 없고(일반 약 70도 렌즈), `hyper_lane_detection`의 BEV 호모그래피가 이 카메라를 이상적인 핀홀로 모델링합니다(`config/bev_real.yaml`).
@@ -323,7 +325,7 @@ ros2 launch hyper_launch behavior.launch.py
 | 센서 | 패키지 | 최종 토픽 |
 |------|--------|-----------|
 | E2BOX EBIMU-9DOFV5 | `hyper_ebimu` | `/imu` (EKF roll/pitch + gyro) |
-| RPLidar | `hyper_lidar` | `/scan` |
+| RPLidar | `hyper_lidar` | `/scan` (드라이버는 `/scan_raw`, `scan_front_filter`가 전방 180도로 잘라 `/scan`으로) |
 | u-blox base + NTRIP | `hyper_rtk` | `/gps/fix` |
 | u-blox rover (moving-base) | `hyper_rtk` | `/imu/heading` (EKF 절대 yaw) |
 
@@ -356,7 +358,8 @@ ros2 launch hyper_launch behavior.launch.py
 | 토픽 | 타입 | 방향 | 설명 |
 |------|------|------|------|
 | `/camera/image_raw` | `sensor_msgs/Image` | Gazebo → ROS (시뮬레이션) / hyper_camera → lane_detection + object_detection_node (실차) | 전방 카메라 영상 — 차량의 유일한 카메라이고 차선·객체 인식이 같이 구독합니다. 시뮬레이션은 ros_gz_bridge, 실차는 `hyper_camera`의 `LogitechCameraPublisherNode`가 발행 — 실차 기본 경로(`lane_input_backend:=intra_process`)에서 `lane_detection`은 같은 `ComposableNodeContainer` 안에서 zero-copy로 받고, 같은 발행이 DDS로도 나가 별도 프로세스인 `object_detection_node`가 일반 구독으로 받습니다 |
-| `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔 (실차: RPLidar, 시뮬레이션: Gazebo) |
+| `/scan` | `sensor_msgs/LaserScan` | hyper_lidar / Gazebo → | 2D LiDAR 스캔, **전방 180도** (실차: RPLidar 360도를 `scan_front_filter`가 자름, 시뮬레이션: Gazebo 라이다가 애초에 전방 180도). 뒤쪽 빔이 있으면 local costmap의 뒤쪽이 레이캐스팅으로 지워집니다 |
+| `/scan_raw` | `sensor_msgs/LaserScan` | hyper_lidar → | 실차 전용. RPLidar 드라이버의 360도 원본 (`scan_front_filter` 입력) |
 | `/gps/fix` | `sensor_msgs/NavSatFix` | Gazebo → ROS (시뮬레이션) / hyper_rtk → ROS (실차) | GPS 위경도 (navsat_transform 입력) |
 | `/lane/center` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[left_offset_m, left_steering_deg, left_valid, right_offset_m, right_steering_deg, right_valid]` |
 | `/stopline/detection` | `std_msgs/Float64MultiArray` | hyper_lane_detection → | `[distance_m, valid]` |

@@ -698,7 +698,14 @@
                at all, now that the rear camera (and with it /scan_rear) is gone. Cells marked
                while driving forward survive behind the vehicle until the costmap's rolling
                window drops them. See the scan block in
-               hyper_planner/config/nav2_controller.yaml. -->
+               hyper_planner/config/nav2_controller.yaml.
+
+               The body does NOT in fact occlude the rear on the real car -- enough rear beams
+               come back (as inf, which inf_is_valid revives into a full-length raytrace) that
+               the real vehicle was wiping its own rear costmap, confirmed at the school track.
+               hyper_lidar's scan_front_filter node now cuts the real /scan to this same sector
+               so both sides behave alike. Change this FOV and you must change that node's
+               lower_angle/upper_angle with it. -->
           <horizontal>
             <samples>360</samples>
             <resolution>1</resolution>
