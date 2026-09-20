@@ -392,8 +392,13 @@
   </joint>
 
 
+  <!-- roll = PI: the unit is bolted to the bumper bracket upside down (top plate facing the
+       ground), so lidar_link's +Z points down and its +Y points to the vehicle's right. Without
+       this the scan is mirrored about the driving axis; an obstacle on the left is marked on
+       the right in the costmap. +X (the sensor's 0 deg mark) is the flip axis, so "forward" is
+       unchanged; if the bracket also turns the 0 deg mark, add the yaw here, not in the driver. -->
   <joint name="lidar_joint" type="fixed">
-    <origin xyz="${body_length/2 + lidar_offset_from_front_bumper} 0 ${lidar_height_from_ground - car_body_origin_point_from_ground}" rpy="0 0 0"/>
+    <origin xyz="${body_length/2 + lidar_offset_from_front_bumper} 0 ${lidar_height_from_ground - car_body_origin_point_from_ground}" rpy="${PI} 0 0"/>
     <parent link="body_link"/>
     <child link="lidar_link"/>
   </joint>

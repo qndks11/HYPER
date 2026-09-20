@@ -534,12 +534,125 @@ def splice_cone(text, scope, step_index, case_index, x, y, expected_value=None):
     return "".join(lines[:case_start]) + new_case_text + "".join(lines[case_end:])
 
 
-def save_mission(path, original_text, blocks, cone_edits=()):
+# ------------------------------------------------------------------ 진입 금지 구역
+
+# 최상위 keepout: 블록의 머리. labels와 같은 이유로 블록 **안에** 둡니다 -- 키 줄 위에 두면
+# 블록 밖이라 저장할 때마다 한 줄씩 늘어납니다.
+KEEPOUT_HEADER = (
+    "keepout:\n"
+    "  # 진입 금지 구역(map 프레임 다각형, 꼭짓점 3개 이상). 이 블록은 waypoint studio가\n"
+    "  # 통째로 재작성합니다. 손으로 쓴 주석을 여기 두지 마세요.\n")
+
+KEEPOUT_EMPTY = "keepout: []\n"
+
+
+def load_keepout(doc):
+    """doc의 최상위 keepout: -> [{"name": str, "points": [(x, y), ...]}].
+
+    mission_loader.hpp의 load_keepout과 같은 모양만 받습니다. 모양이 틀린 항목을 조용히
+    버리지 않고 ValueError를 냅니다 -- 버린 채로 저장하면 그 구역이 파일에서 사라집니다.
+    꼭짓점이 3개 미만인 구역은 받습니다(로더는 거부하지만, 스튜디오에서 고칠 수는 있어야
+    합니다).
+    """
+    raw = doc.get("keepout")
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("'keepout:'는 {name, points} 목록이어야 합니다.")
+    zones = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict) or not isinstance(entry.get("points"), list):
+            raise ValueError(f"keepout #{i}: 'points: [[x, y], ...]'가 없습니다.")
+        points = []
+        for point in entry["points"]:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError(f"keepout #{i}: 꼭짓점은 [x, y]여야 합니다 (받은 값: {point!r}).")
+            points.append((float(point[0]), float(point[1])))
+        name = entry.get("name")
+        zones.append({"name": str(name) if name not in (None, "") else f"zone_{i}",
+                      "points": points})
+    return zones
+
+
+def _yaml_name(name):
+    """구역 이름을 yaml 스칼라로. 평범한 이름은 그대로, 나머지는 따옴표로 감쌉니다.
+
+    json 문자열은 그대로 yaml의 큰따옴표 스칼라입니다. true/null/숫자처럼 읽히는 이름도
+    감싸야 문자열로 남습니다.
+    """
+    import json
+
+    if re.fullmatch(r"[^\W\d][\w\-]*", name) and name.lower() not in (
+            "true", "false", "yes", "no", "on", "off", "null"):
+        return name
+    return json.dumps(name, ensure_ascii=False)
+
+
+def render_keepout_block(zones):
+    """최상위 keepout: 블록 전체를 직렬화합니다. 구역이 없으면 `keepout: []`.
+
+    꼭짓점은 한 줄짜리 flow 목록입니다 -- 구역 하나가 git diff에서 한 줄로 보이고, 좌표는
+    라벨과 같은 cm 단위(:.2f)입니다.
+    """
+    if not zones:
+        return KEEPOUT_EMPTY
+    lines = [KEEPOUT_HEADER]
+    for zone in zones:
+        points = ", ".join(f"[{x:.2f}, {y:.2f}]" for x, y in zone["points"])
+        lines.append(f"  - name: {_yaml_name(zone['name'])}\n")
+        lines.append(f"    points: [{points}]\n")
+    return "".join(lines)
+
+
+def _keepout_body_end(lines, start):
+    """최상위 keepout: 블록의 끝(exclusive).
+
+    _body_end와 거의 같지만, 들여쓰기 없이 쓴 목록(`keepout:` 다음 줄이 바로 `- name:`)도
+    yaml로는 맞으므로 칸 0의 `-` 줄까지 블록으로 셉니다. 그걸 빼먹으면 손으로 쓴 파일을
+    저장하는 순간 옛 항목이 블록 밖에 남아 yaml이 깨집니다.
+    """
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() == "" or line[:1] in (" ", "\t") or line.startswith("-"):
+            end += 1
+            continue
+        break
+    while end > start + 1 and lines[end - 1].strip() == "":
+        end -= 1
+    return end
+
+
+def splice_keepout(text, block):
+    """text의 최상위 keepout: 블록을 block으로 교체합니다. 나머지 바이트는 그대로.
+
+    블록이 없으면 steps: 위에 새로 넣습니다 -- steps: 바로 위에 붙은 주석 덩어리보다도
+    위에 넣어, 그 주석이 steps에서 떨어지지 않게 합니다. 없는 블록을 비우라는 요청이면
+    파일을 건드리지 않습니다.
+    """
+    lines = text.splitlines(keepends=True)
+    pattern = re.compile(r"^keepout:(\s.*)?$")
+    start = next((i for i, line in enumerate(lines) if pattern.match(line)), None)
+    if start is None:
+        if block == KEEPOUT_EMPTY:
+            return text
+        for i, line in enumerate(lines):
+            if re.match(r"^steps:\s*(#.*)?$", line):
+                while i > 0 and lines[i - 1].startswith("#"):
+                    i -= 1
+                return "".join(lines[:i]) + block + "\n" + "".join(lines[i:])
+        return text + ("" if text.endswith("\n") else "\n") + block
+    end = _keepout_body_end(lines, start)
+    return "".join(lines[:start]) + block + "".join(lines[end:])
+
+
+def save_mission(path, original_text, blocks, cone_edits=(), keepout_block=None):
     """labels 블록들과 콘 좌표들을 갈아끼워 저장합니다. 원자적으로 씁니다.
 
     blocks는 (코스 이름, 블록) 목록입니다 -- 코스마다 자기 labels 블록이 따로
     있으므로 한 번의 저장이 여러 자리를 건드립니다. cone_edits는 (scope,
-    step_index, case_index, x, y, expected_value) 목록입니다.
+    step_index, case_index, x, y, expected_value) 목록입니다. keepout_block이 None이
+    아니면 최상위 keepout: 블록도 같은 한 번의 쓰기로 갈아끼웁니다.
 
     바이트 스플라이스는 그 바이트를 읽은 시점의 파일에 대해서만 유효하므로,
     연 뒤에 파일이 밖에서 바뀌었으면 거부합니다 -- 그대로 쓰면 남의 편집을
@@ -555,6 +668,8 @@ def save_mission(path, original_text, blocks, cone_edits=()):
         updated = splice_labels(updated, block, course)
     for scope, step_index, case_index, x, y, expected_value in cone_edits:
         updated = splice_cone(updated, scope, step_index, case_index, x, y, expected_value)
+    if keepout_block is not None:
+        updated = splice_keepout(updated, keepout_block)
 
     directory = os.path.dirname(os.path.abspath(path)) or "."
     handle = tempfile.NamedTemporaryFile(

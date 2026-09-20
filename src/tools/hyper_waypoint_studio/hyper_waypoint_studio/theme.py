@@ -17,6 +17,10 @@ COLOR_LABEL_ACTIVE = '#f85149'
 # 씁니다. 스냅 상태가 없어 COLOR_OK/COLOR_BAD 같은 상태색도 안 씁니다.
 COLOR_CONE = '#f778ba'
 COLOR_CONE_ACTIVE = '#ff9bd2'
+# 진입 금지 구역. "들어가면 안 된다"는 뜻이라 빨강 계열이지만, 채움이 반투명이라 배경
+# 사진 위에서도 코스 색(COURSE_COLORS)과 섞이지 않는 짙은 빨강을 씁니다.
+COLOR_KEEPOUT = '#da3633'
+COLOR_KEEPOUT_ACTIVE = '#ff6a69'
 COLOR_GRID = '#21262d'
 
 # 코스 레이어에 순서대로 배정하는 색. 배경(아스팔트/잔디) 위에서도 서로 구분되고
@@ -35,8 +39,8 @@ COURSE_COLORS = (
 #   99       inscribed(253)   -> 하늘
 #   100      lethal(254)      -> 자홍
 #   -1(255)  모름             -> 투명
-# drivable_area_layer가 쓰는 200은 여기서 78-79로 들어옵니다(주황빛 빨강). 라이다
-# lethal(자홍)과 색이 달라서 차선 밖 영역인지 실제 장애물인지 구분이 됩니다.
+# 미션 keepout: 다각형(keepout_layer)은 254라 라이다 lethal과 같은 자홍으로, 그 둘레는 inflation
+# 기울기로 들어옵니다.
 
 
 def costmap_color_table():

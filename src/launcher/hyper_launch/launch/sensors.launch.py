@@ -14,7 +14,8 @@ from launch_ros.actions import Node
 #                                          publisher component loads into lane_detection's
 #                                          container for zero-copy delivery
 #   E2BOX EBIMU-9DOFV5 (hyper_ebimu)    -> /imu                    (EKF)
-#   RPLidar (hyper_lidar)              -> /scan                   (already unremapped default)
+#   RPLidar (hyper_lidar)              -> /scan                   (front 180 deg only, like the sim;
+#                                                                  full 360 deg stays on /scan_raw)
 #   u-blox base + NTRIP (hyper_rtk)     -> /gps/fix                (navsat_transform)
 #   u-blox rover, moving-base (hyper_rtk) -> /imu/heading           (EKF absolute yaw)
 #

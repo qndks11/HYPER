@@ -64,6 +64,11 @@ class ArduinoInterfaceNode(Node):
         self.declare_parameter('send_rate', 50.0)
         self.declare_parameter('command_timeout', 0.3)
         self.declare_parameter('max_velocity', 10.0)
+        # Reverse cap as a positive magnitude; 0.0 means "same as max_velocity".
+        # This clamp is downstream of everything, so it bounds nav2/RRPP reverse parking
+        # too -- keep it >= RRPP's desired_linear_vel in hyper_planner's
+        # nav2_controller.yaml or parking is silently slowed. See parameters.yaml.
+        self.declare_parameter('max_backward_velocity', 0.0)
         self.declare_parameter('max_steering_angle', 0.5235988)
         # Front-to-rear axle distance [m], for the bicycle-model yaw rate used
         # in /odom (angular.z = velocity * tan(steering_angle) / wheel_base).
@@ -73,6 +78,9 @@ class ArduinoInterfaceNode(Node):
 
         self._command_timeout = self.get_parameter('command_timeout').value
         self._max_velocity = self.get_parameter('max_velocity').value
+        self._max_backward_velocity = self.get_parameter('max_backward_velocity').value
+        if not self._max_backward_velocity:
+            self._max_backward_velocity = self._max_velocity
         self._max_steering_angle = self.get_parameter('max_steering_angle').value
         self._wheel_base = self.get_parameter('wheel_base').value
 
@@ -125,7 +133,8 @@ class ArduinoInterfaceNode(Node):
         self._timer = self.create_timer(send_period, self._timer_callback)
 
     def _velocity_callback(self, msg: Float64):
-        self._velocity = max(-self._max_velocity, min(self._max_velocity, msg.data))
+        self._velocity = max(-self._max_backward_velocity,
+                             min(self._max_velocity, msg.data))
         self._last_velocity_time = self.get_clock().now()
 
     def _steering_callback(self, msg: Float64):

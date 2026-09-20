@@ -29,7 +29,6 @@ include_directories(include)
 add_library(lane_detection_component SHARED
   src/lane_detection_node.cpp
   src/ground_projection.cpp
-  src/drivable_area.cpp
   src/lane_detector.cpp
   src/stopline_detector.cpp
   src/input_backend.cpp

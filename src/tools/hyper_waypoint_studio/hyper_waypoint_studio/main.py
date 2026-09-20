@@ -70,7 +70,7 @@ def main(argv=None):
     window = StudioWindow(
         link, initial_mode=args.mode, mission=args.mission,
         destination=args.destination)
-    window.show()
+    window.showMaximized()
 
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, lambda *_: app.closeAllWindows())

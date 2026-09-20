@@ -39,6 +39,10 @@ def generate_launch_description():
     # publish하고, 목표를 받기 전까지 /cmd_vel은 내지 않습니다.
     # use_cmd_vel_to_ackermann:=false가 핵심입니다 -- 그 노드는 /cmd_vel이 없으면 워치독이
     # /velocity + /steering_angle에 0.0을 계속 내보내 위 joystick_controller_node와 싸웁니다.
+    # use_keepout:=false도 같이 넘깁니다 -- 진입 금지 구역 마스크(/keepout_mask)는 mission_manager가
+    # 미션을 로드할 때만 내는데 조이스틱 주행에는 그게 없습니다. 켜 두면 StaticLayer가
+    # "Can't update static costmap layer, no map received"만 반복해서 찍으므로, 여기서는
+    # 라이다(obstacle_layer + inflation_layer)만 보는 코스트맵을 씁니다.
     # 코스트맵은 odom -> body_link TF(odometry)와 /scan(sensors)이 나올 때까지 기다립니다.
     # 실차 전용이라 use_sim_time은 false입니다.
     use_costmap_arg = DeclareLaunchArgument(
@@ -53,6 +57,7 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': 'false',
             'use_cmd_vel_to_ackermann': 'false',
+            'use_keepout': 'false',
         }.items())
 
     return LaunchDescription([joystick_publish_period_arg,

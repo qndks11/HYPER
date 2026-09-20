@@ -1,9 +1,9 @@
 # hyper_lane_detection — notes for Claude
 
-Read `README.md` in this directory first (input backends, ground projection, drivable area).
+Read `README.md` in this directory first (input backends, ground projection).
 
 - **Never add a `cv::imshow` / `cv::namedWindow` debug window.** It is a deliberate design
-  decision, documented at `src/lane_detection_node.cpp:550`: a GUI window pins the node to a
+  decision, documented at `src/lane_detection_node.cpp:420`: a GUI window pins the node to a
   local X display the real (headless) car doesn't have, and kills the whole node on unrelated
   toolkit failures. Debug output goes to `/lane/bev/image_raw` and `/lane/bev/points`, viewed in
   RViz2's Image display — publishing is skipped when nobody subscribes, so it costs nothing.

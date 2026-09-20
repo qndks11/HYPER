@@ -9,6 +9,23 @@ HYPER 차량의 기본 모델과 저수준 제어 노드를 제공하는 패키�
 - `estop_controller_node`: 조이스틱 버튼으로 차를 세우고 미션을 일시정지합니다.
 - `urdf/vehicle.xacro`: 차량 링크·조인트 모델입니다.
 
+## `joystick_controller_node` -- 축 -> 속도/조향
+
+왼쪽 스틱 X(`axes[0]`)가 조향, 오른쪽 스틱 Y(`axes[4]`)가 속도입니다. 스틱 값에
+아래 상한을 곱하기만 하므로 스틱 전 구간이 그대로 쓰입니다.
+
+| 파라미터 | 기본값 | 하는 일 |
+| --- | --- | --- |
+| `max_velocity` | 1.8 | 스틱을 앞으로 끝까지 밀었을 때의 속도 [m/s] |
+| `max_backward_velocity` | 1.0 | 스틱을 뒤로 끝까지 당겼을 때의 속도(양수 크기) [m/s]. `0.0`이면 `max_velocity`와 동일 -- 예전 대칭 동작 |
+| `max_steering_angle` | 0.5061455 | 스틱을 끝까지 꺾었을 때의 조향각 [rad] |
+| `joystick_publish_period` | 0.0 | 발행 주기 [s]. `0.0`이면 노드 기본값(0.01s = 100Hz) |
+
+`max_backward_velocity`는 **이 노드에만** 걸립니다. nav2의 후진 주차 컨트롤러(`RRPP`,
+`allow_reversing: true`)는 `/cmd_vel` -> `cmd_vel_to_ackermann_node` 경로라 여기를 거치지
+않으므로 영향받지 않습니다. 모든 발행자에게 걸리는 실차 하드 상한은 `hyper_interface`의
+같은 이름 파라미터이고, 그쪽은 RRPP를 자르지 않도록 더 높게(1.0) 잡혀 있습니다.
+
 ## `estop_controller_node` -- 조이스틱 정지/재개
 
 버튼 두 개입니다. 눌린 순간(rising edge)만 봅니다.
@@ -50,5 +67,10 @@ ros2 launch hyper_control estop.launch.py launch_joy_node:=true   # 정지/재�
 (`hyper_planner`의 `nav2_controller.launch.py`를 `use_cmd_vel_to_ackermann:=false`로 포함 --
 `/velocity`를 내는 노드는 여전히 `joystick_controller_node` 하나뿐입니다). 끄려면
 `use_costmap:=false`. 코스트맵이 채워지려면 odometry TF와 `/scan`이 떠 있어야 합니다.
+
+이 코스트맵은 **라이다만** 봅니다(`obstacle_layer` + `inflation_layer`). 진입 금지 구역
+`keepout_layer`는 `use_keepout:=false`로 꺼서 넘깁니다 -- 그 레이어가 읽는 `/keepout_mask`는
+`mission_manager`가 미션을 로드할 때만 내는데 조이스틱 주행에는 미션이 없고, 켜 두면
+`Can't update static costmap layer, no map received` 경고만 반복됩니다.
 
 Gazebo 시뮬레이션은 이 패키지의 모델과 컨트롤러를 사용하며, 실행은 `hyper_gazebo` 또는 `hyper_launch`에서 담당합니다.

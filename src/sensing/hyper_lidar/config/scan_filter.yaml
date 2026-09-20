@@ -1,0 +1,17 @@
+# Keeps only the front half of the RPLidar scan, to match the simulated sensor
+# (hyper_control vehicle.xacro: gpu_lidar min/max_angle -pi/2..+pi/2). The driver publishes
+# the full 360 deg on /scan_raw; this chain republishes the front half as /scan, which is
+# what the costmap reads in both sim and real.
+#
+# Angles are in lidar_link, whose +X is the vehicle's forward even though the unit is mounted
+# upside down (vehicle.xacro rolls lidar_joint by PI; roll keeps +X). The driver's scan runs
+# -pi..+pi (checked on the car: angle_min -3.124, angle_max 3.142), so the front half is one
+# contiguous slice and the trimming (not in-place) bounds filter can cut it out.
+scan_filter:
+  ros__parameters:
+    filter1:
+      name: front_only
+      type: laser_filters/LaserScanAngularBoundsFilter
+      params:
+        lower_angle: -1.57079633
+        upper_angle: 1.57079633
