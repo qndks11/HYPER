@@ -16,6 +16,6 @@ courses:
 # 로 읽으면 됩니다. 실제 스텝 인덱스(~/goto_step에 쓰는 번호)는 routes가 뒤에 붙으므로
 # yaml 순서와 다릅니다 -- `ros2 topic echo /mission_manager/steps --once`로 보세요.
 steps:
-  - {type: drive, course: curve_right_angle, until: curve_right_angle_end, controller: FRPP, cancel_on_arrival_m: 0.4, decel_profile_a: 1.0}
+  - {type: drive, course: curve_right_angle, until: curve_right_angle_end, controller: FRPP_NC, cancel_on_arrival_m: 0.4, decel_profile_a: 1.0}
 
 routes:

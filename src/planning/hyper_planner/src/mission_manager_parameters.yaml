@@ -373,7 +373,7 @@ mission_manager:
 
   lethal_cost:
     type: int
-    default_value: 254
+    default_value: 100
     description: |
       이 코스트 이상인 셀만 셉니다. 254(LETHAL_OBSTACLE)가 기본인 것은 InflationLayer가
       253 이하만 쓰기 때문입니다 -- 254만 세면 팽창 후광이 저절로 빠집니다.

@@ -138,7 +138,7 @@ struct Step
   // 끝내는 대신 그 자리에 세우고(골을 안 보내면 워치독이 세웁니다) 주기적으로 같은 골을
   // 다시 보내, 장애물이 치워지면 스스로 이어서 갑니다. 이 시간(초) 동안 계속 막혀 있으면
   // 그때는 실패로 끝냅니다. 0 = 끔(그때는 goal_retry_limit이 소진되면 바로 실패).
-  double obstacle_hold_s{0.0};
+  double obstacle_hold_s{30.0};
   // 0보다 크면, 골까지 남은 거리가 이 값 이하로 들어왔을 때 서지 않고 다음 drive 스텝의
   // 골로 갈아끼웁니다(prearm과 같은 preemption이지만 신호를 보지 않습니다). 컨트롤러를
   // 바꾸는 유일한 방법이 새 골이므로, RPP <-> MPPI 전환을 정차 없이 하려면 이것이
@@ -765,7 +765,7 @@ private:
     step.decel_profile_a = node["decel_profile_a"]
       ? node["decel_profile_a"].as<double>() : config_.decel_profile_a;
     step.obstacle_hold_s = node["obstacle_hold_s"]
-      ? node["obstacle_hold_s"].as<double>() : 0.0;
+      ? node["obstacle_hold_s"].as<double>() : 30.0;
     step.handoff_m = node["handoff_m"] ? node["handoff_m"].as<double>() : 0.0;
 
     // reverse 플래그가 녹화된 실제 주행 방향과 맞는지 확인합니다. 틀리면 RPP가

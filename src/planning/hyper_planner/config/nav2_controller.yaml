@@ -23,7 +23,7 @@ controller_server:
 
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker", "precise_goal_checker", "park_goal_checker"]
-    controller_plugins: ["MPPI", "FRPP", "RRPP", "FRPP_NC"]
+    controller_plugins: ["MPPI", "FRPP", "RRPP_NC", "FRPP_NC"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -79,7 +79,7 @@ controller_server:
     # (이전 RPP 설정이 필요하면 git history에서 이 파일의 직전 버전을 보세요)
     MPPI:
       plugin: "nav2_mppi_controller::MPPIController"
-      time_steps: 100
+      time_steps: 200 
       model_dt: 0.05
       batch_size: 1000
       iteration_count: 1
@@ -90,9 +90,9 @@ controller_server:
       transform_tolerance: 0.2
       visualize: false
 
-      vx_max: 1.6
+      vx_max: 2.0
       vx_min: 0.0
-      wz_max: 0.77
+      wz_max: 1.23
       vx_std: 0.21
       wz_std: 0.20
       vy_max: 0.5
@@ -153,7 +153,7 @@ controller_server:
         # 훨씬 가까이 붙어도 "안전"으로 오판할 수 있었습니다.
         consider_footprint: true
         collision_cost: 10000.0
-        collision_margin_distance: 0.35
+        collision_margin_distance: 0.2
         near_goal_distance: 0.5
       # 경로에 붙어 있으려는 힘. 이 값이 크면 장애물을 만나도 안 비킵니다.
       # max_path_occupancy_ratio: 참조 경로의 5% 이상이 장애물에 걸리면 이 critic을
@@ -181,29 +181,6 @@ controller_server:
         # pruned path가 76점쯤 되므로 6(= 1.5 m)이면 절대 걸리지 않습니다.
         offset_from_furthest: 6
         use_path_orientations: false
-      # 코너 컷의 주범입니다. 이 critic은 궤적의 *마지막* 점을 경로 위 한 점
-      # (furthest_reached + offset_from_furthest)으로 끌어당기는데, 경로가 휘어 있으면
-      # 그 점까지의 직선 거리는 코너를 잘라야 짧아집니다. nav2 헤더에도 그대로 적혀
-      # 있습니다: "A higher weight here with an offset > 1 will [...] push the follow
-      # point further ahead, creating some shortcutting."
-      #
-      # 36.0 -> 8.0. 다만 이 값은 순항 속도도 같이 정하므로(위 gamma 주석) 그냥 낮추면
-      # 차가 기어갑니다. 속도는 vx_std/gamma 쪽에서 유지합니다.
-      #
-      # offset_from_furthest는 "경로 점 개수"입니다(0.25 m 간격이므로 6점 = 1.5 m).
-      # 이 critic이 실제로 겨냥하는 지점은 차에서 그만큼이 아니라
-      #     지평선 도달거리 + offset  (호 길이 기준)
-      # 이고, 비용은 거기까지의 *직선* 거리입니다. 호로 앞에 있는 점을 현으로 재니까
-      # 코너를 자를수록 점수가 좋아집니다. R=1.5 m 90도 커브에서 실제로 계산해 보면,
-      # 경로를 정확히 따라간 궤적의 끝점보다 코너를 자른 궤적의 끝점이 목표점에
-      # 0.66 m 더 가깝습니다. 컷의 크기는 이 lookahead에 대해 초선형으로 커집니다.
-      #
-      # 6 -> 3 (1.5 m -> 0.75 m). time_steps를 100 -> 56으로 줄인 것과 합쳐서 총
-      # lookahead가 6.5 m -> 3.55 m가 됩니다. vx_max를 1.0으로 내렸는데 offset은
-      # 미터 고정이라 시간 기준 lookahead가 0.68 s -> 1.5 s로 2배 늘어나 있었던 것을
-      # 되돌리는 것이기도 합니다(3점 = 0.75 s).
-      # 코너를 계속 자르면 여기를 더 줄이고, 커브에서 경로 안쪽으로 못 붙고 밖으로
-      # 밀리기 시작하면 다시 4~5로 올리세요.
       PathFollowCritic:
         enabled: true
         cost_power: 1
@@ -261,11 +238,11 @@ controller_server:
     FRPP:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       # MPPI vx_max와 같은 순항 속도. 실제 상한은 /speed_limit이 더 낮게 깎습니다.
-      desired_linear_vel: 1.6
+      desired_linear_vel: 2.0
       # 속도 비례 lookahead (2.22 m/s에서 1.0초 = 2.22 m, min 1.0 / max 6.0 사이).
       use_velocity_scaled_lookahead_dist: true
-      lookahead_time: 1.0
-      lookahead_dist: 2.0
+      lookahead_time: 2.5
+      lookahead_dist: 4.0 
       min_lookahead_dist: 1.0
       max_lookahead_dist: 6.0
       use_interpolation: true
@@ -281,7 +258,7 @@ controller_server:
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 1.30
+      regulated_linear_scaling_min_radius: 1.3
       regulated_linear_scaling_min_speed: 0.25
       # 켜면 inflation 안에 들어가는 것만으로 기어갑니다(가속 구간에서는 손해).
       use_cost_regulated_linear_velocity_scaling: false
@@ -309,27 +286,24 @@ controller_server:
     #        mission.yaml에서 반드시 세그먼트를 쪼개야 합니다.
     # 주의 3: 이 컨트롤러는 준 경로를 벗어나지 않습니다. 주차 구간에 장애물이 있으면
     #        피하지 못하고 use_collision_detection이 정지시킬 뿐입니다.
-    RRPP:
+    RRPP_NC:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      # 이 값을 올리려면 hyper_interface/config/parameters.yaml의 max_backward_velocity
-      # (현재 1.0)도 같이 올리세요. 그쪽이 /velocity 후진 하드 상한이라, 여기만 올리면
-      # 실차에서 후진 주차가 경고 없이 잘립니다.
-      desired_linear_vel: 1.0 # 1.0 m/s because 2.0 m/s caused motor driver to emit smoke
-      lookahead_dist: 1.0
-      min_lookahead_dist: 0.6
-      max_lookahead_dist: 1.2
-      lookahead_time: 1.5
+      desired_linear_vel: 1.5 # 1.0 m/s because 2.0 m/s caused motor driver to emit smoke
+      lookahead_dist: 2.0
+      min_lookahead_dist: 1.0
+      max_lookahead_dist: 2.0
+      lookahead_time: 1.2
       use_velocity_scaled_lookahead_dist: false
       use_interpolation: true
       transform_tolerance: 0.2
       # 골에 가까워지면 이 속도까지 줄여 붙입니다.
       min_approach_linear_velocity: 0.15
       approach_velocity_scaling_dist: 1.0
-      use_collision_detection: true
+      use_collision_detection: false
       max_allowed_time_to_collision_up_to_carrot: 1.0
       # 곡률이 클수록 감속. 최소 회전 반경(1.30 m)을 기준으로 둡니다.
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 1.30
+      regulated_linear_scaling_min_radius: 3.0
       regulated_linear_scaling_min_speed: 0.25
       # costmap 비용에 따른 감속은 끕니다 -- 주차칸은 연석/원뿔 inflation에 둘러싸여 있어
       # 켜면 진입 내내 최저속으로 기어갑니다.
@@ -354,12 +328,12 @@ controller_server:
     # 확신할 수 있는 구간에서만 쓰세요(호출하는 쪽이 안전 책임을 집니다).
     FRPP_NC:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 1.6
+      desired_linear_vel: 2.0
       use_velocity_scaled_lookahead_dist: true
-      lookahead_time: 1.0
-      lookahead_dist: 2.0
+      lookahead_time: 1.2
+      lookahead_dist: 4.0 
       min_lookahead_dist: 1.0
-      max_lookahead_dist: 6.0
+      max_lookahead_dist: 3.0 
       use_interpolation: true
       transform_tolerance: 0.2
       min_approach_linear_velocity: 0.15
@@ -367,7 +341,7 @@ controller_server:
       # costmap을 아예 안 보므로 충돌 검사 자체가 꺼집니다.
       use_collision_detection: false
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 1.30
+      regulated_linear_scaling_min_radius: 4.0
       regulated_linear_scaling_min_speed: 0.25
       use_cost_regulated_linear_velocity_scaling: false
       cost_scaling_dist: 0.3
@@ -380,14 +354,13 @@ controller_server:
       allow_reversing: false
       max_robot_pose_search_dist: 10.0
 
-
 # controller_server의 local costmap. nav2에서는 costmap이 별도 노드(/local_costmap/local_costmap)
 # 이므로 controller_server 아래가 아니라 최상위 키로 두어야 파라미터가 먹습니다.
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: true
-      update_frequency: 5.0
+      update_frequency: 10.0
       publish_frequency: 2.0
       global_frame: odom
       robot_base_frame: body_link
@@ -427,7 +400,8 @@ local_costmap:
         # 한 줄 없이 costmap이 계속 0으로 비어 있습니다. 이유는 scan 블록 주석 참고.
         min_obstacle_height: -1.0
         observation_sources: scan
-        # 전방 180도만 옵니다(vehicle.xacro: min/max_angle -pi/2..+pi/2, 360 samples).
+        # 전방 180도만 옵니다. 시뮬: vehicle.xacro gpu_lidar min/max_angle -pi/2..+pi/2(360 samples).
+        # 실차: hyper_lidar의 scan_filter가 360도 /scan_raw에서 같은 범위만 잘라 /scan으로 냅니다.
         scan:
           topic: /scan
           data_type: "LaserScan"
@@ -466,7 +440,7 @@ local_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
         # 차폭 반(0.385)에 여유를 더한 값
-        inflation_radius: 1.0
+        inflation_radius: 1.0 
       always_send_full_costmap: true
 
 lifecycle_manager_control:
@@ -483,7 +457,7 @@ cmd_vel_to_ackermann:
     max_steering_angle: 0.5061455
     # MPPI.vx_max(2.22)보다 위에 둡니다 -- 이 값이 더 작으면 여기서 다시
     # 잘려서 vx_max를 올린 게 무의미해집니다.
-    max_velocity: 1.6
+    max_velocity: 2.0
     # 이 시간(초) 동안 /cmd_vel이 없으면 정지 명령을 냅니다.
     input_timeout: 0.3
     # 조향각 계산이 v로 나누기 때문에, 이 속도 이하에서는 직전 조향각을 유지합니다.
